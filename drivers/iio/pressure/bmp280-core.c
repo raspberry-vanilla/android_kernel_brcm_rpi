@@ -1060,7 +1060,7 @@ out:
 static const int bmp280_oversampling_avail[] = { 1, 2, 4, 8, 16 };
 static const u8 bmp280_chip_ids[] = { BMP280_CHIP_ID };
 static const int bmp280_temp_coeffs[] = { 10, 1 };
-static const int bmp280_press_coeffs[] = { 1, 256000 };
+static const int bmp280_press_coeffs[] = { 1, 25600 };
 
 const struct bmp280_chip_info bmp280_chip_info = {
 	.id_reg = BMP280_REG_ID,
