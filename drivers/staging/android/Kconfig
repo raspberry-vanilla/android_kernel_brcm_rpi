@@ -23,4 +23,6 @@ config ASHMEM_RUST
 config ASHMEM_C
 	def_bool ASHMEM && !ASHMEM_RUST
 
+source "drivers/staging/android/ion/Kconfig"
+
 endmenu
