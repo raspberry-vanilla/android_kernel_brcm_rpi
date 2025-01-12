@@ -125,7 +125,7 @@ struct ion_heap {
 	struct module *owner;
 
 	/* deferred free support */
-	struct shrinker shrinker;
+	struct shrinker *shrinker;
 	struct list_head free_list;
 	size_t free_list_size;
 	spinlock_t free_lock;

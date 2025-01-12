@@ -233,12 +233,14 @@ static int debug_shrink_set(void *data, u64 val)
 	sc.gfp_mask = GFP_HIGHUSER;
 	sc.nr_to_scan = val;
 
-	if (!val) {
-		objs = heap->shrinker.count_objects(&heap->shrinker, &sc);
+	if (!val && heap->shrinker) {
+		objs = heap->shrinker->count_objects(heap->shrinker, &sc);
 		sc.nr_to_scan = objs;
 	}
 
-	heap->shrinker.scan_objects(&heap->shrinker, &sc);
+	if (heap->shrinker)
+		heap->shrinker->scan_objects(heap->shrinker, &sc);
+
 	return 0;
 }
 
@@ -251,8 +253,11 @@ static int debug_shrink_get(void *data, u64 *val)
 	sc.gfp_mask = GFP_HIGHUSER;
 	sc.nr_to_scan = 0;
 
-	objs = heap->shrinker.count_objects(&heap->shrinker, &sc);
-	*val = objs;
+	if (heap->shrinker) {
+		objs = heap->shrinker->count_objects(heap->shrinker, &sc);
+		*val = objs;
+	}
+
 	return 0;
 }
 
@@ -358,8 +363,8 @@ int __ion_device_add_heap(struct ion_heap *heap, struct module *owner)
 			   heap_root,
 			   &heap->alloc_bytes_wm);
 
-	if (heap->shrinker.count_objects &&
-	    heap->shrinker.scan_objects) {
+	if (heap->shrinker && heap->shrinker->count_objects &&
+	    heap->shrinker->scan_objects) {
 		snprintf(debug_name, 64, "%s_shrink", heap->name);
 		debugfs_create_file(debug_name,
 				    0644,

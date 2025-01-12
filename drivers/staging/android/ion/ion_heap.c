@@ -20,8 +20,7 @@
 static unsigned long ion_heap_shrink_count(struct shrinker *shrinker,
 					   struct shrink_control *sc)
 {
-	struct ion_heap *heap = container_of(shrinker, struct ion_heap,
-					     shrinker);
+	struct ion_heap *heap = shrinker->private_data;
 	int total = 0;
 
 	total = ion_heap_freelist_size(heap) / PAGE_SIZE;
@@ -35,8 +34,7 @@ static unsigned long ion_heap_shrink_count(struct shrinker *shrinker,
 static unsigned long ion_heap_shrink_scan(struct shrinker *shrinker,
 					  struct shrink_control *sc)
 {
-	struct ion_heap *heap = container_of(shrinker, struct ion_heap,
-					     shrinker);
+	struct ion_heap *heap = shrinker->private_data;
 	int freed = 0;
 	int to_scan = sc->nr_to_scan;
 
@@ -253,12 +251,18 @@ int ion_heap_init_deferred_free(struct ion_heap *heap)
 
 int ion_heap_init_shrinker(struct ion_heap *heap)
 {
-	heap->shrinker.count_objects = ion_heap_shrink_count;
-	heap->shrinker.scan_objects = ion_heap_shrink_scan;
-	heap->shrinker.seeks = DEFAULT_SEEKS;
-	heap->shrinker.batch = 0;
+	heap->shrinker = shrinker_alloc(0, "android-ion");
+	if (!heap->shrinker)
+		return -ENOMEM;
 
-	return register_shrinker(&heap->shrinker, "android-ion");
+	heap->shrinker->count_objects = ion_heap_shrink_count;
+	heap->shrinker->scan_objects = ion_heap_shrink_scan;
+	heap->shrinker->batch = 0;
+	heap->shrinker->private_data = heap;
+
+	shrinker_register(heap->shrinker);
+
+	return 0;
 }
 
 int ion_heap_cleanup(struct ion_heap *heap)
@@ -285,7 +289,7 @@ int ion_heap_cleanup(struct ion_heap *heap)
 	}
 
 	if ((heap->flags & ION_HEAP_FLAG_DEFER_FREE) || heap->ops->shrink)
-		unregister_shrinker(&heap->shrinker);
+		shrinker_free(heap->shrinker);
 
 	return 0;
 }
