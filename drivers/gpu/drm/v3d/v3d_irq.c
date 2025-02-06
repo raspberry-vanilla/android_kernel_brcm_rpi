@@ -105,7 +105,10 @@ v3d_irq(int irq, void *arg)
 		v3d->gpu_queue_stats[V3D_BIN].last_exec_end = local_clock();
 
 		trace_v3d_bcl_irq(&v3d->drm, fence->seqno);
+
+		v3d->bin_job = NULL;
 		dma_fence_signal(&fence->base);
+
 		status = IRQ_HANDLED;
 	}
 
@@ -115,7 +118,10 @@ v3d_irq(int irq, void *arg)
 		v3d->gpu_queue_stats[V3D_RENDER].last_exec_end = local_clock();
 
 		trace_v3d_rcl_irq(&v3d->drm, fence->seqno);
+
+		v3d->render_job = NULL;
 		dma_fence_signal(&fence->base);
+
 		status = IRQ_HANDLED;
 	}
 
@@ -126,7 +132,10 @@ v3d_irq(int irq, void *arg)
 		v3d->gpu_queue_stats[V3D_CSD].last_exec_end = local_clock();
 
 		trace_v3d_csd_irq(&v3d->drm, fence->seqno);
+
+		v3d->csd_job = NULL;
 		dma_fence_signal(&fence->base);
+
 		status = IRQ_HANDLED;
 	}
 
@@ -163,7 +172,10 @@ v3d_hub_irq(int irq, void *arg)
 		v3d->gpu_queue_stats[V3D_TFU].last_exec_end = local_clock();
 
 		trace_v3d_tfu_irq(&v3d->drm, fence->seqno);
+
+		v3d->tfu_job = NULL;
 		dma_fence_signal(&fence->base);
+
 		status = IRQ_HANDLED;
 	}
 
