@@ -106,6 +106,10 @@ Targets
 		be added with INSTALL_MOD_PATH (discussed in section
 		`Module Installation`_).
 
+	headers_install
+		Export headers in a format suitable for userspace. The default
+		location is $PWD/usr. INSTALL_HDR_PATH can change this path.
+
 	clean
 		Remove all generated files in the module directory only.
 
@@ -316,6 +320,17 @@ Several Subdirectories
 	pointing to the directory where the currently executing kbuild
 	file is located.
 
+UAPI Headers Installation
+-------------------------
+
+	External modules may export headers to userspace in a similar
+	fashion to the in-tree counterpart drivers. kbuild supports
+	running headers_install target in an out-of-tree. The location
+	where kbuild searches for headers is $(M)/include/uapi and
+	$(M)/arch/$(SRCARCH)/include/uapi.
+
+	See also Documentation/kbuild/headers_install.rst.
+
 
 Module Installation
 ===================
@@ -395,6 +410,26 @@ Symbols From the Kernel (vmlinux + modules)
 
 	1) It lists all exported symbols from vmlinux and all modules.
 	2) It lists the CRC if CONFIG_MODVERSIONS is enabled.
+
+Version Information Formats
+---------------------------
+
+	Exported symbols have information stored in __ksymtab or __ksymtab_gpl
+	sections. Symbol names and namespaces are stored in __ksymtab_strings,
+	using a format similar to the string table used for ELF. If
+	CONFIG_MODVERSIONS is enabled, the CRCs corresponding to exported
+	symbols will be added to the __kcrctab or __kcrctab_gpl.
+
+	If CONFIG_BASIC_MODVERSIONS is enabled (default with
+	CONFIG_MODVERSIONS), imported symbols will have their symbol name and
+	CRC stored in the __versions section of the importing module. This
+	mode only supports symbols of length up to 64 bytes.
+
+	If CONFIG_EXTENDED_MODVERSIONS is enabled (required to enable both
+	CONFIG_MODVERSIONS and CONFIG_RUST at the same time), imported symbols
+	will have their symbol name recorded in the __version_ext_names
+	section as a series of concatenated, null-terminated strings. CRCs for
+	these symbols will be recorded in the __version_ext_crcs section.
 
 Symbols and External Modules
 ----------------------------

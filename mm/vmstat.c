@@ -29,6 +29,7 @@
 #include <linux/page_owner.h>
 #include <linux/sched/isolation.h>
 
+#include <trace/hooks/mm.h>
 #include "internal.h"
 
 #ifdef CONFIG_NUMA
@@ -1198,9 +1199,7 @@ const char * const vmstat_text[] = {
 	"nr_zone_write_pending",
 	"nr_mlock",
 	"nr_bounce",
-#if IS_ENABLED(CONFIG_ZSMALLOC)
 	"nr_zspages",
-#endif
 	"nr_free_cma",
 #ifdef CONFIG_UNACCEPTED_MEMORY
 	"nr_unaccepted",
@@ -1692,6 +1691,7 @@ static int pagetypeinfo_show(struct seq_file *m, void *arg)
 	pagetypeinfo_showfree(m, pgdat);
 	pagetypeinfo_showblockcount(m, pgdat);
 	pagetypeinfo_showmixedcount(m, pgdat);
+	trace_android_vh_pagetypeinfo_show(m);
 
 	return 0;
 }

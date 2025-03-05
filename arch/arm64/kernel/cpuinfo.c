@@ -27,6 +27,8 @@
 #include <linux/smp.h>
 #include <linux/delay.h>
 
+#include <trace/hooks/cpuinfo.h>
+
 /*
  * In case the boot CPU is hotpluggable, we record its initial state and
  * current state separately. Certain system registers may contain different
@@ -279,6 +281,8 @@ static int c_show(struct seq_file *m, void *v)
 		of_node_put(np);
 	}
 
+	trace_android_rvh_cpuinfo_c_show(m);
+
 	return 0;
 }
 
@@ -511,6 +515,9 @@ static void __cpuinfo_store_cpu(struct cpuinfo_arm64 *info)
 		 */
 		info->reg_smidr = read_cpuid(SMIDR_EL1) & ~SMIDR_EL1_SMPS;
 	}
+
+	if (id_aa64pfr0_mpam(info->reg_id_aa64pfr0))
+		info->reg_mpamidr = read_cpuid(MPAMIDR_EL1);
 
 	cpuinfo_detect_icache_policy(info);
 }

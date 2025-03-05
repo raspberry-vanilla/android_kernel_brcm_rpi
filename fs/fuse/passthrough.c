@@ -10,6 +10,7 @@
 #include <linux/file.h>
 #include <linux/backing-file.h>
 #include <linux/splice.h>
+#include <linux/pagemap.h>
 
 static void fuse_file_accessed(struct file *file)
 {
@@ -21,8 +22,23 @@ static void fuse_file_accessed(struct file *file)
 static void fuse_passthrough_end_write(struct file *file, loff_t pos, ssize_t ret)
 {
 	struct inode *inode = file_inode(file);
+	struct fuse_conn *fc = get_fuse_conn(inode);
+	struct fuse_file *ff = file->private_data;
+	struct file *backing_file = fuse_file_passthrough(ff);
+	struct inode *backing_inode = file_inode(backing_file);
 
-	fuse_write_update_attr(inode, pos, ret);
+	if (!fc->writeback_cache) {
+		fuse_write_update_attr(inode, pos, ret);
+	} else {
+		inode_set_mtime_to_ts(inode, inode_get_mtime(backing_inode));
+		inode_set_ctime_to_ts(inode, inode_get_ctime(backing_inode));
+		inode->i_blocks = backing_inode->i_blocks;
+		i_size_write(inode, i_size_read(backing_inode));
+	}
+	if (ret > 0) {
+		invalidate_inode_pages2_range(inode->i_mapping,
+				(pos - ret) >> PAGE_SHIFT, pos >> PAGE_SHIFT);
+	}
 }
 
 ssize_t fuse_passthrough_read_iter(struct kiocb *iocb, struct iov_iter *iter)
@@ -45,6 +61,8 @@ ssize_t fuse_passthrough_read_iter(struct kiocb *iocb, struct iov_iter *iter)
 	if (!count)
 		return 0;
 
+	/* Flush any dirtied cache pages from fuse cache */
+	write_inode_now(file_inode(file), 1);
 	ret = backing_file_read_iter(backing_file, iter, iocb, iocb->ki_flags,
 				     &ctx);
 
@@ -95,6 +113,8 @@ ssize_t fuse_passthrough_splice_read(struct file *in, loff_t *ppos,
 	pr_debug("%s: backing_file=0x%p, pos=%lld, len=%zu, flags=0x%x\n", __func__,
 		 backing_file, ppos ? *ppos : 0, len, flags);
 
+	/* Flush any dirtied cache pages from fuse cache */
+	write_inode_now(file_inode(in), 1);
 	return backing_file_splice_read(backing_file, ppos, pipe, len, flags,
 					&ctx);
 }
@@ -220,9 +240,13 @@ int fuse_backing_open(struct fuse_conn *fc, struct fuse_backing_map *map)
 	pr_debug("%s: fd=%d flags=0x%x\n", __func__, map->fd, map->flags);
 
 	/* TODO: relax CAP_SYS_ADMIN once backing files are visible to lsof */
+	/* Android already restricts access here, and we don't want to grant extra
+	 * Permissions to the daemon */
+#if 0
 	res = -EPERM;
 	if (!fc->passthrough || !capable(CAP_SYS_ADMIN))
 		goto out;
+#endif
 
 	res = -EINVAL;
 	if (map->flags || map->padding)
@@ -271,9 +295,13 @@ int fuse_backing_close(struct fuse_conn *fc, int backing_id)
 	pr_debug("%s: backing_id=%d\n", __func__, backing_id);
 
 	/* TODO: relax CAP_SYS_ADMIN once backing files are visible to lsof */
+	/* Android already restricts access here, and we don't want to grant extra
+	 * Permissions to the daemon */
+#if 0
 	err = -EPERM;
 	if (!fc->passthrough || !capable(CAP_SYS_ADMIN))
 		goto out;
+#endif
 
 	err = -EINVAL;
 	if (backing_id <= 0)

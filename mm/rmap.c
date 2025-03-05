@@ -83,6 +83,9 @@
 #include <trace/events/tlb.h>
 #include <trace/events/migrate.h>
 
+#undef CREATE_TRACE_POINTS
+#include <trace/hooks/mm.h>
+
 #include "internal.h"
 
 static struct kmem_cache *anon_vma_cachep;
@@ -886,6 +889,7 @@ static bool folio_referenced_one(struct folio *folio,
 		}
 
 		if (lru_gen_enabled() && pvmw.pte) {
+			trace_android_vh_look_around(&pvmw, folio, vma, &referenced);
 			if (lru_gen_look_around(&pvmw))
 				referenced++;
 		} else if (pvmw.pte) {
@@ -1010,6 +1014,7 @@ int folio_referenced(struct folio *folio, int is_locked,
 
 	return rwc.contended ? -1 : pra.referenced;
 }
+EXPORT_SYMBOL_GPL(folio_referenced);
 
 static int page_vma_mkclean_one(struct page_vma_mapped_walk *pvmw)
 {
@@ -1465,6 +1470,7 @@ void folio_add_new_anon_rmap(struct folio *folio, struct vm_area_struct *vma,
 
 	__folio_mod_stat(folio, nr, nr_pmdmapped);
 	mod_mthp_stat(folio_order(folio), MTHP_STAT_NR_ANON, 1);
+	trace_android_vh_page_add_new_anon_rmap(&folio->page, vma, address);
 }
 
 static __always_inline void __folio_add_file_rmap(struct folio *folio,

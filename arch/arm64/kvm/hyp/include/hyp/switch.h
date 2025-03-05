@@ -204,6 +204,35 @@ static inline void __deactivate_traps_hfgxtr(struct kvm_vcpu *vcpu)
 		__deactivate_fgt(hctxt, vcpu, kvm, HAFGRTR_EL2);
 }
 
+static inline void  __activate_traps_mpam(struct kvm_vcpu *vcpu)
+{
+	u64 r = MPAM2_EL2_TRAPMPAM0EL1 | MPAM2_EL2_TRAPMPAM1EL1;
+
+	if (!system_supports_mpam())
+		return;
+
+	/* trap guest access to MPAMIDR_EL1 */
+	if (system_supports_mpam_hcr()) {
+		write_sysreg_s(MPAMHCR_EL2_TRAP_MPAMIDR_EL1, SYS_MPAMHCR_EL2);
+	} else {
+		/* From v1.1 TIDR can trap MPAMIDR, set it unconditionally */
+		r |= MPAM2_EL2_TIDR;
+	}
+
+	write_sysreg_s(r, SYS_MPAM2_EL2);
+}
+
+static inline void __deactivate_traps_mpam(void)
+{
+	if (!system_supports_mpam())
+		return;
+
+	write_sysreg_s(MPAM2_HOST_FLAGS, SYS_MPAM2_EL2);
+
+	if (system_supports_mpam_hcr())
+		write_sysreg_s(MPAMHCR_HOST_FLAGS, SYS_MPAMHCR_EL2);
+}
+
 static inline void __activate_traps_common(struct kvm_vcpu *vcpu)
 {
 	/* Trap on AArch32 cp15 c15 (impdef sysregs) accesses (EL1 or EL0) */
@@ -228,22 +257,26 @@ static inline void __activate_traps_common(struct kvm_vcpu *vcpu)
 
 	*host_data_ptr(host_debug_state.mdcr_el2) = read_sysreg(mdcr_el2);
 	write_sysreg(vcpu->arch.mdcr_el2, mdcr_el2);
+}
 
-	if (cpus_have_final_cap(ARM64_HAS_HCX)) {
-		u64 hcrx = vcpu->arch.hcrx_el2;
-		if (vcpu_has_nv(vcpu) && !is_hyp_ctxt(vcpu)) {
-			u64 clr = 0, set = 0;
+static inline void __activate_traps_hcrx(struct kvm_vcpu *vcpu)
+{
+	u64 hcrx = vcpu->arch.hcrx_el2;
 
-			compute_clr_set(vcpu, HCRX_EL2, clr, set);
+	if (!cpus_have_final_cap(ARM64_HAS_HCX))
+		return;
 
-			hcrx |= set;
-			hcrx &= ~clr;
-		}
+	if (vcpu_has_nv(vcpu) && !is_hyp_ctxt(vcpu)) {
+		u64 clr = 0, set = 0;
 
-		write_sysreg_s(hcrx, SYS_HCRX_EL2);
+		compute_clr_set(vcpu, HCRX_EL2, clr, set);
+
+		hcrx |= set;
+		hcrx &= ~clr;
 	}
 
-	__activate_traps_hfgxtr(vcpu);
+	write_sysreg_s(hcrx, SYS_HCRX_EL2);
+	__activate_traps_mpam(vcpu);
 }
 
 static inline void __deactivate_traps_common(struct kvm_vcpu *vcpu)
@@ -261,8 +294,7 @@ static inline void __deactivate_traps_common(struct kvm_vcpu *vcpu)
 
 	if (cpus_have_final_cap(ARM64_HAS_HCX))
 		write_sysreg_s(HCRX_HOST_FLAGS, SYS_HCRX_EL2);
-
-	__deactivate_traps_hfgxtr(vcpu);
+	__deactivate_traps_mpam();
 }
 
 static inline void ___activate_traps(struct kvm_vcpu *vcpu, u64 hcr)

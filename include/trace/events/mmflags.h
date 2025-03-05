@@ -113,7 +113,8 @@ TRACE_DEFINE_ENUM(___GFP_LAST_BIT);
 	gfpflag_string(__GFP_RECLAIM),		\
 	gfpflag_string(__GFP_DIRECT_RECLAIM),	\
 	gfpflag_string(__GFP_KSWAPD_RECLAIM),	\
-	gfpflag_string(__GFP_ZEROTAGS)
+	gfpflag_string(__GFP_ZEROTAGS),		\
+	gfpflag_string(__GFP_CMA)
 
 #ifdef CONFIG_KASAN_HW_TAGS
 #define __def_gfpflag_names_kasan ,			\
@@ -158,11 +159,18 @@ TRACE_DEFINE_ENUM(___GFP_LAST_BIT);
 #define IF_HAVE_PG_ARCH_3(_name)
 #endif
 
+#ifdef CONFIG_64BIT
+#define IF_HAVE_PG_OEM_RESERVED(_name) ,{1UL << PG_##_name, __stringify(_name)}
+#else
+#define IF_HAVE_PG_OEM_RESERVED(_name)
+#endif
+
 #define DEF_PAGEFLAG_NAME(_name) { 1UL <<  PG_##_name, __stringify(_name) }
 
 #define __def_pageflag_names						\
 	DEF_PAGEFLAG_NAME(locked),					\
 	DEF_PAGEFLAG_NAME(waiters),					\
+	DEF_PAGEFLAG_NAME(error),					\
 	DEF_PAGEFLAG_NAME(referenced),					\
 	DEF_PAGEFLAG_NAME(uptodate),					\
 	DEF_PAGEFLAG_NAME(dirty),					\
@@ -185,7 +193,11 @@ IF_HAVE_PG_HWPOISON(hwpoison)						\
 IF_HAVE_PG_IDLE(idle)							\
 IF_HAVE_PG_IDLE(young)							\
 IF_HAVE_PG_ARCH_2(arch_2)						\
-IF_HAVE_PG_ARCH_3(arch_3)
+IF_HAVE_PG_ARCH_3(arch_3)						\
+IF_HAVE_PG_OEM_RESERVED(oem_reserved_1)					\
+IF_HAVE_PG_OEM_RESERVED(oem_reserved_2)					\
+IF_HAVE_PG_OEM_RESERVED(oem_reserved_3)					\
+IF_HAVE_PG_OEM_RESERVED(oem_reserved_4)
 
 #define show_page_flags(flags)						\
 	(flags) ? __print_flags(flags, "|",				\

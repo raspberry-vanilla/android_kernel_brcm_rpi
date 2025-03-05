@@ -7,16 +7,23 @@
  * Sorted alphabetically.
  */
 
+#include "binder.c"
 #include "blk.c"
 #include "bug.c"
 #include "build_assert.c"
 #include "build_bug.c"
+#include "cred.c"
 #include "err.c"
+#include "fs.c"
+#include "jump_label.c"
 #include "kunit.c"
+#include "mm.c"
+#include "mman.c"
 #include "mutex.c"
 #include "page.c"
 #include "rbtree.c"
 #include "refcount.c"
+#include "security.c"
 #include "signal.c"
 #include "slab.c"
 #include "spinlock.c"

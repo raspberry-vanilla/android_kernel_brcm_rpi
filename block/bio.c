@@ -269,6 +269,9 @@ void bio_init(struct bio *bio, struct block_device *bdev, struct bio_vec *table,
 #endif
 #ifdef CONFIG_BLK_INLINE_ENCRYPTION
 	bio->bi_crypt_context = NULL;
+#if IS_ENABLED(CONFIG_DM_DEFAULT_KEY)
+	bio->bi_skip_dm_default_key = false;
+#endif
 #endif
 #ifdef CONFIG_BLK_DEV_INTEGRITY
 	bio->bi_integrity = NULL;
@@ -982,11 +985,16 @@ int bio_add_hw_page(struct request_queue *q, struct bio *bio,
 		unsigned int max_sectors, bool *same_page)
 {
 	unsigned int max_size = max_sectors << SECTOR_SHIFT;
+	unsigned int mss;
 
 	if (WARN_ON_ONCE(bio_flagged(bio, BIO_CLONED)))
 		return 0;
-
-	len = min3(len, max_size, queue_max_segment_size(q));
+	/* Sub page segment limit should not interfere while adding the hw page
+	 * to the bio. Such bio page will be split into the segments later in
+	 * blk_rq_append_bio().
+	 */
+	mss = max(PAGE_SIZE, queue_max_segment_size(q));
+	len = min3(len, max_size, mss);
 	if (len > max_size - bio->bi_iter.bi_size)
 		return 0;
 
