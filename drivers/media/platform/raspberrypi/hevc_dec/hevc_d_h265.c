@@ -2512,7 +2512,7 @@ void hevc_d_device_run(void *priv)
 	struct hevc_d_ctx *const ctx = priv;
 	struct hevc_d_dev *const dev = ctx->dev;
 	struct hevc_d_run run = {};
-	struct media_request *src_req;
+	struct media_request *src_req = NULL;
 
 	run.src = v4l2_m2m_next_src_buf(ctx->fh.m2m_ctx);
 	run.dst = v4l2_m2m_next_dst_buf(ctx->fh.m2m_ctx);
