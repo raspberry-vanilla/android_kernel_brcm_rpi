@@ -1673,4 +1673,10 @@ config REGULATOR_QCOM_LABIBB
 	  boost regulator and IBB can be used as a negative boost regulator
 	  for LCD display panel.
 
+config REGULATOR_WAVESHARE_PANEL
+	tristate "Waveshare touchscreen panel regulator"
+	depends on I2C
+	help
+	  This driver supports the Waveshare touchscreen panel V2 regulator.
+
 endif
