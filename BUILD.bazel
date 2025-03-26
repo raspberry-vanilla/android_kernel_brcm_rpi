@@ -752,6 +752,7 @@ copy_to_dist_dir(
 )
 
 _RPI_OVERLAY_OUTS = [
+    "arch/arm64/boot/dts/overlays/vc4-kms-dsi-waveshare-panel-v2.dtbo",
     "arch/arm64/boot/dts/overlays/act-led.dtbo",
     "arch/arm64/boot/dts/overlays/adafruit18.dtbo",
     "arch/arm64/boot/dts/overlays/adafruit-st7735r.dtbo",
