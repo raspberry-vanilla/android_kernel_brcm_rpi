@@ -6,18 +6,25 @@
 	compatible = "brcm,bcm2835";
 
 	fragment@0 {
+	target = <&i2c1>;
+	__overlay__ {
+		status = "disabled";
+	};
+};
+
+	fragment@1 {
 		target = <&gpio>;
 		__overlay__ {
 			goodix_pins: goodix_pins {
-				brcm,pins = <4 17>; // interrupt and reset
+				brcm,pins = <3 2>; // interrupt and reset
 				brcm,function = <0 0>; // in
 				brcm,pull = <2 2>; // pull-up
 			};
 		};
 	};
 
-	i2c_frag: fragment@1 {
-		target = <&i2c1>;
+	i2c_frag: fragment@2 {
+		target = <&i2c6>;
 		__overlay__ {
 			#address-cells = <1>;
 			#size-cells = <0>;
@@ -30,8 +37,8 @@
 				pinctrl-0 = <&goodix_pins>;
 				interrupt-parent = <&gpio>;
 				interrupts = <4 2>; // high-to-low edge triggered
-				irq-gpios = <&gpio 4 0>; // Pin7 on GPIO header
-				reset-gpios = <&gpio 17 0>; // Pin11 on GPIO header
+				irq-gpios = <&gpio 3 0>; // Pin7 on GPIO header
+				reset-gpios = <&gpio 2 0>; // Pin11 on GPIO header
 			};
 		};
 	};
@@ -40,9 +47,9 @@
 		addr = <&gt9271>,"reg:0";
 		interrupt = <&goodix_pins>,"brcm,pins:0",
 			<&gt9271>,"interrupts:0",
-			<&gt9271>,"irq-gpios:4";
-		reset = <&goodix_pins>,"brcm,pins:4",
-			<&gt9271>,"reset-gpios:4";
+			<&gt9271>,"irq-gpios:3";
+		reset = <&goodix_pins>,"brcm,pins:2",
+			<&gt9271>,"reset-gpios:2";
 		i2c-path = <&i2c_frag>, "target?=0",
 			   <&i2c_frag>, "target-path";
 	};

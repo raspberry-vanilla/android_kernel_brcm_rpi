@@ -8,31 +8,10 @@
 / {
 	compatible = "brcm,bcm2835";
 
-	i2c_frag: fragment@0 {
-		target = <&i2c_csi_dsi>;
-		__overlay__ {
-			#address-cells = <1>;
-			#size-cells = <0>;
-			status = "okay";
 
-			display_mcu: display_mcu@45 {
-				compatible = "waveshare,touchscreen-panel-regulator";
-				reg = <0x45>;
-				gpio-controller;
-				#gpio-cells = <2>;
-			};
-
-			touch: goodix@5d {
-				compatible = "goodix,gt9271";
-				reg = <0x5d>;
-				reset-gpio = <&display_mcu 9 0>;
-			};
-		};
-	};
-
-	dsi_frag: fragment@1 {
+	dsi_frag: fragment@0 {
 		target = <&dsi1>;
-		__overlay__ {
+		__overlay__  {
 			#address-cells = <1>;
 			#size-cells = <0>;
 			status = "okay";
@@ -45,11 +24,8 @@
 
 			dsi_panel: dsi_panel@0 {
 				reg = <0>;
-				/* Use 4-lane configuration and add a custom label */
 				compatible = "waveshare,10.1-dsi-touch-a,4lane";
-				reset-gpio = <&display_mcu 1 0>;
-				backlight = <&display_mcu>;
-				panel-label = "10.1-4lane panel loaded";
+   			// panel-orientation = "left_side_up";
 
 				port {
 					panel_in: endpoint {
@@ -57,20 +33,6 @@
 					};
 				};
 			};
-		};
-	};
-
-	fragment@2 {
-		target = <&i2c0if>;
-		__overlay__ {
-			status = "okay";
-		};
-	};
-
-	fragment@3 {
-		target = <&i2c0mux>;
-		__overlay__ {
-			status = "okay";
 		};
 	};
 
@@ -84,17 +46,9 @@
 		8_0_inch_a = <&dsi_panel>, "compatible=waveshare,8.0-dsi-touch-a";
 		8_0_inch_a_4lane = <&dsi_panel>, "compatible=waveshare,8.0-dsi-touch-a,4lane";
 		8_1_inch_a = <&dsi_panel>, "compatible=waveshare,8.1-dsi-touch-a";
-		/* Force 10.1-inch to use 4-lane mode */
-		10_1_inch_a = <&dsi_panel>, "compatible=waveshare,10.1-dsi-touch-a,4lane";
+		10_1_inch_a = <&dsi_panel>, "compatible=waveshare,10.1-dsi-touch-a";
 		10_1_inch_a_4lane = <&dsi_panel>, "compatible=waveshare,10.1-dsi-touch-a,4lane";
 		10_1_inch_b = <&dsi_panel>, "compatible=waveshare,10.1-dsi-touch-b";
 		10_1_inch_b_4lane = <&dsi_panel>, "compatible=waveshare,10.1-dsi-touch-b,4lane";
-		/* Remove disable_touch override so the touch controller remains enabled */
-		// disable_touch = <&touch>, "status=disabled";
-		invx = <&touch>, "touchscreen-inverted-x?";
-		invy = <&touch>, "touchscreen-inverted-y?";
-		swapxy = <&touch>, "touchscreen-swapped-x-y?";
-		dsi0 = <&dsi_frag>, "target:0=",<&dsi0>,
-		       <&i2c_frag>, "target:0=",<&i2c_csi_dsi0>;
 	};
 };
