@@ -1102,6 +1102,7 @@ _RPI_OVERLAY_OUTS = [
     "arch/arm64/boot/dts/overlays/vc4-kms-dsi-lt070me05000-v2.dtbo",
     "arch/arm64/boot/dts/overlays/vc4-kms-dsi-waveshare-800x480.dtbo",
     "arch/arm64/boot/dts/overlays/vc4-kms-dsi-waveshare-panel.dtbo",
+    "arch/arm64/boot/dts/overlays/vc4-kms-dsi-waveshare-panel-v2.dtbo",
     "arch/arm64/boot/dts/overlays/vc4-kms-kippah-7inch.dtbo",
     "arch/arm64/boot/dts/overlays/vc4-kms-v3d.dtbo",
     "arch/arm64/boot/dts/overlays/vc4-kms-v3d-pi4.dtbo",
