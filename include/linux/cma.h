@@ -61,8 +61,13 @@ extern void cma_reserve_pages_on_error(struct cma *cma);
 
 #ifdef CONFIG_CMA
 extern int cma_check_range(u64 *start, u64 *end);
+extern unsigned long cma_get_first_virtzone_base(int nid);
 #else
 static inline int cma_check_range(u64 *start, u64 *end)
+{
+	return 0;
+}
+static inline unsigned long cma_get_first_virtzone_base(int nid)
 {
 	return 0;
 }
