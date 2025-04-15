@@ -37,8 +37,8 @@
 				pinctrl-0 = <&goodix_pins>;
 				interrupt-parent = <&gpio>;
 				interrupts = <4 2>; // high-to-low edge triggered
-				irq-gpios = <&gpio 3 0>; // Pin7 on GPIO header
-				reset-gpios = <&gpio 2 0>; // Pin11 on GPIO header
+				irq-gpios = <&gpio 3 0>; // Pin3 on GPIO header
+				reset-gpios = <&gpio 2 0>; // Pin2 on GPIO header
 			};
 		};
 	};
