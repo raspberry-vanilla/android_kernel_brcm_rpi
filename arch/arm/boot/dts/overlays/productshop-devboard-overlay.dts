@@ -2,25 +2,16 @@
 /plugin/;
 
 / {
-	/*
-	 * Depending on your Pi or SoC, you might use:
-	 *   compatible = "brcm,bcm2712";
-	 *   compatible = "brcm,bcm2835";
-	 */
 	compatible = "brcm,bcm2712";
 
 	/*
 	 * ------------------------------------------------------------------
-	 *  fragment@0: Override i2c1 to use rp1_i2c1_10_11 and enable it.
+	 *  fragment@0: Configure i2c1 on pins 10/11
 	 * ------------------------------------------------------------------
 	 */
 	fragment@0 {
 		target = <&i2c1>;
 		__overlay__ {
-			/*
-			 * Use pins 10/11 instead of 2/3. 
-			 * 'rp1_i2c1_10_11' must be defined in the base DT.
-			 */
 			pinctrl-0 = <&rp1_i2c1_10_11>;
 			status = "okay";
 		};
@@ -28,7 +19,7 @@
 
 	/*
 	 * ------------------------------------------------------------------
-	 *  fragment@1: GPIO pins for Goodix touchscreen (interrupt/reset)
+	 *  fragment@1: GPIO pins for Goodix touchscreen
 	 * ------------------------------------------------------------------
 	 */
 	fragment@1 {
@@ -54,13 +45,13 @@
 			#size-cells = <0>;
 			status = "okay";
 
-			gt9271: gt9271@14 {
-				compatible = "goodix,gt9271";
+			gt9110: gt9110@14 {
+				compatible = "goodix,gt9110";
 				reg = <0x14>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&goodix_pins>;
 				interrupt-parent = <&gpio>;
-				interrupts = <4 2>;   // high-to-low edge triggered
+				interrupts = <3 1>;   // low to high edge triggered
 				irq-gpios = <&gpio 3 0>;
 				reset-gpios = <&gpio 2 0>;
 			};
@@ -69,7 +60,7 @@
 
 	/*
 	 * ------------------------------------------------------------------
-	 *  fragment@3: DSI panel (e.g. Waveshare) at dsi1
+	 *  fragment@3: DSI panel at dsi1
 	 * ------------------------------------------------------------------
 	 */
 	dsi_frag: fragment@3 {
@@ -88,7 +79,6 @@
 			dsi_panel: dsi_panel@0 {
 				reg = <0>;
 				compatible = "waveshare,10.1-dsi-touch-a,4lane";
-				// panel-orientation = "left_side_up";
 
 				port {
 					panel_in: endpoint {
@@ -101,7 +91,7 @@
 
 	/*
 	 * ------------------------------------------------------------------
-	 *  fragment@4: LSM6DS3 IMU on i2c1 at 0x6B
+	 *  fragment@4: LSM6DSL IMU on i2c1 at 0x6A
 	 * ------------------------------------------------------------------
 	 */
 	fragment@4 {
@@ -110,41 +100,41 @@
 			#address-cells = <1>;
 			#size-cells = <0>;
 			status = "okay";
-			/*
-			 * If you prefer running i2c1 at 400 kHz, uncomment:
-			 * clock-frequency = <400000>;
-			 */
 
-			lsm6ds3: lsm6ds3@6b {
-				compatible = "st,lsm6ds3";
+			lsm6dsl: lsm6dsl@6a {
+				compatible = "st,lsm6dsl";
 				reg = <0x6a>;
-				interrupt-parent = <&gpio>;
-				/*
-				 * Example interrupt line on GPIO4, 
-				 * active-high or active-low depends on design
-				 * (adjust <4 X> as needed).
-				 */
-				interrupts = <4 1>;  // rising edge
 				status = "okay";
+				/*
+				 * If you DO add an interrupt line in future:
+				 *
+				 * interrupt-parent = <&gpio>;
+				 * interrupts = <4 1>; // example only
+				 */
 			};
 		};
 	};
 
 	/*
 	 * ------------------------------------------------------------------
-	 *  __overrides__: Merge overrides for Goodix, LSM6DS3, DSI panel
+	 *  __overrides__: 
 	 * ------------------------------------------------------------------
 	 */
 	__overrides__ {
-		/* Goodix touchscreen overrides */
-		addr = <&gt9271>,"reg:0",
-		       <&lsm6ds3>,"reg:0";  /* so you could override LSM6DS3 addr too */
+		/* Touchscreen & LSM6DSL address override */
+		addr = <&gt9110>,"reg:0",
+		       <&lsm6dsl>,"reg:0";
+
+		/* Touchscreen interrupt override */
 		interrupt = <&goodix_pins>,"brcm,pins:0",
-		            <&gt9271>,"interrupts:0",
-		            <&gt9271>,"irq-gpios:3",
-		            <&lsm6ds3>,"interrupts:0";
+		            <&gt9110>,"interrupts:0",
+		            <&gt9110>,"irq-gpios:3";
+
+		/* Touchscreen reset override */
 		reset = <&goodix_pins>,"brcm,pins:2",
-			<&gt9271>,"reset-gpios:2";
+			<&gt9110>,"reset-gpios:2";
+
+		/* i2c path for Goodix */
 		i2c-path = <&i2c_frag>, "target?=0",
 			   <&i2c_frag>, "target-path";
 
@@ -163,11 +153,7 @@
 		10_1_inch_b        = <&dsi_panel>, "compatible=waveshare,10.1-dsi-touch-b";
 		10_1_inch_b_4lane  = <&dsi_panel>, "compatible=waveshare,10.1-dsi-touch-b,4lane";
 
-		/*
-		 * Optional named parameter to enable LSM6DS3.
-		 * For instance: dtoverlay=productshop-devboard-v1,lsm6ds3=on
-		 * might (on some overlay systems) set the node status.
-		 */
-		lsm6ds3 = <0>,"+0";
+		/* Optional named parameter to enable LSM6DSL if needed */
+		lsm6dsl = <0>,"+0";
 	};
 };
