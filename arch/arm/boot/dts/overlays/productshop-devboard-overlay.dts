@@ -54,6 +54,10 @@
 				interrupts = <3 1>;   // low to high edge triggered
 				irq-gpios = <&gpio 3 0>;
 				reset-gpios = <&gpio 2 0>;
+				touchscreen-size-x = <1280>;
+  			touchscreen-size-y = <800>;
+				touchscreen-swapped-x-y;
+				touchscreen-inverted-y;
 			};
 		};
 	};
