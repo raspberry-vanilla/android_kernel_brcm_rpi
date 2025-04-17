@@ -19,16 +19,16 @@
 
 	/*
 	 * ------------------------------------------------------------------
-	 *  fragment@1: GPIO pins for Goodix touchscreen
+	 *  fragment@1: GPIO pins for Goodix touchscreen (interrupt, reset)
 	 * ------------------------------------------------------------------
 	 */
 	fragment@1 {
 		target = <&gpio>;
 		__overlay__ {
 			goodix_pins: goodix_pins {
-				brcm,pins = <3 2>;       // interrupt, reset
-				brcm,function = <0 0>;   // input
-				brcm,pull = <2 2>;       // pull-up
+				brcm,pins = <3 2>;       // GPIO3=interrupt, GPIO2=reset
+				brcm,function = <0 0>;   // 0 = input
+				brcm,pull = <2 2>;       // 2 = pull-up
 			};
 		};
 	};
@@ -50,12 +50,14 @@
 				reg = <0x14>;
 				pinctrl-names = "default";
 				pinctrl-0 = <&goodix_pins>;
+
 				interrupt-parent = <&gpio>;
-				interrupts = <3 1>;   // low to high edge triggered
+				interrupts = <3 1>;  // GPIO3, rising edge (adjust if needed)
 				irq-gpios = <&gpio 3 0>;
 				reset-gpios = <&gpio 2 0>;
+
 				touchscreen-size-x = <1280>;
-  			touchscreen-size-y = <800>;
+				touchscreen-size-y = <800>;
 				touchscreen-swapped-x-y;
 				touchscreen-inverted-y;
 			};
@@ -109,19 +111,72 @@
 				compatible = "st,lsm6dsl";
 				reg = <0x6a>;
 				status = "okay";
-				/*
-				 * If you DO add an interrupt line in future:
-				 *
-				 * interrupt-parent = <&gpio>;
-				 * interrupts = <4 1>; // example only
-				 */
 			};
 		};
 	};
 
 	/*
 	 * ------------------------------------------------------------------
-	 *  __overrides__: 
+	 *  fragment@5: Enable i2c3 on pins 22/23 and add BQ2589x + BQ274xx
+	 * ------------------------------------------------------------------
+	 */
+	fragment@5 {
+		target = <&i2c3>;
+		__overlay__ {
+			#address-cells = <1>;
+			#size-cells = <0>;
+			pinctrl-0 = <&rp1_i2c3_22_23>;
+			status = "okay";
+
+			charger: charger@6a {
+				compatible = "ti,bq25890";
+				reg = <0x6a>;
+
+				pinctrl-names = "default";
+				pinctrl-0 = <&pinctrl_charger>;  // references fragment@6 below
+
+				/*
+				 * interrupt on GPIO24, falling edge (2).
+				 */
+				interrupt-parent = <&gpio>;
+				interrupts = <24 2>;
+
+				ti,battery-regulation-voltage = <4192000>;
+				ti,charge-current = <1600000>;
+				ti,termination-current = <66000>;
+				ti,precharge-current = <130000>;
+				ti,minimum-sys-voltage = <2700000>;
+				ti,boost-voltage = <5000000>;
+				ti,boost-max-current = <50000>;
+			};
+
+			bq27441_fg: bq27441-battery@55 {
+				compatible = "ti,bq27411";
+				reg = <0x55>;
+				status = "okay";
+			};
+		};
+	};
+
+	/*
+	 * ------------------------------------------------------------------
+	 * fragment@6: Define pinctrl_charger to set GPIO24 as input + pull-up
+	 * ------------------------------------------------------------------
+	 */
+	fragment@6 {
+		target = <&gpio>; /* or the correct pinctrl node label in Pi 5 base DT */
+		__overlay__ {
+			pinctrl_charger: pinctrl_charger {
+				brcm,pins = <24>;
+				brcm,function = <0>;  // 0 = GPIO input
+				brcm,pull = <2>;      // 2 = pull-up
+			};
+		};
+	};
+
+	/*
+	 * ------------------------------------------------------------------
+	 *  __overrides__ Section
 	 * ------------------------------------------------------------------
 	 */
 	__overrides__ {
