@@ -32,6 +32,8 @@
 
 #include <trace/events/block.h>
 
+#include <trace/hooks/blk.h>
+
 #include <linux/t10-pi.h>
 #include "blk.h"
 #include "blk-mq.h"
@@ -1565,6 +1567,12 @@ static void blk_mq_requeue_work(struct work_struct *work)
 
 void blk_mq_kick_requeue_list(struct request_queue *q)
 {
+	bool skip = false;
+
+	trace_android_vh_blk_mq_kick_requeue_list(q, 0, &skip);
+	if (skip)
+		return;
+
 	kblockd_mod_delayed_work_on(WORK_CPU_UNBOUND, &q->requeue_work, 0);
 }
 EXPORT_SYMBOL(blk_mq_kick_requeue_list);
@@ -1572,6 +1580,13 @@ EXPORT_SYMBOL(blk_mq_kick_requeue_list);
 void blk_mq_delay_kick_requeue_list(struct request_queue *q,
 				    unsigned long msecs)
 {
+	bool skip = false;
+
+	trace_android_vh_blk_mq_kick_requeue_list(q,
+			msecs_to_jiffies(msecs), &skip);
+	if (skip)
+		return;
+
 	kblockd_mod_delayed_work_on(WORK_CPU_UNBOUND, &q->requeue_work,
 				    msecs_to_jiffies(msecs));
 }
@@ -1837,9 +1852,6 @@ bool __blk_mq_alloc_driver_tag(struct request *rq)
 	if (blk_mq_tag_is_reserved(rq->mq_hctx->sched_tags, rq->internal_tag)) {
 		bt = &rq->mq_hctx->tags->breserved_tags;
 		tag_offset = 0;
-	} else {
-		if (!hctx_may_queue(rq->mq_hctx, bt))
-			return false;
 	}
 
 	tag = __sbitmap_queue_get(bt);
@@ -2279,8 +2291,16 @@ select_cpu:
  */
 void blk_mq_delay_run_hw_queue(struct blk_mq_hw_ctx *hctx, unsigned long msecs)
 {
+	bool skip = false;
+
 	if (unlikely(blk_mq_hctx_stopped(hctx)))
 		return;
+
+	trace_android_vh_blk_mq_delay_run_hw_queue(blk_mq_hctx_next_cpu(hctx),
+			hctx, msecs_to_jiffies(msecs), &skip);
+	if (skip)
+		return;
+
 	kblockd_mod_delayed_work_on(blk_mq_hctx_next_cpu(hctx), &hctx->run_work,
 				    msecs_to_jiffies(msecs));
 }

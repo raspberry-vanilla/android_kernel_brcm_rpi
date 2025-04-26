@@ -32,6 +32,7 @@
 #include <linux/swiotlb.h>
 #include <linux/vmalloc.h>
 #include <trace/events/swiotlb.h>
+#include <trace/hooks/iommu.h>
 
 #include "dma-iommu.h"
 #include "iommu-pages.h"
@@ -599,16 +600,16 @@ static int iova_reserve_iommu_regions(struct device *dev,
 	return ret;
 }
 
-static bool dev_is_untrusted(struct device *dev)
+static bool dev_requires_dma_protection(struct device *dev)
 {
-	return dev_is_pci(dev) && to_pci_dev(dev)->untrusted;
+	return dev_is_pci(dev) && to_pci_dev(dev)->requires_dma_protection;
 }
 
 static bool dev_use_swiotlb(struct device *dev, size_t size,
 			    enum dma_data_direction dir)
 {
 	return IS_ENABLED(CONFIG_SWIOTLB) &&
-		(dev_is_untrusted(dev) ||
+		(dev_requires_dma_protection(dev) ||
 		 dma_kmalloc_needs_bounce(dev, size, dir));
 }
 
@@ -621,7 +622,7 @@ static bool dev_use_sg_swiotlb(struct device *dev, struct scatterlist *sg,
 	if (!IS_ENABLED(CONFIG_SWIOTLB))
 		return false;
 
-	if (dev_is_untrusted(dev))
+	if (dev_requires_dma_protection(dev))
 		return true;
 
 	/*
@@ -713,6 +714,9 @@ static int iommu_dma_init_domain(struct iommu_domain *domain, struct device *dev
 	}
 
 	init_iova_domain(iovad, 1UL << order, base_pfn);
+
+	trace_android_rvh_iommu_iovad_init_alloc_algo(dev, iovad);
+
 	ret = iova_domain_init_rcaches(iovad);
 	if (ret)
 		goto done_unlock;
@@ -747,6 +751,8 @@ static int dma_info_to_prot(enum dma_data_direction dir, bool coherent,
 
 	if (attrs & DMA_ATTR_PRIVILEGED)
 		prot |= IOMMU_PRIV;
+
+	trace_android_rvh_iommu_dma_info_to_prot(attrs, &prot);
 
 	switch (dir) {
 	case DMA_BIDIRECTIONAL:
@@ -803,6 +809,7 @@ static dma_addr_t iommu_dma_alloc_iova(struct iommu_domain *domain,
 
 	iova = alloc_iova_fast(iovad, iova_len, dma_limit >> shift, true);
 done:
+	trace_android_vh_iommu_iovad_alloc_iova(dev, iovad, (dma_addr_t)iova << shift, size);
 	return (dma_addr_t)iova << shift;
 }
 
@@ -821,6 +828,8 @@ static void iommu_dma_free_iova(struct iommu_dma_cookie *cookie,
 	else
 		free_iova_fast(iovad, iova_pfn(iovad, iova),
 				size >> iova_shift(iovad));
+
+	trace_android_vh_iommu_iovad_free_iova(iovad, iova, size);
 }
 
 static void __iommu_dma_unmap(struct device *dev, dma_addr_t dma_addr,
@@ -977,6 +986,8 @@ static struct page **__iommu_dma_alloc_pages(struct device *dev,
 				nodemask = numa_policy_nodemask(gfp,
 								dma_iommu_numa_policy(),
 								i, &nid);
+			trace_android_vh_adjust_alloc_flags(order, &alloc_flags);
+
 			page = alloc_pages_node(nid, alloc_flags, order);
 			if (!page)
 				continue;
@@ -1252,12 +1263,12 @@ dma_addr_t iommu_dma_map_page(struct device *dev, struct page *page,
 			return DMA_MAPPING_ERROR;
 
 		/*
-		 * Untrusted devices should not see padding areas with random
-		 * leftover kernel data, so zero the pre- and post-padding.
+		 * Zero the pre- and post-padding to prevent exposing kernel data to devices
+		 * requiring DMA protection.
 		 * swiotlb_tbl_map_single() has initialized the bounce buffer
 		 * proper to the contents of the original memory buffer.
 		 */
-		if (dev_is_untrusted(dev)) {
+		if (dev_requires_dma_protection(dev)) {
 			size_t start, virt = (size_t)phys_to_virt(phys);
 
 			/* Pre-padding */
@@ -1798,7 +1809,7 @@ size_t iommu_dma_opt_mapping_size(void)
 
 size_t iommu_dma_max_mapping_size(struct device *dev)
 {
-	if (dev_is_untrusted(dev))
+	if (dev_requires_dma_protection(dev))
 		return swiotlb_max_mapping_size(dev);
 
 	return SIZE_MAX;
@@ -1814,6 +1825,8 @@ void iommu_setup_dma_ops(struct device *dev)
 	dev->dma_iommu = iommu_is_dma_domain(domain);
 	if (dev->dma_iommu && iommu_dma_init_domain(domain, dev))
 		goto out_err;
+
+	trace_android_rvh_iommu_setup_dma_ops(dev);
 
 	return;
 out_err:

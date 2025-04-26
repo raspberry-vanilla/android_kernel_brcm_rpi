@@ -39,6 +39,8 @@
 #include <linux/sched/signal.h>
 #include <linux/mm_inline.h>
 #include <trace/events/writeback.h>
+#include <trace/hooks/mm.h>
+#include <trace/hooks/fs.h>
 
 #include "internal.h"
 
@@ -1724,6 +1726,7 @@ static inline void wb_dirty_limits(struct dirty_throttle_control *dtc)
 		wb_reclaimable = wb_stat(wb, WB_RECLAIMABLE);
 		dtc->wb_dirty = wb_reclaimable + wb_stat(wb, WB_WRITEBACK);
 	}
+	trace_android_vh_wb_dirty_limits(&dtc->wb_dirty, wb);
 }
 
 static unsigned long domain_poll_intv(struct dirty_throttle_control *dtc,
@@ -2084,6 +2087,8 @@ int balance_dirty_pages_ratelimited_flags(struct address_space *mapping,
 	if (!(bdi->capabilities & BDI_CAP_WRITEBACK))
 		return ret;
 
+	trace_android_rvh_ctl_dirty_rate(inode);
+
 	if (inode_cgwb_enabled(inode))
 		wb = wb_get_create_current(bdi, GFP_KERNEL);
 	if (!wb)
@@ -2160,6 +2165,7 @@ static void wb_bg_dirty_limits(struct dirty_throttle_control *dtc)
 		dtc->wb_dirty = wb_stat_sum(wb, WB_RECLAIMABLE);
 	else
 		dtc->wb_dirty = wb_stat(wb, WB_RECLAIMABLE);
+	trace_android_vh_wb_dirty_limits(&dtc->wb_dirty, wb);
 }
 
 static bool domain_over_bg_thresh(struct dirty_throttle_control *dtc)

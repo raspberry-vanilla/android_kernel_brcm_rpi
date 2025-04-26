@@ -15,6 +15,6 @@
 #define DECLARE_REG(type, name, ctxt, reg)	\
 				type name = (type)cpu_reg(ctxt, (reg))
 
-void __pkvm_vcpu_init_traps(struct kvm_vcpu *vcpu);
+void __kvm_hyp_host_forward_smc(struct kvm_cpu_context *host_ctxt);
 
 #endif /* __ARM64_KVM_NVHE_TRAP_HANDLER_H__ */

@@ -6,6 +6,8 @@
  * Author: Rafael J. Wysocki <rafael.j.wysocki@intel.com>
  */
 
+#include <trace/hooks/sched.h>
+
 #define IOWAIT_BOOST_MIN	(SCHED_CAPACITY_SCALE / 8)
 
 struct sugov_tunables {
@@ -95,9 +97,15 @@ static bool sugov_should_update_freq(struct sugov_policy *sg_policy, u64 time)
 static bool sugov_update_next_freq(struct sugov_policy *sg_policy, u64 time,
 				   unsigned int next_freq)
 {
+	bool should_update = true;
+
 	if (sg_policy->need_freq_update)
 		sg_policy->need_freq_update = false;
 	else if (sg_policy->next_freq == next_freq)
+		return false;
+
+	trace_android_rvh_set_sugov_update(sg_policy, next_freq, &should_update);
+	if (!should_update)
 		return false;
 
 	sg_policy->next_freq = next_freq;
@@ -167,9 +175,15 @@ static unsigned int get_next_freq(struct sugov_policy *sg_policy,
 {
 	struct cpufreq_policy *policy = sg_policy->policy;
 	unsigned int freq;
+	unsigned long next_freq = 0;
 
 	freq = get_capacity_ref_freq(policy);
-	freq = map_util_freq(util, freq, max);
+	trace_android_vh_map_util_freq(util, freq, max, &next_freq, policy,
+			&sg_policy->need_freq_update);
+	if (next_freq)
+		freq = next_freq;
+	else
+		freq = map_util_freq(util, freq, max);
 
 	if (freq == sg_policy->cached_raw_freq && !sg_policy->need_freq_update)
 		return sg_policy->next_freq;

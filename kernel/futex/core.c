@@ -42,6 +42,7 @@
 
 #include "futex.h"
 #include "../locking/rtmutex_common.h"
+#include <trace/hooks/futex.h>
 
 /*
  * The base of the bucket array and its size are always used together
@@ -558,6 +559,7 @@ void __futex_queue(struct futex_q *q, struct futex_hash_bucket *hb,
 		   struct task_struct *task)
 {
 	int prio;
+	bool already_on_hb = false;
 
 	/*
 	 * The priority used to register this element is
@@ -570,7 +572,9 @@ void __futex_queue(struct futex_q *q, struct futex_hash_bucket *hb,
 	prio = min(current->normal_prio, MAX_RT_PRIO);
 
 	plist_node_init(&q->list, prio);
-	plist_add(&q->list, &hb->chain);
+	trace_android_vh_alter_futex_plist_add(&q->list, &hb->chain, &already_on_hb);
+	if (!already_on_hb)
+		plist_add(&q->list, &hb->chain);
 	q->task = task;
 }
 

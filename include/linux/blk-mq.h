@@ -208,6 +208,8 @@ struct request {
 	 */
 	rq_end_io_fn *end_io;
 	void *end_io_data;
+
+	ANDROID_OEM_DATA(1);
 };
 
 static inline enum req_op req_op(const struct request *req)
@@ -774,6 +776,7 @@ struct blk_mq_tags {
 	 * request pool
 	 */
 	spinlock_t lock;
+	ANDROID_OEM_DATA(1);
 };
 
 static inline struct request *blk_mq_tag_to_rq(struct blk_mq_tags *tags,

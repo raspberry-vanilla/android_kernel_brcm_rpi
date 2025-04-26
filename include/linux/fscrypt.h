@@ -190,6 +190,8 @@ struct fscrypt_operations {
 	 */
 	struct block_device **(*get_devices)(struct super_block *sb,
 					     unsigned int *num_devs);
+
+	ANDROID_OEM_DATA_ARRAY(1, 4);
 };
 
 int fscrypt_d_revalidate(struct dentry *dentry, unsigned int flags);
@@ -891,6 +893,20 @@ static inline u64 fscrypt_limit_io_blocks(const struct inode *inode, u64 lblk,
 	return nr_blocks;
 }
 #endif /* !CONFIG_FS_ENCRYPTION_INLINE_CRYPT */
+
+#if IS_ENABLED(CONFIG_FS_ENCRYPTION) && IS_ENABLED(CONFIG_DM_DEFAULT_KEY)
+static inline bool
+fscrypt_inode_should_skip_dm_default_key(const struct inode *inode)
+{
+	return IS_ENCRYPTED(inode) && S_ISREG(inode->i_mode);
+}
+#else
+static inline bool
+fscrypt_inode_should_skip_dm_default_key(const struct inode *inode)
+{
+	return false;
+}
+#endif
 
 /**
  * fscrypt_inode_uses_inline_crypto() - test whether an inode uses inline

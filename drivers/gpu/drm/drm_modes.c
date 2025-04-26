@@ -2622,6 +2622,7 @@ void drm_mode_convert_to_umode(struct drm_mode_modeinfo *out,
 
 	strscpy_pad(out->name, in->name, sizeof(out->name));
 }
+EXPORT_SYMBOL_GPL(drm_mode_convert_to_umode);
 
 /**
  * drm_mode_convert_umode - convert a modeinfo into a drm_display_mode
@@ -2697,6 +2698,7 @@ int drm_mode_convert_umode(struct drm_device *dev,
 
 	return 0;
 }
+EXPORT_SYMBOL_GPL(drm_mode_convert_umode);
 
 /**
  * drm_mode_is_420_only - if a given videomode can be only supported in YCBCR420

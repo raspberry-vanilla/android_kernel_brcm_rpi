@@ -11,6 +11,7 @@
 #include <asm/page.h>		/* pgprot_t */
 #include <linux/rbtree.h>
 #include <linux/overflow.h>
+#include <linux/android_vendor.h>
 
 #include <asm/vmalloc.h>
 
@@ -61,6 +62,7 @@ struct vm_struct {
 	unsigned int		nr_pages;
 	phys_addr_t		phys_addr;
 	const void		*caller;
+	ANDROID_OEM_DATA(1);
 };
 
 struct vmap_area {
@@ -207,6 +209,9 @@ extern int remap_vmalloc_range_partial(struct vm_area_struct *vma,
 
 extern int remap_vmalloc_range(struct vm_area_struct *vma, void *addr,
 							unsigned long pgoff);
+
+int vmap_pages_range(unsigned long addr, unsigned long end, pgprot_t prot,
+		     struct page **pages, unsigned int page_shift);
 
 /*
  * Architectures can set this mask to a combination of PGTBL_P?D_MODIFIED values

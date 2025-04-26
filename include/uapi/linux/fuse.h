@@ -638,6 +638,7 @@ enum fuse_opcode {
 	FUSE_SYNCFS		= 50,
 	FUSE_TMPFILE		= 51,
 	FUSE_STATX		= 52,
+	FUSE_CANONICAL_PATH	= 2016,
 
 	/* CUSE specific operations */
 	CUSE_INIT		= 4096,
@@ -1012,8 +1013,19 @@ struct fuse_in_header {
 	uint32_t	uid;
 	uint32_t	gid;
 	uint32_t	pid;
-	uint16_t	total_extlen; /* length of extensions in 8byte units */
-	uint16_t	padding;
+
+	/*
+	 * fuse-bpf reused the padding field to pass errors to postfilter
+	 * Unfortunately this field has now been used for extlen.
+	 * Manage at least temporarily with a union
+	 */
+	union {
+		struct {
+			uint16_t	total_extlen; /* length of extensions in 8byte units */
+			uint16_t	padding;
+		};
+		uint32_t error_in;
+	};
 };
 
 struct fuse_out_header {

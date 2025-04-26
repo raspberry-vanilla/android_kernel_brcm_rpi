@@ -40,7 +40,11 @@
 #include <linux/fs_parser.h>
 #include <linux/swapfile.h>
 #include <linux/iversion.h>
+#include <linux/mm_inline.h>
 #include "swap.h"
+
+#undef CREATE_TRACE_POINTS
+#include <trace/hooks/mm.h>
 
 static struct vfsmount *shm_mnt __ro_after_init;
 
@@ -80,6 +84,7 @@ static struct vfsmount *shm_mnt __ro_after_init;
 #include <linux/uuid.h>
 #include <linux/quotaops.h>
 #include <linux/rcupdate_wait.h>
+#include <linux/android_vendor.h>
 
 #include <linux/uaccess.h>
 
@@ -823,6 +828,7 @@ static int shmem_add_to_page_cache(struct folio *folio,
 			goto unlock;
 		shmem_update_stats(folio, nr);
 		mapping->nrpages += nr;
+		trace_android_vh_shmem_mod_shmem(folio->mapping, nr);
 unlock:
 		xas_unlock_irq(&xas);
 	} while (xas_nomem(&xas, gfp));
@@ -847,6 +853,7 @@ static void shmem_delete_from_page_cache(struct folio *folio, void *radswap)
 
 	xa_lock_irq(&mapping->i_pages);
 	error = shmem_replace_entry(mapping, folio->index, folio, radswap);
+	trace_android_vh_shmem_mod_shmem(folio->mapping, -nr);
 	folio->mapping = NULL;
 	mapping->nrpages -= nr;
 	shmem_update_stats(folio, -nr);
@@ -1141,6 +1148,7 @@ whole_folios:
 	}
 
 	shmem_recalc_inode(inode, 0, -nr_swaps_freed);
+	trace_android_vh_shmem_mod_swapped(mapping, -nr_swaps_freed);
 }
 
 void shmem_truncate_range(struct inode *inode, loff_t lstart, loff_t lend)
@@ -1563,6 +1571,7 @@ try_split:
 			__GFP_HIGH | __GFP_NOMEMALLOC | __GFP_NOWARN,
 			NULL) == 0) {
 		shmem_recalc_inode(inode, 0, nr_pages);
+		trace_android_vh_shmem_mod_swapped(folio->mapping, nr_pages);
 		swap_shmem_alloc(swap, nr_pages);
 		shmem_delete_from_page_cache(folio, swp_to_radix_entry(swap));
 
@@ -1632,6 +1641,7 @@ static struct folio *shmem_swapin_cluster(swp_entry_t swap, gfp_t gfp,
 	return folio;
 }
 
+#ifdef CONFIG_TRANSPARENT_HUGEPAGE
 /*
  * Make sure huge_gfp is always more limited than limit_gfp.
  * Some of the flags set permissions, while others set limitations.
@@ -1656,7 +1666,6 @@ static gfp_t limit_gfp_mask(gfp_t huge_gfp, gfp_t limit_gfp)
 	return result;
 }
 
-#ifdef CONFIG_TRANSPARENT_HUGEPAGE
 unsigned long shmem_allowable_huge_orders(struct inode *inode,
 				struct vm_area_struct *vma, pgoff_t index,
 				loff_t write_end, bool shmem_huge_force)
@@ -1768,10 +1777,14 @@ static struct folio *shmem_alloc_folio(gfp_t gfp, int order,
 {
 	struct mempolicy *mpol;
 	pgoff_t ilx;
-	struct folio *folio;
+	struct folio *folio = NULL;
 
 	mpol = shmem_get_pgoff_policy(info, index, order, &ilx);
+	trace_android_rvh_shmem_get_folio(info, &folio, order);
+	if (folio)
+		goto done;
 	folio = folio_alloc_mpol(gfp, order, mpol, ilx, numa_node_id());
+done:
 	mpol_cond_put(mpol);
 
 	return folio;
@@ -1795,6 +1808,8 @@ static struct folio *shmem_alloc_and_add_folio(struct vm_fault *vmf,
 		suitable_orders = shmem_suitable_orders(inode, vmf,
 							mapping, index, orders);
 
+		trace_android_rvh_shmem_suitable_orders(inode, index,
+							orders, &suitable_orders);
 		order = highest_order(suitable_orders);
 		while (suitable_orders) {
 			pages = 1UL << order;
@@ -2195,6 +2210,7 @@ static int shmem_swapin_folio(struct inode *inode, pgoff_t index,
 		goto failed;
 
 	shmem_recalc_inode(inode, 0, -nr_pages);
+	trace_android_vh_shmem_mod_swapped(folio->mapping, -nr_pages);
 
 	if (sgp == SGP_WRITE)
 		folio_mark_accessed(folio);
@@ -2313,6 +2329,13 @@ repeat:
 
 	/* Find hugepage orders that are allowed for anonymous shmem and tmpfs. */
 	orders = shmem_allowable_huge_orders(inode, vma, index, write_end, false);
+	trace_android_rvh_shmem_allowable_huge_orders(inode, index, vma, &orders);
+	/*
+	 * With the above hook `order` is not always 0 anymore and the following
+	 * if block does not get compiled out. With CONFIG_TRANSPARENT_HUGEPAGE=n
+	 * vma_thp_gfp_mask() becomes undefined and linker fails.
+	 */
+#ifdef CONFIG_TRANSPARENT_HUGEPAGE
 	if (orders > 0) {
 		gfp_t huge_gfp;
 
@@ -2329,6 +2352,7 @@ repeat:
 		if (PTR_ERR(folio) == -EEXIST)
 			goto repeat;
 	}
+#endif
 
 	folio = shmem_alloc_and_add_folio(vmf, gfp, inode, index, fault_mm, 0);
 	if (IS_ERR(folio)) {
@@ -2339,7 +2363,9 @@ repeat:
 		goto unlock;
 	}
 
+#ifdef CONFIG_TRANSPARENT_HUGEPAGE
 alloced:
+#endif
 	alloced = true;
 	if (folio_test_large(folio) &&
 	    DIV_ROUND_UP(i_size_read(inode), PAGE_SIZE) <
@@ -2811,6 +2837,7 @@ static struct inode *__shmem_get_inode(struct mnt_idmap *idmap,
 	inode->i_generation = get_random_u32();
 	info = SHMEM_I(inode);
 	memset(info, 0, (char *)inode - (char *)info);
+	android_init_vendor_data(info, 1);
 	spin_lock_init(&info->lock);
 	atomic_set(&info->stop_eviction, 0);
 	info->seals = F_SEAL_SEAL;
@@ -4820,6 +4847,11 @@ static const struct address_space_operations shmem_aops = {
 	.error_remove_folio = shmem_error_remove_folio,
 };
 
+#ifdef CONFIG_ASHMEM_RUST
+extern long ashmem_memfd_ioctl(struct file *file, unsigned int cmd,
+			       unsigned long arg);
+#endif
+
 static const struct file_operations shmem_file_operations = {
 	.mmap		= shmem_mmap,
 	.open		= shmem_file_open,
@@ -4832,6 +4864,12 @@ static const struct file_operations shmem_file_operations = {
 	.splice_read	= shmem_file_splice_read,
 	.splice_write	= iter_file_splice_write,
 	.fallocate	= shmem_fallocate,
+#endif
+#ifdef CONFIG_ASHMEM_RUST
+	.unlocked_ioctl	= ashmem_memfd_ioctl,
+#ifdef CONFIG_COMPAT
+	.compat_ioctl	= ashmem_memfd_ioctl,
+#endif
 #endif
 };
 
@@ -5369,3 +5407,41 @@ struct page *shmem_read_mapping_page_gfp(struct address_space *mapping,
 	return page;
 }
 EXPORT_SYMBOL_GPL(shmem_read_mapping_page_gfp);
+
+int reclaim_shmem_address_space(struct address_space *mapping)
+{
+#ifdef CONFIG_SHMEM
+	pgoff_t start = 0;
+	struct page *page;
+	LIST_HEAD(page_list);
+	XA_STATE(xas, &mapping->i_pages, start);
+
+	if (!shmem_mapping(mapping))
+		return -EINVAL;
+
+	lru_add_drain();
+
+	rcu_read_lock();
+	xas_for_each(&xas, page, ULONG_MAX) {
+		if (xas_retry(&xas, page))
+			continue;
+		if (xa_is_value(page))
+			continue;
+		if (!folio_isolate_lru(page_folio(page)))
+			continue;
+
+		list_add(&page->lru, &page_list);
+
+		if (need_resched()) {
+			xas_pause(&xas);
+			cond_resched_rcu();
+		}
+	}
+	rcu_read_unlock();
+
+	return reclaim_pages(&page_list);
+#else
+	return 0;
+#endif
+}
+EXPORT_SYMBOL_GPL(reclaim_shmem_address_space);

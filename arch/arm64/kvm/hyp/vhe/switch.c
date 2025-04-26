@@ -227,6 +227,8 @@ static void __vcpu_load_activate_traps(struct kvm_vcpu *vcpu)
 
 	local_irq_save(flags);
 	__activate_traps_common(vcpu);
+	__activate_traps_hcrx(vcpu);
+	__activate_traps_hfgxtr(vcpu);
 	local_irq_restore(flags);
 }
 
@@ -236,6 +238,7 @@ static void __vcpu_put_deactivate_traps(struct kvm_vcpu *vcpu)
 
 	local_irq_save(flags);
 	__deactivate_traps_common(vcpu);
+	__deactivate_traps_hfgxtr(vcpu);
 	local_irq_restore(flags);
 }
 
@@ -307,6 +310,14 @@ static bool kvm_hyp_handle_eret(struct kvm_vcpu *vcpu, u64 *exit_code)
 	write_sysreg_el2(elr, SYS_ELR);
 
 	return true;
+}
+
+static void kvm_hyp_save_fpsimd_host(struct kvm_vcpu *vcpu)
+{
+	__fpsimd_save_state(*host_data_ptr(fpsimd_state));
+
+	if (kvm_has_fpmr(vcpu->kvm))
+		**host_data_ptr(fpmr_ptr) = read_sysreg_s(SYS_FPMR);
 }
 
 static bool kvm_hyp_handle_tlbi_el2(struct kvm_vcpu *vcpu, u64 *exit_code)
@@ -423,10 +434,13 @@ static const exit_handler_fn hyp_exit_handlers[] = {
 	[ESR_ELx_EC_MOPS]		= kvm_hyp_handle_mops,
 };
 
-static inline bool fixup_guest_exit(struct kvm_vcpu *vcpu, u64 *exit_code)
+static const exit_handler_fn *kvm_get_exit_handler_array(struct kvm_vcpu *vcpu)
 {
-	synchronize_vcpu_pstate(vcpu, exit_code);
+	return hyp_exit_handlers;
+}
 
+static void early_exit_filter(struct kvm_vcpu *vcpu, u64 *exit_code)
+{
 	/*
 	 * If we were in HYP context on entry, adjust the PSTATE view
 	 * so that the usual helpers work correctly.
@@ -446,8 +460,6 @@ static inline bool fixup_guest_exit(struct kvm_vcpu *vcpu, u64 *exit_code)
 		*vcpu_cpsr(vcpu) &= ~(PSR_MODE_MASK | PSR_MODE32_BIT);
 		*vcpu_cpsr(vcpu) |= mode;
 	}
-
-	return __fixup_guest_exit(vcpu, exit_code, hyp_exit_handlers);
 }
 
 /* Switch to the guest for VHE systems running in EL2 */
@@ -461,8 +473,6 @@ static int __kvm_vcpu_run_vhe(struct kvm_vcpu *vcpu)
 	guest_ctxt = &vcpu->arch.ctxt;
 
 	sysreg_save_host_state_vhe(host_ctxt);
-
-	fpsimd_lazy_switch_to_guest(vcpu);
 
 	/*
 	 * Note that ARM erratum 1165522 requires us to configure both stage 1
@@ -487,8 +497,6 @@ static int __kvm_vcpu_run_vhe(struct kvm_vcpu *vcpu)
 	sysreg_save_guest_state_vhe(guest_ctxt);
 
 	__deactivate_traps(vcpu);
-
-	fpsimd_lazy_switch_to_host(vcpu);
 
 	sysreg_restore_host_state_vhe(host_ctxt);
 

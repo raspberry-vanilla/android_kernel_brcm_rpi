@@ -4,6 +4,7 @@
 
 #include <linux/debugfs.h>
 #include <linux/kobject.h>
+#include <linux/android_vendor.h>
 
 struct cma_kobject {
 	struct kobject kobj;
@@ -22,6 +23,7 @@ struct cma {
 	struct debugfs_u32_array dfs_bitmap;
 #endif
 	char name[CMA_MAX_NAME];
+	bool gcma;
 #ifdef CONFIG_CMA_SYSFS
 	/* the number of CMA page successful allocations */
 	atomic64_t nr_pages_succeeded;
@@ -33,6 +35,7 @@ struct cma {
 	struct cma_kobject *cma_kobj;
 #endif
 	bool reserve_pages_on_error;
+	ANDROID_VENDOR_DATA(1);
 };
 
 extern struct cma cma_areas[MAX_CMA_AREAS];

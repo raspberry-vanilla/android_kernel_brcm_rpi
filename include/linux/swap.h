@@ -217,7 +217,9 @@ enum {
 	SWP_AREA_DISCARD = (1 << 9),	/* single-time swap area discards */
 	SWP_PAGE_DISCARD = (1 << 10),	/* freed swap page-cluster discards */
 	SWP_STABLE_WRITES = (1 << 11),	/* no overwrite PG_writeback pages */
-	SWP_SYNCHRONOUS_IO = (1 << 12),	/* synchronous IO is efficient */
+	__SWP_READ_SYNCHRONOUS_IO = (1 << 12),	/* synchronous read IO is efficient */
+	__SWP_WRITE_SYNCHRONOUS_IO = (1 << 13),	/* synchronous write IO is efficient */
+	SWP_SYNCHRONOUS_IO = (__SWP_READ_SYNCHRONOUS_IO | __SWP_WRITE_SYNCHRONOUS_IO),
 					/* add others here before... */
 	SWP_SCANNING	= (1 << 14),	/* refcount in scan_swap_map */
 };
@@ -425,6 +427,9 @@ extern unsigned long shrink_all_memory(unsigned long nr_pages);
 extern int vm_swappiness;
 long remove_mapping(struct address_space *mapping, struct folio *folio);
 
+extern unsigned long reclaim_pages(struct list_head *folio_list);
+extern unsigned long __reclaim_pages(struct list_head *folio_list,
+				     void *private);
 #ifdef CONFIG_NUMA
 extern int node_reclaim_mode;
 extern int sysctl_min_unmapped_ratio;
@@ -502,6 +507,7 @@ extern int init_swap_address_space(unsigned int type, unsigned long nr_pages);
 extern void exit_swap_address_space(unsigned int type);
 extern struct swap_info_struct *get_swap_device(swp_entry_t entry);
 sector_t swap_folio_sector(struct folio *folio);
+extern sector_t alloc_swapdev_block(int swap);
 
 static inline void put_swap_device(struct swap_info_struct *si)
 {
@@ -618,8 +624,16 @@ static inline void swap_free(swp_entry_t entry)
 }
 
 #ifdef CONFIG_MEMCG
+extern void _trace_android_vh_use_vm_swappiness(bool *use_vm_swappiness);
+
 static inline int mem_cgroup_swappiness(struct mem_cgroup *memcg)
 {
+	bool use_vm_swappiness = false;
+
+	_trace_android_vh_use_vm_swappiness(&use_vm_swappiness);
+	if (use_vm_swappiness)
+		return READ_ONCE(vm_swappiness);
+
 	/* Cgroup2 doesn't have per-cgroup swappiness */
 	if (cgroup_subsys_on_dfl(memory_cgrp_subsys))
 		return READ_ONCE(vm_swappiness);

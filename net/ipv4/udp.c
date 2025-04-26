@@ -119,6 +119,7 @@
 #if IS_ENABLED(CONFIG_IPV6)
 #include <net/ipv6_stubs.h>
 #endif
+#include <trace/hooks/net.h>
 
 struct udp_table udp_table __read_mostly;
 EXPORT_SYMBOL(udp_table);
@@ -1134,6 +1135,8 @@ int udp_sendmsg(struct sock *sk, struct msghdr *msg, size_t len)
 	struct ip_options_data opt_copy;
 	int uc_index;
 
+	trace_android_rvh_udp_sendmsg(sk, msg, len);
+
 	if (len > 0xFFFF)
 		return -EMSGSIZE;
 
@@ -1143,6 +1146,8 @@ int udp_sendmsg(struct sock *sk, struct msghdr *msg, size_t len)
 
 	if (msg->msg_flags & MSG_OOB) /* Mirror BSD error message compatibility */
 		return -EOPNOTSUPP;
+
+	trace_android_vh_uplink_send_msg(sk);
 
 	getfrag = is_udplite ? udplite_getfrag : ip_generic_getfrag;
 
@@ -1189,6 +1194,8 @@ int udp_sendmsg(struct sock *sk, struct msghdr *msg, size_t len)
 		 */
 		connected = 1;
 	}
+
+	trace_android_vh_udp_v4_connect(sk, daddr, dport, AF_INET);
 
 	ipcm_init_sk(&ipc, inet);
 	ipc.gso_size = READ_ONCE(up->gso_size);
@@ -1574,6 +1581,8 @@ int __udp_enqueue_schedule_skb(struct sock *sk, struct sk_buff *skb)
 	spinlock_t *busy = NULL;
 	int size, rcvbuf;
 
+	trace_android_vh_udp_enqueue_schedule_skb(sk, skb);
+
 	/* Immediately drop when the receive queue is full.
 	 * Always allow at least one packet.
 	 */
@@ -1952,6 +1961,8 @@ try_again:
 	err = copied;
 	if (flags & MSG_TRUNC)
 		err = ulen;
+
+	trace_android_rvh_udp_recvmsg(sk, msg, len, flags, addr_len);
 
 	skb_consume_udp(sk, skb, peeking ? -err : err);
 	return err;
@@ -2418,6 +2429,7 @@ static int udp_unicast_rcv_skb(struct sock *sk, struct sk_buff *skb,
 	if (inet_get_convert_csum(sk) && uh->check && !IS_UDPLITE(sk))
 		skb_checksum_try_convert(skb, IPPROTO_UDP, inet_compute_pseudo);
 
+	trace_android_vh_udp_unicast_rcv_skb(skb, sk);
 	ret = udp_queue_rcv_skb(sk, skb);
 
 	/* a return value > 0 means to resubmit the input, but

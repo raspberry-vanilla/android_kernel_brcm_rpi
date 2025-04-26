@@ -1314,6 +1314,7 @@ int kvm_gfn_to_hva_cache_init(struct kvm *kvm, struct gfn_to_hva_cache *ghc,
 
 int kvm_clear_guest(struct kvm *kvm, gpa_t gpa, unsigned long len);
 struct kvm_memory_slot *gfn_to_memslot(struct kvm *kvm, gfn_t gfn);
+struct kvm_memory_slot *gfn_to_memslot_prot(struct kvm *kvm, gfn_t gfn, bool *writable);
 bool kvm_is_visible_gfn(struct kvm *kvm, gfn_t gfn);
 bool kvm_vcpu_is_visible_gfn(struct kvm_vcpu *vcpu, gfn_t gfn);
 unsigned long kvm_host_page_size(struct kvm_vcpu *vcpu, gfn_t gfn);
@@ -1639,6 +1640,31 @@ static inline void kvm_arch_end_assignment(struct kvm *kvm)
 static __always_inline bool kvm_arch_has_assigned_device(struct kvm *kvm)
 {
 	return false;
+}
+#endif
+
+#ifdef __KVM_HAVE_ARCH_ASSIGNED_DEVICE_GROUP
+int kvm_arch_assign_device(struct device *dev);
+int kvm_arch_assign_group(struct iommu_group *group);
+void kvm_arch_reclaim_device(struct device *dev);
+void kvm_arch_reclaim_group(struct iommu_group *group);
+#else
+static inline int kvm_arch_assign_device(struct device *dev)
+{
+	return 0;
+}
+
+static inline int kvm_arch_assign_group(struct iommu_group *group)
+{
+	return 0;
+}
+
+static inline void kvm_arch_reclaim_device(struct device *dev)
+{
+}
+
+static inline void kvm_arch_reclaim_group(struct iommu_group *group)
+{
 }
 #endif
 

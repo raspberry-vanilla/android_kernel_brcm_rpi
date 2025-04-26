@@ -55,6 +55,9 @@
 #include <trace/events/initcall.h>
 #define CREATE_TRACE_POINTS
 #include <trace/events/printk.h>
+#undef CREATE_TRACE_POINTS
+#include <trace/hooks/printk.h>
+#include <trace/hooks/logbuf.h>
 
 #include "printk_ringbuffer.h"
 #include "console_cmdline.h"
@@ -665,10 +668,14 @@ static ssize_t info_print_ext_header(char *buf, size_t size,
 	u64 ts_usec = info->ts_nsec;
 	char caller[20];
 #ifdef CONFIG_PRINTK_CALLER
+	int vh_ret = 0;
 	u32 id = info->caller_id;
 
-	snprintf(caller, sizeof(caller), ",caller=%c%u",
-		 id & 0x80000000 ? 'C' : 'T', id & ~0x80000000);
+	trace_android_vh_printk_ext_header(caller, sizeof(caller), id, &vh_ret);
+
+	if (!vh_ret)
+		snprintf(caller, sizeof(caller), ",caller=%c%u",
+			 id & 0x80000000 ? 'C' : 'T', id & ~0x80000000);
 #else
 	caller[0] = '\0';
 #endif
@@ -1367,9 +1374,12 @@ static size_t print_time(u64 ts, char *buf)
 static size_t print_caller(u32 id, char *buf)
 {
 	char caller[12];
+	int vh_ret = 0;
 
-	snprintf(caller, sizeof(caller), "%c%u",
-		 id & 0x80000000 ? 'C' : 'T', id & ~0x80000000);
+	trace_android_vh_printk_caller(caller, sizeof(caller), id, &vh_ret);
+	if (!vh_ret)
+		snprintf(caller, sizeof(caller), "%c%u",
+			 id & 0x80000000 ? 'C' : 'T', id & ~0x80000000);
 	return sprintf(buf, "[%6s]", caller);
 }
 #else
@@ -2138,6 +2148,12 @@ static inline void printk_delay(int level)
 
 static inline u32 printk_caller_id(void)
 {
+	u32 caller_id = 0;
+
+	trace_android_vh_printk_caller_id(&caller_id);
+	if (caller_id)
+		return caller_id;
+
 	return in_task() ? task_pid_nr(current) :
 		0x80000000 + smp_processor_id();
 }
@@ -2287,6 +2303,7 @@ int vprintk_store(int facility, int level,
 				prb_commit(&e);
 			}
 
+			trace_android_vh_logbuf_pr_cont(&r, text_len);
 			ret = text_len;
 			goto out;
 		}
@@ -2326,6 +2343,7 @@ int vprintk_store(int facility, int level,
 	else
 		prb_final_commit(&e);
 
+	trace_android_vh_logbuf(prb, &r);
 	ret = text_len + trunc_msg_len;
 out:
 	printk_exit_irqrestore(recursion_ptr, irqflags);
@@ -2350,6 +2368,22 @@ void printk_legacy_allow_panic_sync(void)
 	}
 }
 
+bool __read_mostly debug_non_panic_cpus;
+
+#ifdef CONFIG_PRINTK_CALLER
+static int __init debug_non_panic_cpus_setup(char *str)
+{
+	debug_non_panic_cpus = true;
+	pr_info("allow messages from non-panic CPUs in panic()\n");
+
+	return 0;
+}
+early_param("debug_non_panic_cpus", debug_non_panic_cpus_setup);
+module_param(debug_non_panic_cpus, bool, 0644);
+MODULE_PARM_DESC(debug_non_panic_cpus,
+		 "allow messages from non-panic CPUs in panic()");
+#endif
+
 asmlinkage int vprintk_emit(int facility, int level,
 			    const struct dev_printk_info *dev_info,
 			    const char *fmt, va_list args)
@@ -2366,7 +2400,9 @@ asmlinkage int vprintk_emit(int facility, int level,
 	 * non-panic CPUs are generating any messages, they will be
 	 * silently dropped.
 	 */
-	if (other_cpu_in_panic() && !panic_triggering_all_cpu_backtrace)
+	if (other_cpu_in_panic() &&
+	    !debug_non_panic_cpus &&
+	    !panic_triggering_all_cpu_backtrace)
 		return 0;
 
 	printk_get_console_flush_type(&ft);
@@ -2775,6 +2811,12 @@ void resume_console(void)
  */
 static int console_cpu_notify(unsigned int cpu)
 {
+	int flag = 0;
+
+	trace_android_vh_printk_hotplug(&flag);
+	if (flag)
+		return 0;
+
 	struct console_flush_type ft;
 
 	if (!cpuhp_tasks_frozen) {
@@ -4552,6 +4594,7 @@ int _printk_deferred(const char *fmt, ...)
 
 	return r;
 }
+EXPORT_SYMBOL_GPL(_printk_deferred);
 
 /*
  * printk rate limiting, lifted from the networking subsystem.
