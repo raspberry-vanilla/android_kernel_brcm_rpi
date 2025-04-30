@@ -49,6 +49,9 @@ DECLARE_RESTRICTED_HOOK(android_rvh_bitmap_find_best_next_area,
 				bool status),
 			TP_ARGS(bitmap, bitmap_maxno, start, bitmap_count, mask,
 				offset, bitmap_no, status), 1);
+DECLARE_HOOK(android_vh_madvise_cold_pageout_skip,
+	     TP_PROTO(struct vm_area_struct *vma, struct folio *folio, bool pageout, bool *need_skip),
+	     TP_ARGS(vma, folio, pageout, need_skip));
 /*
 
 DECLARE_RESTRICTED_HOOK(android_rvh_set_skip_swapcache_flags,
@@ -447,6 +450,12 @@ DECLARE_HOOK(android_vh_mm_may_oom_exit,
 DECLARE_HOOK(android_vh_calculate_totalreserve_pages,
 	TP_PROTO(bool *skip),
 	TP_ARGS(skip));
+DECLARE_HOOK(android_vh_compact_finished,
+	TP_PROTO(bool *abort_compact),
+	TP_ARGS(abort_compact));
+DECLARE_HOOK(android_vh_madvise_cold_or_pageout_abort,
+	TP_PROTO(struct vm_area_struct *vma, bool *abort_madvise),
+	TP_ARGS(vma, abort_madvise));
 #endif /* _TRACE_HOOK_MM_H */
 
 /* This part must be outside protection */

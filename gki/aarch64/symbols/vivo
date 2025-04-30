@@ -105,6 +105,7 @@
   __traceiter_android_vh_clear_rwsem_writer_owned
   __traceiter_android_vh_do_new_mount_fc
   __traceiter_android_vh_dup_task_struct
+  __traceiter_android_vh_f2fs_file_open
   __traceiter_android_vh_filemap_update_page
   __traceiter_android_vh_free_task
   __traceiter_android_vh_fuse_request_end
@@ -143,6 +144,7 @@
   __traceiter_sched_switch
   __traceiter_sched_waking
   __traceiter_task_rename
+  __traceiter_sys_exit
   __traceiter_tcp_retransmit_skb
   __traceiter_workqueue_execute_end
   __traceiter_workqueue_execute_start
@@ -184,6 +186,7 @@
   __tracepoint_android_vh_clear_rwsem_writer_owned
   __tracepoint_android_vh_do_new_mount_fc
   __tracepoint_android_vh_dup_task_struct
+  __tracepoint_android_vh_f2fs_file_open
   __tracepoint_android_vh_filemap_update_page
   __tracepoint_android_vh_free_task
   __tracepoint_android_vh_fuse_request_end
@@ -222,6 +225,7 @@
   __tracepoint_sched_switch
   __tracepoint_sched_waking
   __tracepoint_task_rename
+  __tracepoint_sys_exit
   __tracepoint_tcp_retransmit_skb
   __tracepoint_workqueue_execute_end
   __tracepoint_workqueue_execute_start
