@@ -2684,11 +2684,11 @@ static int apply_to_pte_range(struct mm_struct *mm, pmd_t *pmd,
 	if (fn) {
 		do {
 			if (create || !pte_none(*pte)) {
-				err = fn(pte++, addr, data);
+				err = fn(pte, addr, data);
 				if (err)
 					break;
 			}
-		} while (addr += PAGE_SIZE, addr != end);
+		} while (pte++, addr += PAGE_SIZE, addr != end);
 	}
 	*mask |= PGTBL_PTE_MODIFIED;
 
@@ -3563,6 +3563,7 @@ static vm_fault_t do_wp_page(struct vm_fault *vmf)
 		 * sunglasses. Hit it.
 		 */
 		page_move_anon_rmap(vmf->page, vma);
+		SetPageAnonExclusive(vmf->page);
 		folio_unlock(folio);
 reuse:
 		if (unlikely(unshare)) {
