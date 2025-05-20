@@ -1840,8 +1840,6 @@ static int vchiq_probe(struct platform_device *pdev)
 	if (ret)
 		goto failed_platform_init;
 
-	vchiq_debugfs_init(&mgmt->state);
-
 	dev_dbg(&pdev->dev, "arm: platform initialised - version %d (min %d)\n",
 		VCHIQ_VERSION, VCHIQ_VERSION_MIN);
 
@@ -1854,6 +1852,8 @@ static int vchiq_probe(struct platform_device *pdev)
 		dev_err(&pdev->dev, "arm: Failed to initialize vchiq cdev\n");
 		goto error_exit;
 	}
+
+	vchiq_debugfs_init(&mgmt->state);
 
 	vcsm_cma = vchiq_device_register(&pdev->dev, "vcsm-cma");
 	bcm2835_codec = vchiq_device_register(&pdev->dev, "bcm2835-codec");
