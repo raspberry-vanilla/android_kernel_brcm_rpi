@@ -6363,7 +6363,7 @@ CONFIG_IIO_ST_MAGN_SPI_3AXIS=y
 # CONFIG_MCP4018 is not set
 # CONFIG_MCP4131 is not set
 # CONFIG_MCP4531 is not set
-# CONFIG_MCP41010 is not set
+CONFIG_MCP41010=y
 # CONFIG_TPL0102 is not set
 # CONFIG_X9250 is not set
 # end of Digital potentiometers
