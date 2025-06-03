@@ -3288,6 +3288,17 @@ Params: addr                    I2C bus address of device, for devices with
         mcp3428                 The device is an MCP3428
 
 
+Name:   mcp41010
+Info:   Configures Microchip MCP41xxx/MCP42xxx digital potentiometers over SPI
+        as an IIO device.
+Load:   dtoverlay=mcp41010,<param>
+Params: mcp41050                Select the MCP41050 device
+        mcp41100                Select the MCP41100 device
+        mcp42010                Select the MCP42010 device
+        mcp42050                Select the MCP42050 device
+        mcp42100                Select the MCP42100 device
+
+
 Name:   media-center
 Info:   Media Center HAT - 2.83" Touch Display + extras by Pi Supply
 Load:   dtoverlay=media-center,<param>=<val>

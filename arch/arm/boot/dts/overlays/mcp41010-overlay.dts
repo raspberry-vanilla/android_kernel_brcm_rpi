@@ -1,0 +1,42 @@
+/*
+ * Device Tree overlay for Microchip MCP41xxx/MCP42xxx digital potentiometers
+ */
+
+/dts-v1/;
+/plugin/;
+
+/ {
+	compatible = "brcm,bcm2835";
+
+	fragment@0 {
+		target = <&spidev0>;
+		__overlay__ {
+			status = "disabled";
+		};
+	};
+
+	fragment@1 {
+		target = <&spi0>;
+		__overlay__ {
+			/* needed to avoid dtc warning */
+			#address-cells = <1>;
+			#size-cells = <0>;
+
+			status = "okay";
+
+			mcp4xxxx: mcp4xxxx@0 {
+				compatible = "microchip,mcp41010";
+				reg = <0>;
+				spi-max-frequency = <500000>;
+			};
+		};
+	};
+
+	__overrides__ {
+		mcp41050 = <&mcp4xxxx>,"compatible=microchip,mcp41050";
+		mcp41100 = <&mcp4xxxx>,"compatible=microchip,mcp41100";
+		mcp42010 = <&mcp4xxxx>,"compatible=microchip,mcp42010";
+		mcp42050 = <&mcp4xxxx>,"compatible=microchip,mcp42050";
+		mcp42100 = <&mcp4xxxx>,"compatible=microchip,mcp42100";
+	};
+};

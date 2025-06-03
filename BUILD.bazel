@@ -969,6 +969,7 @@ _RPI_OVERLAY_OUTS = [
     "arch/arm64/boot/dts/overlays/mcp3008.dtbo",
     "arch/arm64/boot/dts/overlays/mcp3202.dtbo",
     "arch/arm64/boot/dts/overlays/mcp342x.dtbo",
+    "arch/arm64/boot/dts/overlays/mcp41010.dtbo",
     "arch/arm64/boot/dts/overlays/media-center.dtbo",
     "arch/arm64/boot/dts/overlays/merus-amp.dtbo",
     "arch/arm64/boot/dts/overlays/midi-uart0.dtbo",

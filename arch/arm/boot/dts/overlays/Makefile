@@ -171,6 +171,7 @@ dtbo-$(CONFIG_ARCH_BCM2835) += \
 	mcp3008.dtbo \
 	mcp3202.dtbo \
 	mcp342x.dtbo \
+	mcp41010.dtbo \
 	media-center.dtbo \
 	merus-amp.dtbo \
 	midi-uart0.dtbo \
