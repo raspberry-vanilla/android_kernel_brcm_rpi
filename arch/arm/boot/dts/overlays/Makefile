@@ -191,6 +191,7 @@ dtbo-$(CONFIG_ARCH_BCM2835) += \
 	minipitft13.dtbo \
 	miniuart-bt.dtbo \
 	mipi-dbi-spi.dtbo \
+	mira220.dtbo \
 	mlx90640.dtbo \
 	mmc.dtbo \
 	mz61581.dtbo \
@@ -254,10 +255,8 @@ dtbo-$(CONFIG_ARCH_BCM2835) += \
 	rra-digidac1-wm8741-audio.dtbo \
 	sainsmart18.dtbo \
 	sc16is750-i2c.dtbo \
-	sc16is750-spi0.dtbo \
 	sc16is752-i2c.dtbo \
-	sc16is752-spi0.dtbo \
-	sc16is752-spi1.dtbo \
+	sc16is75x-spi.dtbo \
 	sdhost.dtbo \
 	sdio.dtbo \
 	sdio-pi5.dtbo \
