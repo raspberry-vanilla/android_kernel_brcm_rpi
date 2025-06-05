@@ -461,7 +461,14 @@ static int __init_memblock memblock_double_array(struct memblock_type *type,
 				min(new_area_start, memblock.current_limit),
 				new_alloc_size, PAGE_SIZE);
 
-		new_array = addr ? __va(addr) : NULL;
+		if (addr) {
+			/* The memory may not have been accepted, yet. */
+			accept_memory(addr, new_alloc_size);
+
+			new_array = __va(addr);
+		} else {
+			new_array = NULL;
+		}
 	}
 	if (!addr) {
 		pr_err("memblock: Failed to double %s array from %ld to %ld entries !\n",
@@ -924,6 +931,9 @@ int __init_memblock memblock_phys_free(phys_addr_t base, phys_addr_t size)
 	kmemleak_free_part_phys(base, size);
 	return memblock_remove_range(&memblock.reserved, base, size);
 }
+#ifdef CONFIG_ARCH_KEEP_MEMBLOCK
+EXPORT_SYMBOL_GPL(memblock_free);
+#endif
 
 int __init_memblock memblock_reserve(phys_addr_t base, phys_addr_t size)
 {
