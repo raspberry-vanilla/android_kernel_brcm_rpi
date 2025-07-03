@@ -449,6 +449,9 @@
 	arm64.nomops	[ARM64] Unconditionally disable Memory Copy and Memory
 			Set instructions support
 
+	arm64.nompam	[ARM64] Unconditionally disable Memory Partitioning And
+			Monitoring support
+
 	arm64.nomte	[ARM64] Unconditionally disable Memory Tagging Extension
 			support
 
@@ -1538,6 +1541,10 @@
 			Format: { "fix" }
 			Permit 'security.evm' to be updated regardless of
 			current integrity status.
+	export_pmu_events
+			[KNL,ARM64] Sets the PMU export bit (PMCR_EL0.X), which enables
+			the exporting of events over an IMPLEMENTATION DEFINED PMU event
+			export bus to another device.
 
 	early_page_ext [KNL,EARLY] Enforces page_ext initialization to earlier
 			stages so cover more early boot allocations.
@@ -6315,6 +6322,8 @@
 
 			Selecting 'on' will also enable the mitigation
 			against user space to user space task attacks.
+			Selecting specific mitigation does not force enable
+			user mitigations.
 
 			Selecting 'off' will disable both the kernel and
 			the user space protections.

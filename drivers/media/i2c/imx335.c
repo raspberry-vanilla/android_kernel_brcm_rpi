@@ -615,12 +615,14 @@ static int imx335_set_ctrl(struct v4l2_ctrl *ctrl)
 			imx335->vblank,
 			imx335->vblank + imx335->cur_mode->height);
 
-		__v4l2_ctrl_modify_range(imx335->exp_ctrl,
-					 IMX335_EXPOSURE_MIN,
-					 imx335->vblank +
-					 imx335->cur_mode->height -
-					 IMX335_EXPOSURE_OFFSET,
-					 1, IMX335_EXPOSURE_DEFAULT);
+		ret = __v4l2_ctrl_modify_range(imx335->exp_ctrl,
+					       IMX335_EXPOSURE_MIN,
+					       imx335->vblank +
+					       imx335->cur_mode->height -
+					       IMX335_EXPOSURE_OFFSET,
+					       1, IMX335_EXPOSURE_DEFAULT);
+		if (ret)
+			return ret;
 	}
 
 	/*
