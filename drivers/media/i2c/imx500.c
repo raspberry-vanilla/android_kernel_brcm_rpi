@@ -239,6 +239,7 @@ enum pad_types { IMAGE_PAD, METADATA_PAD, NUM_PADS };
 
 #define V4L2_CID_USER_IMX500_INFERENCE_WINDOW (V4L2_CID_USER_IMX500_BASE + 0)
 #define V4L2_CID_USER_IMX500_NETWORK_FW_FD (V4L2_CID_USER_IMX500_BASE + 1)
+#define V4L2_CID_USER_GET_IMX500_DEVICE_ID (V4L2_CID_USER_IMX500_BASE + 2)
 
 #define ONE_MIB (1024 * 1024)
 
@@ -1365,6 +1366,7 @@ struct imx500 {
 	struct v4l2_ctrl *vblank;
 	struct v4l2_ctrl *hblank;
 	struct v4l2_ctrl *network_fw_ctrl;
+	struct v4l2_ctrl *device_id;
 
 	struct v4l2_rect inference_window;
 
@@ -1579,6 +1581,25 @@ static int imx500_set_inference_window(struct imx500 *imx500)
 				   ARRAY_SIZE(window_regs), NULL);
 }
 
+static int imx500_get_device_id(struct imx500 *imx500, u32 *device_id)
+{
+	const u32 addr = 0xd040;
+	unsigned int i;
+	int ret = 0;
+	u64 tmp, data;
+
+	for (i = 0; i < 4; i++) {
+		ret = cci_read(imx500->regmap, CCI_REG32(addr + i * 4), &tmp,
+			       NULL);
+		if (ret)
+			return -EREMOTEIO;
+		data = tmp & 0xffffffff;
+		device_id[i] = data;
+	}
+
+	return ret;
+}
+
 static int imx500_reg_val_write_cbk(void *arg,
 				    const struct cci_reg_sequence *reg)
 {
@@ -1619,6 +1640,7 @@ static int imx500_validate_fw_block(const char *data, size_t maxlen)
 	static const char footer_id[] = { '3', '6', '9', '5' };
 
 	u32 data_size;
+	u32 extra_bytes_size = 0;
 
 	const char *end = data + maxlen;
 
@@ -1635,13 +1657,16 @@ static int imx500_validate_fw_block(const char *data, size_t maxlen)
 	memcpy(&data_size, data + sizeof(header_id), sizeof(data_size));
 	data_size = ___constant_swab32(data_size);
 
-	if (end - data_size - footer_size < data)
+	/* check the device_lock flag */
+	extra_bytes_size = *((u8 *)(data + 0x0e)) & 0x01 ? 32 : 0;
+
+	if (end - data_size - footer_size - extra_bytes_size < data)
 		return -1;
 	if (memcmp(data + data_size + footer_size - sizeof(footer_id),
 		   &footer_id, sizeof(footer_id)))
 		return -1;
 
-	return data_size + footer_size;
+	return data_size + footer_size + extra_bytes_size;
 }
 
 /* Parse fw block by block, returning total valid fw size */
@@ -1875,6 +1900,7 @@ static void imx500_clear_fw_network(struct imx500 *imx500)
 	imx500->fw_network = NULL;
 	imx500->network_written = false;
 	imx500->fw_progress = 0;
+	v4l2_ctrl_activate(imx500->device_id, false);
 }
 
 static int imx500_set_ctrl(struct v4l2_ctrl *ctrl)
@@ -1997,7 +2023,31 @@ static int imx500_set_ctrl(struct v4l2_ctrl *ctrl)
 	return ret;
 }
 
+static int imx500_get_ctrl(struct v4l2_ctrl *ctrl)
+{
+	struct imx500 *imx500 = container_of(ctrl->handler, struct imx500,
+					     ctrl_handler);
+	struct i2c_client *client = v4l2_get_subdevdata(&imx500->sd);
+	u32 device_id[4] = {0};
+	int ret;
+
+	switch (ctrl->id) {
+	case V4L2_CID_USER_GET_IMX500_DEVICE_ID:
+		ret = imx500_get_device_id(imx500, device_id);
+		memcpy(ctrl->p_new.p_u32, device_id, sizeof(device_id));
+		break;
+	default:
+		dev_info(&client->dev, "ctrl(id:0x%x,val:0x%x) is not handled\n",
+			 ctrl->id, ctrl->val);
+		ret = -EINVAL;
+		break;
+	}
+
+	return ret;
+}
+
 static const struct v4l2_ctrl_ops imx500_ctrl_ops = {
+	.g_volatile_ctrl = imx500_get_ctrl,
 	.s_ctrl = imx500_set_ctrl,
 };
 
@@ -2362,9 +2412,11 @@ static int imx500_state_transition(struct imx500 *imx500, const u8 *fw,
 		}
 
 		/* Do SPI transfer */
-		gpiod_set_value_cansleep(imx500->led_gpio, 1);
+		if (imx500->led_gpio)
+			gpiod_set_value_cansleep(imx500->led_gpio, 1);
 		ret = imx500_spi_write(imx500, data, size);
-		gpiod_set_value_cansleep(imx500->led_gpio, 0);
+		if (imx500->led_gpio)
+			gpiod_set_value_cansleep(imx500->led_gpio, 0);
 
 		imx500->fw_progress += size;
 
@@ -2522,7 +2574,7 @@ static int imx500_start_streaming(struct imx500 *imx500)
 	if (ret) {
 		dev_err(&client->dev, "%s failed to set image mode\n",
 			__func__);
-		return ret;
+		goto err_runtime_put;
 	}
 
 	/* Acquire loader and main firmware if needed */
@@ -2534,7 +2586,7 @@ static int imx500_start_streaming(struct imx500 *imx500)
 			if (ret) {
 				dev_err(&client->dev,
 					"Unable to acquire firmware loader\n");
-				return ret;
+				goto err_runtime_put;
 			}
 		}
 		if (!imx500->fw_main) {
@@ -2544,7 +2596,7 @@ static int imx500_start_streaming(struct imx500 *imx500)
 			if (ret) {
 				dev_err(&client->dev,
 					"Unable to acquire main firmware\n");
-				return ret;
+				goto err_runtime_put;
 			}
 		}
 	}
@@ -2556,7 +2608,7 @@ static int imx500_start_streaming(struct imx500 *imx500)
 		if (ret) {
 			dev_err(&client->dev,
 				"%s failed to set common settings\n", __func__);
-			return ret;
+			goto err_runtime_put;
 		}
 
 		imx500->common_regs_written = true;
@@ -2568,7 +2620,7 @@ static int imx500_start_streaming(struct imx500 *imx500)
 			dev_err(&client->dev,
 				"%s failed to transition from program empty state\n",
 				__func__);
-			return ret;
+			goto err_runtime_put;
 		}
 		imx500->loader_and_main_written = true;
 	}
@@ -2579,7 +2631,7 @@ static int imx500_start_streaming(struct imx500 *imx500)
 			dev_err(&client->dev,
 				"%s failed to transition to network loaded\n",
 				__func__);
-			return ret;
+			goto err_runtime_put;
 		}
 		imx500->network_written = true;
 	}
@@ -2590,8 +2642,10 @@ static int imx500_start_streaming(struct imx500 *imx500)
 		if (ret) {
 			dev_err(&client->dev, "%s failed to enable DNN\n",
 				__func__);
-			return ret;
+			goto err_runtime_put;
 		}
+
+		v4l2_ctrl_activate(imx500->device_id, true);
 	}
 
 	/* Apply default values of current mode */
@@ -2600,7 +2654,7 @@ static int imx500_start_streaming(struct imx500 *imx500)
 				  reg_list->num_of_regs, NULL);
 	if (ret) {
 		dev_err(&client->dev, "%s failed to set mode\n", __func__);
-		return ret;
+		goto err_runtime_put;
 	}
 
 	/* Apply customized values from user */
@@ -2616,6 +2670,14 @@ static int imx500_start_streaming(struct imx500 *imx500)
 	cci_write(imx500->regmap, IMX500_REG_MODE_SELECT, IMX500_MODE_STREAMING,
 		  &ret);
 
+	if (ret)
+		goto err_runtime_put;
+
+	return 0;
+
+err_runtime_put:
+	pm_runtime_mark_last_busy(&client->dev);
+	pm_runtime_put_autosuspend(&client->dev);
 	return ret;
 }
 
@@ -2688,11 +2750,28 @@ static int imx500_power_on(struct device *dev)
 	struct imx500 *imx500 = to_imx500(sd);
 	int ret;
 
+	/* Acquire GPIOs first to ensure reset is asserted before power is applied */
+	imx500->led_gpio = devm_gpiod_get_optional(dev, "led", GPIOD_OUT_LOW);
+	if (IS_ERR(imx500->led_gpio)) {
+		ret = PTR_ERR(imx500->led_gpio);
+		dev_err(&client->dev, "%s: failed to get led gpio\n", __func__);
+		return ret;
+	}
+
+	imx500->reset_gpio =
+		devm_gpiod_get_optional(dev, "reset", GPIOD_OUT_HIGH);
+	if (IS_ERR(imx500->reset_gpio)) {
+		ret = PTR_ERR(imx500->reset_gpio);
+		dev_err(&client->dev, "%s: failed to get reset gpio\n",
+			__func__);
+		goto gpio_led_put;
+	}
+
 	ret = regulator_bulk_enable(IMX500_NUM_SUPPLIES, imx500->supplies);
 	if (ret) {
 		dev_err(&client->dev, "%s: failed to enable regulators\n",
 			__func__);
-		return ret;
+		goto gpio_reset_put;
 	}
 
 	/* T4 - 1us
@@ -2712,7 +2791,8 @@ static int imx500_power_on(struct device *dev)
 	 * as 0ms but also "XCLR pin should be set to 'High' after INCK supplied.".
 	 * T4 and T5 are shown as overlapping.
 	 */
-	gpiod_set_value_cansleep(imx500->reset_gpio, 1);
+	if (imx500->reset_gpio)
+		gpiod_set_value_cansleep(imx500->reset_gpio, 1);
 
 	/* T7 - 9ms
 	 * "INCK start and CXLR rising till Send Streaming Command wait time"
@@ -2723,6 +2803,16 @@ static int imx500_power_on(struct device *dev)
 
 reg_off:
 	regulator_bulk_disable(IMX500_NUM_SUPPLIES, imx500->supplies);
+gpio_reset_put:
+	if (imx500->reset_gpio) {
+		devm_gpiod_put(dev, imx500->reset_gpio);
+		imx500->reset_gpio = NULL;
+	}
+gpio_led_put:
+	if (imx500->led_gpio) {
+		devm_gpiod_put(dev, imx500->led_gpio);
+		imx500->led_gpio = NULL;
+	}
 	return ret;
 }
 
@@ -2739,7 +2829,19 @@ static int imx500_power_off(struct device *dev)
 	 * Note, this is not the reverse order of power up.
 	 */
 	clk_disable_unprepare(imx500->xclk);
-	gpiod_set_value_cansleep(imx500->reset_gpio, 0);
+	if (imx500->reset_gpio)
+		gpiod_set_value_cansleep(imx500->reset_gpio, 0);
+
+	/* Release GPIOs before disabling regulators */
+	if (imx500->reset_gpio) {
+		devm_gpiod_put(&client->dev, imx500->reset_gpio);
+		imx500->reset_gpio = NULL;
+	}
+	if (imx500->led_gpio) {
+		devm_gpiod_put(&client->dev, imx500->led_gpio);
+		imx500->led_gpio = NULL;
+	}
+
 	regulator_bulk_disable(IMX500_NUM_SUPPLIES, imx500->supplies);
 
 	/* Force reprogramming of the common registers when powered up again. */
@@ -2846,6 +2948,22 @@ static const struct v4l2_ctrl_config network_fw_fd = {
 	.def		= -1,
 };
 
+/* Custom control to get camera device id */
+static const struct v4l2_ctrl_config cam_get_device_id = {
+	.name		= "Get IMX500 Device ID",
+	.id		= V4L2_CID_USER_GET_IMX500_DEVICE_ID,
+	.dims[0]	= 4,
+	.ops		= &imx500_ctrl_ops,
+	.type		= V4L2_CTRL_TYPE_U32,
+	.flags		= V4L2_CTRL_FLAG_READ_ONLY | V4L2_CTRL_FLAG_VOLATILE |
+			  V4L2_CTRL_FLAG_INACTIVE,
+	.elem_size	= sizeof(u32),
+	.min		= 0x00,
+	.max		= U32_MAX,
+	.step		= 1,
+	.def		= 0,
+};
+
 /* Initialize control handlers */
 static int imx500_init_controls(struct imx500 *imx500)
 {
@@ -2909,6 +3027,8 @@ static int imx500_init_controls(struct imx500 *imx500)
 	v4l2_ctrl_new_custom(ctrl_hdlr, &inf_window_ctrl, NULL);
 	imx500->network_fw_ctrl =
 		v4l2_ctrl_new_custom(ctrl_hdlr, &network_fw_fd, NULL);
+	imx500->device_id =
+		v4l2_ctrl_new_custom(ctrl_hdlr, &cam_get_device_id, NULL);
 
 	if (ctrl_hdlr->error) {
 		ret = ctrl_hdlr->error;
@@ -3057,14 +3177,14 @@ static int imx500_probe(struct i2c_client *client)
 		return ret;
 	}
 
-	imx500->led_gpio = devm_gpiod_get_optional(dev, "led", GPIOD_OUT_LOW);
-
-	imx500->reset_gpio =
-		devm_gpiod_get_optional(dev, "reset", GPIOD_OUT_HIGH);
+	/* GPIOs are acquired in imx500_power_on() to avoid preventing
+	 * regulator power down when shared with other drivers.
+	 */
 
 	/*
 	 * The sensor must be powered for imx500_identify_module()
-	 * to be able to read the CHIP_ID register
+	 * to be able to read the CHIP_ID register. This also ensures
+	 * GPIOs are available.
 	 */
 	ret = imx500_power_on(dev);
 	if (ret)

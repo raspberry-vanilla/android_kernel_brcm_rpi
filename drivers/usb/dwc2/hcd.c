@@ -2469,10 +2469,23 @@ static int dwc2_alloc_dma_aligned_buffer(struct urb *urb, gfp_t mem_flags)
 {
 	void *kmalloc_ptr;
 	size_t kmalloc_size;
+	bool small_ctrl;
 
-	if (urb->num_sgs || urb->sg ||
-	    urb->transfer_buffer_length == 0 ||
-	    !((uintptr_t)urb->transfer_buffer & (DWC2_USB_DMA_ALIGN - 1)))
+	if (urb->num_sgs || urb->sg || urb->transfer_buffer_length == 0)
+		return 0;
+
+	/*
+	 * Hardware bug: small IN packets with length < 4 cause a
+	 * 4-byte write to memory. This is only an issue for drivers that
+	 * insist on packing a device's various properties into a struct
+	 * and filling them one at a time with Control transfers (uvcvideo).
+	 * Force the use of align_buf so that the subsequent memcpy puts
+	 * the right number of bytes in the URB's buffer.
+	 */
+	small_ctrl = (urb->setup_packet &&
+		     le16_to_cpu(((struct usb_ctrlrequest *)(urb->setup_packet))->wLength) < 4);
+
+	if (!small_ctrl && !((uintptr_t)urb->transfer_buffer & (DWC2_USB_DMA_ALIGN - 1)))
 		return 0;
 
 	/*
@@ -2620,6 +2633,10 @@ static int dwc2_assign_and_init_hc(struct dwc2_hsotg *hsotg, struct dwc2_qh *qh)
 		dwc2_hc_init_split(hsotg, chan, qtd, urb);
 	else
 		chan->do_split = 0;
+
+	/* Limit split IN transfers to the remaining buffer space */
+	if (qh->do_split && chan->ep_is_in)
+		chan->max_packet = min_t(u32, chan->max_packet, chan->xfer_len);
 
 	/* Set the transfer attributes */
 	dwc2_hc_init_xfer(hsotg, chan, qtd);
@@ -4526,8 +4543,13 @@ unlock:
 static int _dwc2_hcd_get_frame_number(struct usb_hcd *hcd)
 {
 	struct dwc2_hsotg *hsotg = dwc2_hcd_to_hsotg(hcd);
+	u32 hprt0 = dwc2_readl(hsotg, HPRT0);
 
-	return dwc2_hcd_get_frame_number(hsotg);
+	/* HS root port counts microframes, not frames */
+	if ((hprt0 & HPRT0_SPD_MASK) >> HPRT0_SPD_SHIFT == HPRT0_SPD_HIGH_SPEED)
+		return dwc2_hcd_get_frame_number(hsotg) >> 3;
+	else
+		return dwc2_hcd_get_frame_number(hsotg);
 }
 
 static void dwc2_dump_urb_info(struct usb_hcd *hcd, struct urb *urb,
