@@ -851,8 +851,11 @@ static void cfe_start_channel(struct cfe_node *node)
 		width = source_fmt->width;
 		height = source_fmt->height;
 
-		/* Must have a valid CSI2 datatype. */
-		WARN_ON(!fmt->csi_dt);
+		/*
+		 * Must have a valid CSI2 datatype, but it will be 0 for 16-bit
+		 * formats to work-around the HW mismatch.
+		 */
+		WARN_ON(fmt->depth != 16 && !fmt->csi_dt);
 
 		/*
 		 * Start the associated CSI2 Channel as well.
@@ -884,7 +887,9 @@ static void cfe_start_channel(struct cfe_node *node)
 			width = source_fmt->width;
 			height = source_fmt->height;
 
-			if (node->vid_fmt.fmt.pix.pixelformat ==
+			/* We don't need to repack in the case of 16-bit output. */
+			if (fmt->depth != 16 &&
+			    node->vid_fmt.fmt.pix.pixelformat ==
 					fmt->remap[CFE_REMAP_16BIT])
 				mode = CSI2_MODE_REMAP;
 			else if (node->vid_fmt.fmt.pix.pixelformat ==
