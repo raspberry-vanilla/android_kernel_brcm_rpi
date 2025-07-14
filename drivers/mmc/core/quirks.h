@@ -57,6 +57,12 @@ static const struct mmc_fixup __maybe_unused mmc_sd_fixups[] = {
 		   MMC_QUIRK_NO_UHS_DDR50_TUNING, EXT_CSD_REV_ANY),
 
 	/*
+	 * Some SD cards reports discard support while they don't
+	 */
+	MMC_FIXUP(CID_NAME_ANY, CID_MANFID_SANDISK_SD, 0x5344, add_quirk_sd,
+		  MMC_QUIRK_BROKEN_SD_DISCARD),
+
+	/*
 	 * Samsung Pro Plus/EVO Plus/Pro Ultimate SD cards (2023) claim to cache
 	 * flush OK, but become unresponsive afterwards.
 	 */
