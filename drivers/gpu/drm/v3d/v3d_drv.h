@@ -122,6 +122,12 @@ enum v3d_gen {
 	V3D_GEN_71 = 71,
 };
 
+enum v3d_irq {
+	V3D_CORE_IRQ,
+	V3D_HUB_IRQ,
+	V3D_MAX_IRQS,
+};
+
 struct v3d_dev {
 	struct drm_device drm;
 
@@ -130,6 +136,8 @@ struct v3d_dev {
 	 */
 	enum v3d_gen ver;
 	bool single_irq_line;
+
+	int irq[V3D_MAX_IRQS];
 
 	void __iomem *hub_regs;
 	void __iomem *core_regs[3];
