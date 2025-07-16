@@ -1,6 +1,6 @@
 #
 # Automatically generated file; DO NOT EDIT.
-# Linux/arm64 6.12.37 Kernel Configuration
+# Linux/arm64 6.12.38 Kernel Configuration
 #
 CONFIG_CC_VERSION_TEXT="Android (12833971, +pgo, +bolt, +lto, +mlgo, based on r536225) clang version 19.0.1 (https://android.googlesource.com/toolchain/llvm-project b3a530ec6537146650e42be89f1089e9a3588460)"
 CONFIG_GCC_VERSION=0
@@ -7690,6 +7690,7 @@ CONFIG_HAVE_HARDLOCKUP_DETECTOR_BUDDY=y
 CONFIG_DETECT_HUNG_TASK=y
 CONFIG_DEFAULT_HUNG_TASK_TIMEOUT=120
 # CONFIG_BOOTPARAM_HUNG_TASK_PANIC is not set
+# CONFIG_DETECT_HUNG_TASK_BLOCKER is not set
 # CONFIG_WQ_WATCHDOG is not set
 # CONFIG_WQ_CPU_INTENSIVE_REPORT is not set
 # CONFIG_TEST_LOCKUP is not set
