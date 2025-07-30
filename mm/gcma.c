@@ -13,6 +13,7 @@
 #include <linux/idr.h>
 #include <linux/slab.h>
 #include <linux/xarray.h>
+#include <trace/hooks/mm.h>
 #include "gcma_sysfs.h"
 
 /*
@@ -306,6 +307,7 @@ int register_gcma_area(const char *name, phys_addr_t base, phys_addr_t size)
 	INIT_LIST_HEAD(&area->free_pages);
 	spin_lock_init(&area->free_pages_lock);
 
+	gcma_stat_add(TOTAL_PAGE, page_count);
 	for (i = 0; i < page_count; i++) {
 		page = pfn_to_page(pfn + i);
 		set_area_id(page, area_id);
@@ -620,6 +622,7 @@ void gcma_alloc_range(unsigned long start_pfn, unsigned long end_pfn)
 
 		__gcma_discard_range(area, s_pfn, e_pfn);
 	}
+	gcma_stat_add(ALLOCATED_PAGE, end_pfn - start_pfn + 1);
 }
 EXPORT_SYMBOL_GPL(gcma_alloc_range);
 
@@ -658,6 +661,7 @@ void gcma_free_range(unsigned long start_pfn, unsigned long end_pfn)
 	}
 
 	local_irq_enable();
+	gcma_stat_sub(ALLOCATED_PAGE, end_pfn - start_pfn + 1);
 }
 EXPORT_SYMBOL_GPL(gcma_free_range);
 
@@ -747,7 +751,11 @@ static void gcma_cc_store_page(int hash_id, struct cleancache_filekey key,
 	void *src, *dst;
 	bool is_new = false;
 	bool workingset = PageWorkingset(page);
+	bool bypass = false;
 
+	trace_android_vh_gcma_cc_store_page_bypass(&bypass);
+	if (bypass)
+		return;
 	/*
 	 * This cleancache function is called under irq disabled so every
 	 * locks in this function should take of the irq if they are
