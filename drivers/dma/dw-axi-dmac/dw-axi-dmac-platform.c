@@ -809,7 +809,7 @@ static int dw_axi_dma_set_hw_desc(struct axi_dma_chan *chan,
 	ctlhi = CH_CTL_H_LLI_VALID;
 
 	if (chan->chip->dw->hdata->restrict_axi_burst_len) {
-		burst_len = chan->chip->dw->hdata->axi_rw_burst_len;
+		burst_len = chan->chip->dw->hdata->axi_rw_burst_len[chan->id];
 		ctlhi |= CH_CTL_H_ARLEN_EN | CH_CTL_H_AWLEN_EN |
 			 burst_len << CH_CTL_H_ARLEN_POS |
 			 burst_len << CH_CTL_H_AWLEN_POS;
@@ -1087,7 +1087,7 @@ dma_chan_prep_dma_memcpy(struct dma_chan *dchan, dma_addr_t dst_adr,
 
 		reg = CH_CTL_H_LLI_VALID;
 		if (chan->chip->dw->hdata->restrict_axi_burst_len) {
-			u32 burst_len = chan->chip->dw->hdata->axi_rw_burst_len;
+			u32 burst_len = chan->chip->dw->hdata->axi_rw_burst_len[chan->id];
 
 			reg |= (CH_CTL_H_ARLEN_EN |
 				burst_len << CH_CTL_H_ARLEN_POS |
@@ -1476,19 +1476,56 @@ static int __maybe_unused axi_dma_runtime_resume(struct device *dev)
 	return axi_dma_resume(chip);
 }
 
+static void dw_axi_dma_device_caps(struct dma_chan *dchan,
+				   struct dma_slave_caps *caps)
+{
+	struct axi_dma_chan *chan = dchan_to_axi_dma_chan(dchan);
+	struct dw_axi_dma *dw = chan->chip->dw;
+
+	if (dw->hdata->restrict_axi_burst_len)
+		caps->max_burst = dw->hdata->axi_rw_burst_len[chan->id];
+}
+
+static bool dw_axi_dma_filter_fn(struct dma_chan *dchan, void *filter_param)
+{
+	struct axi_dma_chan *chan = dchan_to_axi_dma_chan(dchan);
+	uint32_t selector = *(const uint32_t *)filter_param;
+
+	return !!(selector & (1 << chan->id));
+}
+
 static struct dma_chan *dw_axi_dma_of_xlate(struct of_phandle_args *dma_spec,
 					    struct of_dma *ofdma)
 {
 	struct dw_axi_dma *dw = ofdma->of_dma_data;
 	struct axi_dma_chan *chan;
 	struct dma_chan *dchan;
+	uint32_t chan_mask = 0;
+	uint32_t chan_sel;
+	dma_cap_mask_t mask;
+	int i;
 
-	dchan = dma_get_any_slave_channel(&dw->dma);
+	/*
+	 * Walk through all channels looking for the best match.
+	 * Starting from 0, choose the first available slave channel which isn't precluded.
+	 */
+	chan_sel = dma_spec->args[0];
+
+	for (i = 0; i < dw->hdata->nr_channels; i++) {
+		if (((dw->sel_precluded[i] & chan_sel) == 0) &&
+		    ((dw->sel_required[i] & chan_sel) == dw->sel_required[i]))
+			chan_mask |= (1 << i);
+	}
+
+	dma_cap_zero(mask);
+	dma_cap_set(DMA_SLAVE, mask);
+
+	dchan = __dma_request_channel(&mask, dw_axi_dma_filter_fn, &chan_mask, ofdma->of_node);
 	if (!dchan)
 		return NULL;
 
 	chan = dchan_to_axi_dma_chan(dchan);
-	chan->hw_handshake_num = dma_spec->args[0];
+	chan->hw_handshake_num = (u8)chan_sel;
 	return dchan;
 }
 
@@ -1496,6 +1533,7 @@ static int parse_device_properties(struct axi_dma_chip *chip)
 {
 	struct device *dev = chip->dev;
 	u32 tmp, carr[DMAC_MAX_CHANNELS];
+	u32 val;
 	int ret;
 
 	ret = device_property_read_u32(dev, "dma-channels", &tmp);
@@ -1552,16 +1590,34 @@ static int parse_device_properties(struct axi_dma_chip *chip)
 	}
 
 	/* axi-max-burst-len is optional property */
-	ret = device_property_read_u32(dev, "snps,axi-max-burst-len", &tmp);
-	if (!ret) {
-		if (tmp > DWAXIDMAC_ARWLEN_MAX + 1)
-			return -EINVAL;
-		if (tmp < DWAXIDMAC_ARWLEN_MIN + 1)
-			return -EINVAL;
-
+	ret = device_property_read_u32_array(dev, "snps,axi-max-burst-len", NULL,
+					     chip->dw->hdata->nr_channels);
+	if ((ret > 0) &&
+	    !device_property_read_u32_array(dev, "snps,axi-max-burst-len",
+					    carr, ret)) {
 		chip->dw->hdata->restrict_axi_burst_len = true;
-		chip->dw->hdata->axi_rw_burst_len = tmp;
+		for (tmp = 0; tmp < chip->dw->hdata->nr_channels; tmp++) {
+			// Replicate the last value to any remaining channels
+			val = carr[min(tmp, (u32)ret - 1)];
+			if (val > DWAXIDMAC_ARWLEN_MAX + 1)
+				return -EINVAL;
+			if (val < DWAXIDMAC_ARWLEN_MIN + 1)
+				return -EINVAL;
+			chip->dw->hdata->axi_rw_burst_len[tmp] = val;
+		}
 	}
+
+	/* sel-require is optional */
+	memset(chip->dw->sel_required, 0, sizeof(chip->dw->sel_required));
+	device_property_read_u32_array(dev, "snps,sel-require",
+				       chip->dw->sel_required,
+				       chip->dw->hdata->nr_channels);
+
+	/* sel-preclude is optional */
+	memset(chip->dw->sel_precluded, 0, sizeof(chip->dw->sel_precluded));
+	device_property_read_u32_array(dev, "snps,sel-preclude",
+				       chip->dw->sel_precluded,
+				       chip->dw->hdata->nr_channels);
 
 	return 0;
 }
@@ -1674,7 +1730,7 @@ static int dw_probe(struct platform_device *pdev)
 	dma_cap_set(DMA_CYCLIC, dw->dma.cap_mask);
 
 	/* DMA capabilities */
-	dw->dma.max_burst = hdata->axi_rw_burst_len;
+	dw->dma.device_caps = dw_axi_dma_device_caps;
 	dw->dma.src_addr_widths = AXI_DMA_BUSWIDTHS;
 	dw->dma.dst_addr_widths = AXI_DMA_BUSWIDTHS;
 	dw->dma.directions = BIT(DMA_MEM_TO_MEM);
