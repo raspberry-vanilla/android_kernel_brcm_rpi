@@ -266,7 +266,8 @@ Params:
 
         eth_max_speed           Set the maximum speed a link is allowed
                                 to negotiate. Legal values are 10, 100 and
-                                1000 (default 1000). Pi3B+ only.
+                                1000 (default set by the platform). Pi3B+,
+                                Pi4, Pi400, CM4, Pi5, Pi500, and CM5 only.
 
         fan_temp0               Temperature threshold (in millicelcius) for
                                 1st cooling level (default 50000). Pi5 only.
@@ -2422,7 +2423,7 @@ Info:   Adds support for a number of I2C barometric pressure, temperature,
 Load:   dtoverlay=i2c-sensor,<param>=<val>
 Params: addr                    Set the address for the ADS7828, ADS7830,
                                 ADT7410, AS73211, AS7331, BH1750, BME280,
-                                BME680, BMP280, BMP380, CCS811, DS1621,
+                                BME680, BMP280, BMP380, BMP58x, CCS811, DS1621,
                                 HDC100X, HDC3020, JC42, LM75, MCP980x,
                                 MPU6050, MPU9250, MS5637, MS5803, MS5805,
                                 MS5837, MS8607, SHT3x or TMP102
@@ -2441,6 +2442,9 @@ Params: addr                    Set the address for the ADS7828, ADS7830,
                                 Valid address 0x48-0x4b, default 0x48
 
         adxl345                 Select the Analog Devices ADXL345 3-axis
+                                accelerometer
+
+        adxl355                 Select the Analog Devices ADXL355 3-axis
                                 accelerometer
 
         aht10                   Select the Aosong AHT10 temperature and humidity
@@ -2473,6 +2477,10 @@ Params: addr                    Set the address for the ADS7828, ADS7830,
 
         bmp380                  Select the Bosch Sensortronic BMP380
                                 Valid addresses 0x76-0x77, default 0x76
+
+        bmp58x                  Select the Bosch Sensortronic BMP580, BMP581,
+                                or BMP585
+                                Valid addresses 0x46-0x47, default 0x46
 
         bno055                  Select the Bosch Sensortronic BNO055 IMU
                                 Valid address 0x28-0x29, default 0x29
@@ -4457,6 +4465,18 @@ Params: poe_fan_temp0           Temperature (in millicelcius) at which the fan
                                 the firmware.
 
 
+Name:   rpi-power-hat-b
+Info:   Raspberry Pi Power HAT Bottom
+Load:   dtoverlay=rpi-power-hat-b
+Params: <None>
+
+
+Name:   rpi-power-hat-t
+Info:   Raspberry Pi Power HAT Top
+Load:   dtoverlay=rpi-power-hat-t
+Params: <None>
+
+
 Name:   rpi-proto
 Info:   This overlay has been renamed to proto-codec.
 Load:   <Deprecated>
@@ -5595,6 +5615,7 @@ Params: sizex                   Touchscreen size x (default 720)
         invy                    Touchscreen inverted y axis
         swapxy                  Touchscreen swapped x y axis
         disable_touch           Disables the touch screen overlay driver
+        rotation                Display rotation {0,90,180,270} (default 0)
         dsi0                    Use DSI0 and i2c_csi_dsi0 (rather than
                                 the default DSI1 and i2c_csi_dsi).
 

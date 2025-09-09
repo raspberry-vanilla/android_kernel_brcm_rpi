@@ -1671,6 +1671,8 @@ _RPI_OVERLAY_OUTS = [
     "arch/arm64/boot/dts/overlays/rpi-fw-uart.dtbo",
     "arch/arm64/boot/dts/overlays/rpi-poe.dtbo",
     "arch/arm64/boot/dts/overlays/rpi-poe-plus.dtbo",
+    "arch/arm64/boot/dts/overlays/rpi-power-hat-b.dtbo",
+    "arch/arm64/boot/dts/overlays/rpi-power-hat-t.dtbo",
     "arch/arm64/boot/dts/overlays/rpi-sense.dtbo",
     "arch/arm64/boot/dts/overlays/rpi-sense-v2.dtbo",
     "arch/arm64/boot/dts/overlays/rpi-tv.dtbo",
