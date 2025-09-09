@@ -2121,10 +2121,11 @@ prepare_slab_obj_exts_hook(struct kmem_cache *s, gfp_t flags, void *p)
 
 	slab = virt_to_slab(p);
 	if (!slab_obj_exts(slab) &&
-	    WARN(alloc_slab_obj_exts(slab, s, flags, false),
-		 "%s, %s: Failed to create slab extension vector!\n",
-		 __func__, s->name))
+	    alloc_slab_obj_exts(slab, s, flags, false)) {
+		pr_warn_once("%s, %s: Failed to create slab extension vector!\n",
+			     __func__, s->name);
 		return NULL;
+	}
 
 	return slab_obj_exts(slab) + obj_to_index(s, slab, p);
 }
@@ -4286,12 +4287,22 @@ static void *___kmalloc_large_node(size_t size, gfp_t flags, int node)
 	struct folio *folio;
 	void *ptr = NULL;
 	unsigned int order = get_order(size);
+	bool bypass = false;
 
 	if (unlikely(flags & GFP_SLAB_BUG_MASK))
 		flags = kmalloc_fix_flags(flags);
 
+	trace_android_vh_kmalloc_large_node_bypass(size, flags, node, &ptr, &bypass);
+	if (bypass)
+		return ptr;
+
 	flags |= __GFP_COMP;
-	folio = (struct folio *)alloc_pages_node_noprof(node, flags, order);
+
+	if (node == NUMA_NO_NODE)
+		folio = (struct folio *)alloc_pages_noprof(flags, order);
+	else
+		folio = (struct folio *)__alloc_pages_noprof(flags, order, node, NULL);
+
 	if (folio) {
 		ptr = folio_address(folio);
 		lruvec_stat_mod_folio(folio, NR_SLAB_UNRECLAIMABLE_B,
@@ -4802,6 +4813,7 @@ void kfree(const void *object)
 	struct slab *slab;
 	struct kmem_cache *s;
 	void *x = (void *)object;
+	bool bypass = false;
 
 	trace_kfree(_RET_IP_, object);
 
@@ -4810,6 +4822,9 @@ void kfree(const void *object)
 
 	folio = virt_to_folio(object);
 	if (unlikely(!folio_test_slab(folio))) {
+		trace_android_vh_kfree_bypass(folio, object, &bypass);
+		if (bypass)
+			return;
 		free_large_kmalloc(folio, (void *)object);
 		return;
 	}

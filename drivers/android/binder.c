@@ -73,6 +73,9 @@
 
 #include <linux/cacheflush.h>
 
+#include "binder_netlink.h"
+ANDROID_KABI_DECLONLY(net);
+
 #include "binder_internal.h"
 #include "binder_trace.h"
 #include <trace/hooks/binder.h>
@@ -3186,6 +3189,71 @@ static void binder_set_txn_from_error(struct binder_transaction *t, int id,
 	binder_thread_dec_tmpref(from);
 }
 
+/**
+ * binder_netlink_report() - report a transaction failure via netlink
+ * @proc:	the binder proc sending the transaction
+ * @t:		the binder transaction that failed
+ * @data_size:	the user provided data size for the transaction
+ * @error:	enum binder_driver_return_protocol returned to sender
+ * @reply:	whether the transaction is a reply
+ */
+static void binder_netlink_report(struct binder_proc *proc,
+				  struct binder_transaction *t,
+				  u32 data_size,
+				  u32 error,
+				  int is_reply)
+{
+	const char *context = proc->context->name;
+	struct sk_buff *skb;
+	void *hdr;
+
+	if (!genl_has_listeners(&binder_nl_family, &init_net,
+				BINDER_NLGRP_REPORT))
+		return;
+
+	trace_binder_netlink_report(context, t, data_size, error, is_reply);
+
+	skb = genlmsg_new(GENLMSG_DEFAULT_SIZE, GFP_KERNEL);
+	if (!skb)
+		return;
+
+	hdr = genlmsg_put(skb, 0, 0, &binder_nl_family, 0, BINDER_CMD_REPORT);
+	if (!hdr)
+		goto free_skb;
+
+	if (nla_put_u32(skb, BINDER_A_REPORT_ERROR, error) ||
+	    nla_put_string(skb, BINDER_A_REPORT_CONTEXT, context) ||
+	    nla_put_u32(skb, BINDER_A_REPORT_FROM_PID, t->from_pid) ||
+	    nla_put_u32(skb, BINDER_A_REPORT_FROM_TID, t->from_tid))
+		goto cancel_skb;
+
+	if (t->to_proc &&
+	    nla_put_u32(skb, BINDER_A_REPORT_TO_PID, t->to_proc->pid))
+		goto cancel_skb;
+
+	if (t->to_thread &&
+	    nla_put_u32(skb, BINDER_A_REPORT_TO_TID, t->to_thread->pid))
+		goto cancel_skb;
+
+	if (is_reply && nla_put_flag(skb, BINDER_A_REPORT_IS_REPLY))
+		goto cancel_skb;
+
+	if (nla_put_u32(skb, BINDER_A_REPORT_FLAGS, t->flags) ||
+	    nla_put_u32(skb, BINDER_A_REPORT_CODE, t->code) ||
+	    nla_put_u32(skb, BINDER_A_REPORT_DATA_SIZE, data_size))
+		goto cancel_skb;
+
+	genlmsg_end(skb, hdr);
+	genlmsg_multicast(&binder_nl_family, skb, 0, BINDER_NLGRP_REPORT,
+			  GFP_KERNEL);
+	return;
+
+cancel_skb:
+	genlmsg_cancel(skb, hdr);
+free_skb:
+	nlmsg_free(skb);
+}
+
 static void binder_transaction(struct binder_proc *proc,
 			       struct binder_thread *thread,
 			       struct binder_transaction_data *tr, int reply,
@@ -3236,6 +3304,29 @@ static void binder_transaction(struct binder_proc *proc,
 	binder_inner_proc_lock(proc);
 	binder_set_extended_error(&thread->ee, t_debug_id, BR_OK, 0);
 	binder_inner_proc_unlock(proc);
+
+	t = kzalloc(sizeof(*t), GFP_KERNEL);
+	if (!t) {
+		binder_txn_error("%d:%d cannot allocate transaction\n",
+				 thread->pid, proc->pid);
+		return_error = BR_FAILED_REPLY;
+		return_error_param = -ENOMEM;
+		return_error_line = __LINE__;
+		goto err_alloc_t_failed;
+	}
+	INIT_LIST_HEAD(&t->fd_fixups);
+	binder_stats_created(BINDER_STAT_TRANSACTION);
+	spin_lock_init(&t->lock);
+	t->debug_id = t_debug_id;
+	t->start_time = t_start_time;
+	t->from_pid = proc->pid;
+	t->from_tid = thread->pid;
+	t->sender_euid = task_euid(proc->tsk);
+	t->code = tr->code;
+	t->flags = tr->flags;
+	t->work.type = BINDER_WORK_TRANSACTION;
+	if (!reply && !(tr->flags & TF_ONE_WAY))
+		t->from = thread;
 
 	if (reply) {
 		binder_inner_proc_lock(proc);
@@ -3427,23 +3518,13 @@ static void binder_transaction(struct binder_proc *proc,
 		}
 		binder_inner_proc_unlock(proc);
 	}
+
+	t->to_proc = target_proc;
+	t->to_thread = target_thread;
 	if (target_thread)
 		e->to_thread = target_thread->pid;
 	e->to_proc = target_proc->pid;
 
-	/* TODO: reuse incoming transaction for reply */
-	t = kzalloc(sizeof(*t), GFP_KERNEL);
-	if (t == NULL) {
-		binder_txn_error("%d:%d cannot allocate transaction\n",
-			thread->pid, proc->pid);
-		return_error = BR_FAILED_REPLY;
-		return_error_param = -ENOMEM;
-		return_error_line = __LINE__;
-		goto err_alloc_t_failed;
-	}
-	INIT_LIST_HEAD(&t->fd_fixups);
-	binder_stats_created(BINDER_STAT_TRANSACTION);
-	spin_lock_init(&t->lock);
 	trace_android_vh_binder_transaction_init(t);
 
 	tcomplete = kzalloc(sizeof(*tcomplete), GFP_KERNEL);
@@ -3456,9 +3537,6 @@ static void binder_transaction(struct binder_proc *proc,
 		goto err_alloc_tcomplete_failed;
 	}
 	binder_stats_created(BINDER_STAT_TRANSACTION_COMPLETE);
-
-	t->debug_id = t_debug_id;
-	t->start_time = t_start_time;
 
 	if (reply)
 		binder_debug(BINDER_DEBUG_TRANSACTION,
@@ -3479,17 +3557,6 @@ static void binder_transaction(struct binder_proc *proc,
 			     (u64)tr->data_size, (u64)tr->offsets_size,
 			     (u64)extra_buffers_size);
 
-	if (!reply && !(tr->flags & TF_ONE_WAY))
-		t->from = thread;
-	else
-		t->from = NULL;
-	t->from_pid = proc->pid;
-	t->from_tid = thread->pid;
-	t->sender_euid = task_euid(proc->tsk);
-	t->to_proc = target_proc;
-	t->to_thread = target_thread;
-	t->code = tr->code;
-	t->flags = tr->flags;
 	t->is_nested = is_nested;
 	if (!(t->flags & TF_ONE_WAY) &&
 	    binder_supported_policy(current->policy)) {
@@ -3894,11 +3961,13 @@ static void binder_transaction(struct binder_proc *proc,
 		return_error_line = __LINE__;
 		goto err_copy_data_failed;
 	}
-	if (t->buffer->oneway_spam_suspect)
+	if (t->buffer->oneway_spam_suspect) {
 		tcomplete->type = BINDER_WORK_TRANSACTION_ONEWAY_SPAM_SUSPECT;
-	else
+		binder_netlink_report(proc, t, tr->data_size,
+				      BR_ONEWAY_SPAM_SUSPECT, reply);
+	} else {
 		tcomplete->type = BINDER_WORK_TRANSACTION_COMPLETE;
-	t->work.type = BINDER_WORK_TRANSACTION;
+	}
 
 	trace_android_vh_binder_transaction_record(tr, t, in_reply_to);
 
@@ -3957,8 +4026,11 @@ static void binder_transaction(struct binder_proc *proc,
 		 * process and is put in a pending queue, waiting for the target
 		 * process to be unfrozen.
 		 */
-		if (return_error == BR_TRANSACTION_PENDING_FROZEN)
+		if (return_error == BR_TRANSACTION_PENDING_FROZEN) {
 			tcomplete->type = BINDER_WORK_TRANSACTION_PENDING;
+			binder_netlink_report(proc, t, tr->data_size,
+					      return_error, reply);
+		}
 		binder_enqueue_thread_work(thread, tcomplete);
 		if (return_error &&
 		    return_error != BR_TRANSACTION_PENDING_FROZEN)
@@ -4007,9 +4079,6 @@ err_get_secctx_failed:
 err_alloc_tcomplete_failed:
 	if (trace_binder_txn_latency_free_enabled())
 		binder_txn_latency_free(t);
-	kfree(t);
-	binder_stats_deleted(BINDER_STAT_TRANSACTION);
-err_alloc_t_failed:
 err_bad_todo_list:
 err_bad_call_stack:
 err_empty_call_stack:
@@ -4019,6 +4088,11 @@ err_invalid_target_handle:
 		binder_dec_node(target_node, 1, 0);
 		binder_dec_node_tmpref(target_node);
 	}
+
+	binder_netlink_report(proc, t, tr->data_size, return_error, reply);
+	kfree(t);
+	binder_stats_deleted(BINDER_STAT_TRANSACTION);
+err_alloc_t_failed:
 
 	binder_debug(BINDER_DEBUG_FAILED_TRANSACTION,
 		     "%d:%d transaction %s to %d:%d failed %d/%d/%d, code %u size %lld-%lld line %d\n",
@@ -4516,6 +4590,7 @@ static int binder_thread_write(struct binder_proc *proc,
 			}
 			thread->looper |= BINDER_LOOPER_STATE_REGISTERED;
 			binder_inner_proc_unlock(proc);
+			trace_android_vh_binder_looper_state_registered(thread, proc);
 			break;
 		case BC_ENTER_LOOPER:
 			binder_debug(BINDER_DEBUG_THREADS,
@@ -5598,6 +5673,7 @@ static int binder_thread_release(struct binder_proc *proc,
 	if (send_reply)
 		binder_send_failed_reply(send_reply, BR_DEAD_REPLY);
 	binder_release_work(proc, &thread->todo);
+	trace_android_vh_binder_thread_release(proc, thread);
 	binder_thread_dec_tmpref(thread);
 	return active_transactions;
 }
@@ -5671,6 +5747,7 @@ static int binder_ioctl_write_read(struct file *filp, unsigned long arg,
 		if (!binder_worklist_empty_ilocked(&proc->todo) || has_special_work)
 			binder_wakeup_proc_ilocked(proc);
 		binder_inner_proc_unlock(proc);
+		trace_android_vh_binder_read_done(proc, thread);
 		if (ret < 0) {
 			if (copy_to_user(ubuf, &bwr, sizeof(bwr)))
 				ret = -EFAULT;
@@ -7350,11 +7427,18 @@ static int __init binder_init(void)
 		}
 	}
 
-	ret = init_binderfs();
+	ret = genl_register_family(&binder_nl_family);
 	if (ret)
 		goto err_init_binder_device_failed;
 
+	ret = init_binderfs();
+	if (ret)
+		goto err_init_binderfs_failed;
+
 	return ret;
+
+err_init_binderfs_failed:
+	genl_unregister_family(&binder_nl_family);
 
 err_init_binder_device_failed:
 	hlist_for_each_entry_safe(device, tmp, &binder_devices, hlist) {

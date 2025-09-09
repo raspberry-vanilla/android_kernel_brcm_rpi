@@ -9609,6 +9609,30 @@ static inline int migrate_degrades_locality(struct task_struct *p,
 #endif
 
 /*
+ * Check whether the task is ineligible on the destination cpu
+ *
+ * When the PLACE_LAG scheduling feature is enabled and
+ * dst_cfs_rq->nr_running is greater than 1, if the task
+ * is ineligible, it will also be ineligible when
+ * it is migrated to the destination cpu.
+ */
+static inline int task_is_ineligible_on_dst_cpu(struct task_struct *p, int dest_cpu)
+{
+	struct cfs_rq *dst_cfs_rq;
+
+#ifdef CONFIG_FAIR_GROUP_SCHED
+	dst_cfs_rq = task_group(p)->cfs_rq[dest_cpu];
+#else
+	dst_cfs_rq = &cpu_rq(dest_cpu)->cfs;
+#endif
+	if (sched_feat(PLACE_LAG) && dst_cfs_rq->nr_running &&
+	    !entity_eligible(task_cfs_rq(p), &p->se))
+		return 1;
+
+	return 0;
+}
+
+/*
  * can_migrate_task - may task p from runqueue rq be migrated to this_cpu?
  */
 static
@@ -9634,6 +9658,16 @@ int can_migrate_task(struct task_struct *p, struct lb_env *env)
 	 * 5) are blocked on mutexes (if SCHED_PROXY_EXEC is enabled)
 	 */
 	if (throttled_lb_pair(task_group(p), env->src_cpu, env->dst_cpu))
+		return 0;
+
+	/*
+	 * We want to prioritize the migration of eligible tasks.
+	 * For ineligible tasks we soft-limit them and only allow
+	 * them to migrate when nr_balance_failed is non-zero to
+	 * avoid load-balancing trying very hard to balance the load.
+	 */
+	if (!env->sd->nr_balance_failed &&
+	    task_is_ineligible_on_dst_cpu(p, env->dst_cpu))
 		return 0;
 
 	/* Disregard percpu kthreads; they are where they need to be. */
@@ -12400,8 +12434,14 @@ static inline bool update_newidle_cost(struct sched_domain *sd, u64 cost)
 		/*
 		 * Track max cost of a domain to make sure to not delay the
 		 * next wakeup on the CPU.
+		 *
+		 * sched_balance_newidle() bumps the cost whenever newidle
+		 * balance fails, and we don't want things to grow out of
+		 * control.  Use the sysctl_sched_migration_cost as the upper
+		 * limit, plus a litle extra to avoid off by ones.
 		 */
-		sd->max_newidle_lb_cost = cost;
+		sd->max_newidle_lb_cost =
+			min(cost, sysctl_sched_migration_cost + 200);
 		sd->last_decay_max_lb_cost = jiffies;
 	} else if (time_after(jiffies, sd->last_decay_max_lb_cost + HZ)) {
 		/*
@@ -13125,10 +13165,17 @@ static int sched_balance_newidle(struct rq *this_rq, struct rq_flags *rf)
 
 			t1 = sched_clock_cpu(this_cpu);
 			domain_cost = t1 - t0;
-			update_newidle_cost(sd, domain_cost);
-
 			curr_cost += domain_cost;
 			t0 = t1;
+
+			/*
+			 * Failing newidle means it is not effective;
+			 * bump the cost so we end up doing less of it.
+			 */
+			if (!pulled_task)
+				domain_cost = (3 * sd->max_newidle_lb_cost) / 2;
+
+			update_newidle_cost(sd, domain_cost);
 		}
 
 		/*

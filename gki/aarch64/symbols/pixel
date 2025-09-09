@@ -69,6 +69,7 @@
   bitmap_to_arr32
   __bitmap_weight
   bitmap_zalloc
+  blk_check_plugged
   blk_execute_rq_nowait
   blk_get_queue
   blk_mq_free_request
@@ -1474,6 +1475,9 @@
   loops_per_jiffy
   lru_cache_disable
   lru_disable_count
+  LZ4_compress_HC_continue
+  LZ4_loadDictHC
+  LZ4_resetStreamHC
   mac_pton
   mas_find
   max_load_balance_interval
@@ -2213,6 +2217,7 @@
   simple_attr_read
   simple_attr_release
   simple_attr_write
+  simple_attr_write_signed
   simple_open
   simple_read_from_buffer
   simple_strtol
@@ -2564,12 +2569,14 @@
   __traceiter_android_rvh_select_task_rq_fair
   __traceiter_android_rvh_select_task_rq_rt
   __traceiter_android_rvh_set_cpus_allowed_by_task
+  __traceiter_android_rvh_set_cpus_allowed_ptr
   __traceiter_android_rvh_set_iowait
   __traceiter_android_rvh_setscheduler
   __traceiter_android_rvh_setscheduler_prio
   __traceiter_android_rvh_set_task_comm
   __traceiter_android_rvh_set_task_cpu
   __traceiter_android_rvh_set_user_nice_locked
+  __traceiter_android_rvh_swap_read_folio_bdev_sync
   __traceiter_android_rvh_try_to_wake_up_success
   __traceiter_android_rvh_uclamp_eff_get
   __traceiter_android_rvh_ufs_complete_init
@@ -2595,6 +2602,7 @@
   __traceiter_android_vh_early_resume_begin
   __traceiter_android_vh_enable_thermal_genl_check
   __traceiter_android_vh_filemap_get_folio
+  __traceiter_android_vh_free_one_page_flag_check
   __traceiter_android_vh_free_pages_prepare_init
   __traceiter_android_vh_ipi_stop
   __traceiter_android_vh_mm_compaction_begin
@@ -2608,6 +2616,7 @@
   __traceiter_android_vh_scheduler_tick
   __traceiter_android_vh_setscheduler_uclamp
   __traceiter_android_vh_si_meminfo_adjust
+  __traceiter_android_vh_swap_writepage
   __traceiter_android_vh_sysrq_crash
   __traceiter_android_vh_tune_swappiness
   __traceiter_android_vh_uclamp_validate
@@ -2686,12 +2695,14 @@
   __tracepoint_android_rvh_select_task_rq_fair
   __tracepoint_android_rvh_select_task_rq_rt
   __tracepoint_android_rvh_set_cpus_allowed_by_task
+  __tracepoint_android_rvh_set_cpus_allowed_ptr
   __tracepoint_android_rvh_set_iowait
   __tracepoint_android_rvh_setscheduler
   __tracepoint_android_rvh_setscheduler_prio
   __tracepoint_android_rvh_set_task_comm
   __tracepoint_android_rvh_set_task_cpu
   __tracepoint_android_rvh_set_user_nice_locked
+  __tracepoint_android_rvh_swap_read_folio_bdev_sync
   __tracepoint_android_rvh_try_to_wake_up_success
   __tracepoint_android_rvh_uclamp_eff_get
   __tracepoint_android_rvh_ufs_complete_init
@@ -2717,6 +2728,7 @@
   __tracepoint_android_vh_early_resume_begin
   __tracepoint_android_vh_enable_thermal_genl_check
   __tracepoint_android_vh_filemap_get_folio
+  __tracepoint_android_vh_free_one_page_flag_check
   __tracepoint_android_vh_free_pages_prepare_init
   __tracepoint_android_vh_ipi_stop
   __tracepoint_android_vh_mm_compaction_begin
@@ -2730,6 +2742,7 @@
   __tracepoint_android_vh_scheduler_tick
   __tracepoint_android_vh_setscheduler_uclamp
   __tracepoint_android_vh_si_meminfo_adjust
+  __tracepoint_android_vh_swap_writepage
   __tracepoint_android_vh_sysrq_crash
   __tracepoint_android_vh_tune_swappiness
   __tracepoint_android_vh_uclamp_validate
@@ -3082,3 +3095,15 @@
   xhci_sideband_remove_interrupter
   xhci_sideband_unregister
   xhci_suspend
+  zstd_compress_using_cdict
+  zstd_create_cctx_advanced
+  zstd_create_cdict_byreference
+  zstd_create_dctx_advanced
+  zstd_create_ddict_byreference
+  zstd_decompress_using_ddict
+  zstd_default_clevel
+  zstd_free_cctx
+  zstd_free_cdict
+  zstd_free_dctx
+  zstd_free_ddict
+  zstd_get_cparams

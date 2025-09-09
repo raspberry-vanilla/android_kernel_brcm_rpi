@@ -14,6 +14,8 @@
   __tracepoint_android_vh_fuse_request_send
   __traceiter_android_vh_fuse_request_end
   __tracepoint_android_vh_fuse_request_end
+  __traceiter_android_vh_throttle_direct_reclaim_bypass
+  __tracepoint_android_vh_throttle_direct_reclaim_bypass
 
 # commonly used symbols
   __traceiter_android_vh_logbuf
@@ -90,6 +92,18 @@
   blk_mq_alloc_queue
   scsi_host_busy
   dev_pm_opp_find_freq_ceil_indexed
+  __traceiter_android_vh_customize_thp_gfp_orders
+  __tracepoint_android_vh_customize_thp_gfp_orders
+  __traceiter_android_vh_customize_pmd_gfp_bypass
+  __tracepoint_android_vh_customize_pmd_gfp_bypass
+  __traceiter_android_vh_thp_vma_allowable_orders
+  __tracepoint_android_vh_thp_vma_allowable_orders
+  __traceiter_cma_alloc_busy_retry
+  __tracepoint_cma_alloc_busy_retry
+  __traceiter_cma_release
+  __tracepoint_cma_release
+  __traceiter_android_vh_dma_buf_release
+  __tracepoint_android_vh_dma_buf_release
 
 #required by stability
   sock_from_file
@@ -154,6 +168,8 @@
 
 # required by dw_wdt.ko
   android_rvh_probe_register
+  __traceiter_android_rvh_fiq_dump
+  __tracepoint_android_rvh_fiq_dump
 
 #required by mi_sched.ko
   __traceiter_android_vh_scheduler_tick
