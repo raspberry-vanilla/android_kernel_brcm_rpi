@@ -444,13 +444,9 @@ static int bcm54xx_config_init(struct phy_device *phydev)
 	if (reg < 0)
 		return reg;
 
-	/* Mask interrupts globally.  */
-	reg |= MII_BCM54XX_ECR_IM;
-	err = phy_write(phydev, MII_BCM54XX_ECR, reg);
-	if (err < 0)
-		return err;
-
-	/* Unmask events we are interested in.  */
+	/* Initially all interrupts are masked in IMR, so unmask events
+	 * we are interested in.
+	 */
 	reg = ~(MII_BCM54XX_INT_DUPLEX |
 		MII_BCM54XX_INT_SPEED |
 		MII_BCM54XX_INT_LINK);
@@ -516,10 +512,14 @@ static int bcm54xx_config_init(struct phy_device *phydev)
 			BCM54XX_SHD_LEDS1_LED3(BCM_LED_SRC_MULTICOLOR1);
 		bcm_phy_write_shadow(phydev, BCM54XX_SHD_LEDS1, val);
 		/* BCM54210PE controls two extra LEDs with the next register.
-		 * Make them shadow the first pair of LEDs - useful on CM4 which
-		 * uses LED3 for ETH_LEDY instead of LED1.
+		 * Make LED3 shadow LED1, but preserve LED4 as is - useful on
+		 * CM4/CM5 which use LED3 for ETH_LEDY instead of LED1. LED4
+		 * is either unused or configured as INT pin on CM5.
 		 */
-		bcm_phy_write_shadow(phydev, BCM54XX_SHD_LEDS1 + 1, val);
+		reg = bcm_phy_read_shadow(phydev, BCM54XX_SHD_LEDS2);
+		reg &= ~(0xf << 0);
+		reg |= BCM54XX_SHD_LEDS1_LED1(BCM_LED_SRC_MULTICOLOR1);
+		bcm_phy_write_shadow(phydev, BCM54XX_SHD_LEDS2, reg);
 
 		val = BCM_LED_MULTICOLOR_IN_PHASE |
 			BCM54XX_SHD_LEDS1_LED1(led_modes[0]) |
@@ -1501,6 +1501,8 @@ static struct phy_driver broadcom_drivers[] = {
 	.probe		= bcm54xx_phy_probe,
 	.config_init	= bcm54xx_config_init,
 	.config_intr	= bcm_phy_config_intr,
+	.handle_interrupt = bcm_phy_handle_interrupt,
+	.link_change_notify	= bcm54xx_link_change_notify,
 	.suspend	= bcm54xx_suspend,
 	.resume		= bcm54xx_resume,
 }, {
