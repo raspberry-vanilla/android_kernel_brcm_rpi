@@ -2749,6 +2749,9 @@ Params: interrupt               GPIO used for interrupt (default 4)
         sizey                   Touchscreen size y, vertical resolution of
                                 touchscreen (in pixels)
         i2c-path                Override I2C path to allow for i2c-gpio buses
+        invx                    Invert touchscreen x-axis
+        invy                    Invert touchscreen y-axis
+        swapxy                  Swap touchscreen axis
 
 
 Name:   imx219
