@@ -43,5 +43,8 @@
 		sizey = <&ili251x>,"touchscreen-size-y:0";
 		i2c-path = <&frag1>, "target?=0",
 			   <&frag1>, "target-path";
+		invx = <&ili251x>,"touchscreen-inverted-x?";
+		invy = <&ili251x>,"touchscreen-inverted-y?";
+		swapxy = <&ili251x>,"touchscreen-swapped-x-y?";
 	};
 };
