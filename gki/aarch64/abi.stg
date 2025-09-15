@@ -48928,6 +48928,11 @@ member {
   offset: 704
 }
 member {
+  id: 0x30326380
+  type_id: 0x4fe7e7e7
+  offset: 1280
+}
+member {
   id: 0x30345aac
   type_id: 0x4fff3cac
   offset: 96
@@ -126460,10 +126465,9 @@ member {
   offset: 2752
 }
 member {
-  id: 0x642249c1
+  id: 0x64224fbc
   name: "hash_node"
   type_id: 0x49a73111
-  offset: 1280
 }
 member {
   id: 0x645db146
@@ -270185,6 +270189,15 @@ struct_union {
   }
 }
 struct_union {
+  id: 0x4fe7e7e7
+  kind: UNION
+  definition {
+    bytesize: 16
+    member_id: 0x64224fbc
+    member_id: 0x56a7265c
+  }
+}
+struct_union {
   id: 0x4fff3cac
   kind: UNION
   definition {
@@ -312895,7 +312908,7 @@ struct_union {
     member_id: 0x9a2343f3
     member_id: 0x97a3df99
     member_id: 0x8b9060cf
-    member_id: 0x642249c1
+    member_id: 0x30326380
     member_id: 0x5581282d
     member_id: 0x82cdc63e
     member_id: 0x9f5134da

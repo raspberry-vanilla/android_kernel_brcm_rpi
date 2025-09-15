@@ -29,3 +29,7 @@ type 'enum gunyah_rm_vm_status' changed
   'struct tracepoint __tracepoint_f2fs_write_checkpoint'
   'struct tracepoint __tracepoint_ufshcd_command'
 
+type 'struct io_kiocb' changed
+  member 'struct hlist_node hash_node' was removed
+  member 'union { struct hlist_node hash_node; struct callback_head callback_head; }' was added
+
