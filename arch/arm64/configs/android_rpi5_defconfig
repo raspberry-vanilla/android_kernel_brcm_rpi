@@ -1,6 +1,6 @@
 #
 # Automatically generated file; DO NOT EDIT.
-# Linux/arm64 6.12.47 Kernel Configuration
+# Linux/arm64 6.12.48 Kernel Configuration
 #
 CONFIG_CC_VERSION_TEXT="Android (12833971, +pgo, +bolt, +lto, +mlgo, based on r536225) clang version 19.0.1 (https://android.googlesource.com/toolchain/llvm-project b3a530ec6537146650e42be89f1089e9a3588460)"
 CONFIG_GCC_VERSION=0
@@ -666,7 +666,6 @@ CONFIG_KVM_GENERIC_MMU_NOTIFIER=y
 CONFIG_VIRTUALIZATION=y
 CONFIG_KVM=y
 # CONFIG_PTDUMP_STAGE2_DEBUGFS is not set
-CONFIG_PKVM_STACKTRACE=y
 CONFIG_PKVM_MODULE_PATH=""
 # CONFIG_PKVM_DEBUG is not set
 CONFIG_CPU_MITIGATIONS=y
@@ -921,6 +920,7 @@ CONFIG_ARCH_HAS_SYSCALL_WRAPPER=y
 # CONFIG_GKI_HIDDEN_MMC_CONFIGS is not set
 # CONFIG_GKI_HIDDEN_GPIO_CONFIGS is not set
 # CONFIG_GKI_HIDDEN_QCOM_CONFIGS is not set
+# CONFIG_GKI_HIDDEN_MTK_CONFIGS is not set
 # CONFIG_GKI_HIDDEN_MEDIA_CONFIGS is not set
 # CONFIG_GKI_HIDDEN_VIRTUAL_CONFIGS is not set
 # CONFIG_GKI_LEGACY_WEXT_ALLCONFIG is not set
