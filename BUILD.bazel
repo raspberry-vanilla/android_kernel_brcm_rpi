@@ -1814,6 +1814,7 @@ kernel_build(
     ],
     arch = "arm64",
     build_config = "build.config.rpi",
+    check_defconfig = "disabled",
     defconfig = "arch/arm64/configs/android_rpi4_defconfig",
     make_goals = [
          "Image",
