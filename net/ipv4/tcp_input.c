@@ -4717,8 +4717,6 @@ static void tcp_rcv_spurious_retrans(struct sock *sk, const struct sk_buff *skb)
 	 * repathing due to our own RTO, then rehash the socket to repath our
 	 * packets.
 	 */
-	 trace_android_rvh_tcp_rcv_spurious_retrans(sk);
-
 #if IS_ENABLED(CONFIG_IPV6)
 	if (inet_csk(sk)->icsk_ca_state != TCP_CA_Loss &&
 	    skb->protocol == htons(ETH_P_IPV6) &&
@@ -7356,7 +7354,6 @@ int tcp_conn_request(struct request_sock_ops *rsk_ops,
 				    &foc, TCP_SYNACK_FASTOPEN, skb);
 		/* Add the child socket directly into the accept queue */
 		if (!inet_csk_reqsk_queue_add(sk, req, fastopen_sk)) {
-			reqsk_fastopen_remove(fastopen_sk, req, false);
 			bh_unlock_sock(fastopen_sk);
 			sock_put(fastopen_sk);
 			goto drop_and_free;
