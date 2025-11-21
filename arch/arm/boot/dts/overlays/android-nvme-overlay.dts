@@ -8,7 +8,6 @@
             firmware {
                 android {
                     compatible = "android,firmware";
-                    bootdevice = "nvme";
                     fstab {
                         compatible = "android,fstab";
                         boot {
@@ -20,17 +19,24 @@
                         };
                         system {
                             compatible = "android,system";
-                            dev = "/dev/block/nvme0n1p2";
+                            dev = "/dev/block/nvme0n1p5";
                             type = "ext4";
                             mnt_flags = "ro,barrier=1";
                             fsmgr_flags = "wait,first_stage_mount";
                         };
                         vendor {
                             compatible = "android,vendor";
-                            dev = "/dev/block/nvme0n1p3";
+                            dev = "/dev/block/nvme0n1p6";
                             type = "ext4";
                             mnt_flags = "ro,barrier=1";
                             fsmgr_flags = "wait,first_stage_mount";
+                        };
+                        metadata {
+                            compatible = "android,metadata";
+                            dev = "/dev/block/nvme0n1p7";
+                            type = "ext4";
+                            mnt_flags = "nodev,noatime,nosuid";
+                            fsmgr_flags = "wait,check,formattable,first_stage_mount";
                         };
                     };
                 };
