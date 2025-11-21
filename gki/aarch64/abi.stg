@@ -50693,6 +50693,11 @@ member {
   offset: 128
 }
 member {
+  id: 0x3d2dbebd
+  type_id: 0x7b98a85e
+  offset: 768
+}
+member {
   id: 0x3d316dce
   type_id: 0x7bebd4ad
   offset: 64
@@ -103486,6 +103491,13 @@ member {
   offset: 1024
 }
 member {
+  id: 0xba333fca
+  name: "dst_quick_ack"
+  type_id: 0xe62ebf07
+  offset: 60
+  bitsize: 1
+}
+member {
   id: 0xcdacfab5
   name: "dst_reg"
   type_id: 0xb3e7bac9
@@ -107336,6 +107348,11 @@ member {
   name: "ep"
   type_id: 0x0399ec3e
   offset: 64
+}
+member {
+  id: 0xb5a82535
+  name: "ep"
+  type_id: 0x0e2680c2
 }
 member {
   id: 0x3b08524b
@@ -248177,6 +248194,13 @@ member {
   offset: 896
 }
 member {
+  id: 0x058924c4
+  name: "unused"
+  type_id: 0xe62ebf07
+  offset: 61
+  bitsize: 3
+}
+member {
   id: 0x3c62344c
   name: "unused"
   type_id: 0xc93e017b
@@ -248201,13 +248225,6 @@ member {
   type_id: 0x295c7202
   offset: 15947
   bitsize: 5
-}
-member {
-  id: 0xd423e96f
-  name: "unused"
-  type_id: 0xe62ebf07
-  offset: 60
-  bitsize: 4
 }
 member {
   id: 0xd4ec94ba
@@ -267283,7 +267300,8 @@ struct_union {
     member_id: 0x7fdde492
     member_id: 0x23174432
     member_id: 0xdc65b548
-    member_id: 0xd423e96f
+    member_id: 0xba333fca
+    member_id: 0x058924c4
     member_id: 0x54f0f552
     member_id: 0x9d3fc94e
     member_id: 0x4c233807
@@ -272828,6 +272846,16 @@ struct_union {
     bytesize: 32
     member_id: 0xb6520a5a
     member_id: 0x486c93cb
+  }
+}
+struct_union {
+  id: 0x7b98a85e
+  kind: UNION
+  definition {
+    bytesize: 8
+    member_id: 0xb5a82535
+    member_id: 0x21c53df9
+    member_id: 0x36752b74
   }
 }
 struct_union {
@@ -342513,7 +342541,7 @@ struct_union {
     member_id: 0x2c35055f
     member_id: 0x20000016
     member_id: 0x92f98fb9
-    member_id: 0x415b0412
+    member_id: 0x3d2dbebd
   }
 }
 struct_union {
