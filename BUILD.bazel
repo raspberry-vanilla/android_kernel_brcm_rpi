@@ -1775,6 +1775,7 @@ _RPI_OVERLAY_OUTS = [
     "arch/arm64/boot/dts/overlays/vc4-kms-v3d-pi4.dtbo",
     "arch/arm64/boot/dts/overlays/vc4-kms-v3d-pi5.dtbo",
     "arch/arm64/boot/dts/overlays/vc4-kms-vga666.dtbo",
+    "arch/arm64/boot/dts/overlays/vec-gpio-pi5.dtbo",
     "arch/arm64/boot/dts/overlays/vga666.dtbo",
     "arch/arm64/boot/dts/overlays/vl805.dtbo",
     "arch/arm64/boot/dts/overlays/w1-gpio.dtbo",
