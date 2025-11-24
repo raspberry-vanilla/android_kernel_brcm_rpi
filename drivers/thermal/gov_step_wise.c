@@ -23,10 +23,10 @@
  *    b. if the trend is THERMAL_TREND_DROPPING, use a lower cooling state
  *       for this trip point, but keep the cooling state above the applicable
  *       minimum
- * If the temperature is lower than a trip point,
+ * If the temperature is lower than a hysteresis temperature,
  *    a. if the trend is THERMAL_TREND_RAISING, do nothing
- *    b. if the trend is THERMAL_TREND_DROPPING, use lower cooling
- *       state for this trip point, if the cooling state already
+ *    b. if the trend is THERMAL_TREND_DROPPING, use the minimum applicable
+ *       cooling state for this trip point, or if the cooling state already
  *       equals lower limit, deactivate the thermal instance
  */
 static unsigned long get_target_state(struct thermal_instance *instance,
@@ -83,18 +83,14 @@ static void thermal_zone_trip_update(struct thermal_zone_device *tz,
 				     int trip_threshold)
 {
 	const struct thermal_trip *trip = &td->trip;
+	int hyst_temp = trip->temperature - trip->hysteresis;
+	bool throttle = tz->temperature >= hyst_temp;
 	enum thermal_trend trend = get_tz_trend(tz, trip);
 	int trip_id = thermal_zone_trip_id(tz, trip);
 	struct thermal_instance *instance;
-	bool throttle = false;
-	int hyst_temp;
 
-	if (tz->temperature >= trip_threshold) {
-		throttle = true;
+	if (throttle)
 		trace_thermal_zone_trip(tz, trip_id, trip->type);
-	}
-
-	hyst_temp = trip->temperature - trip->hysteresis;
 
 	dev_dbg(&tz->device,
 		"Trip%d[type=%d,temp=%d,hyst=%d]:trend=%d,throttle=%d\n",
@@ -105,6 +101,7 @@ static void thermal_zone_trip_update(struct thermal_zone_device *tz,
 
 		old_target = instance->target;
 		throttle = false;
+
 		/*
 		 * Lower the mitigation only if the temperature
 		 * goes below the hysteresis temperature.
