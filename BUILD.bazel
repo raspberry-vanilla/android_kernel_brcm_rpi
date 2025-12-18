@@ -1560,6 +1560,7 @@ _RPI_OVERLAY_OUTS = [
     "arch/arm64/boot/dts/overlays/i2s-gpio28-31.dtbo",
     "arch/arm64/boot/dts/overlays/i2s-master-dac.dtbo",
     "arch/arm64/boot/dts/overlays/ilitek251x.dtbo",
+    "arch/arm64/boot/dts/overlays/ilitek-ts-i2c.dtbo",
     "arch/arm64/boot/dts/overlays/imx219.dtbo",
     "arch/arm64/boot/dts/overlays/imx258.dtbo",
     "arch/arm64/boot/dts/overlays/imx283.dtbo",
