@@ -2426,6 +2426,7 @@ static void prepare_scan_control(pg_data_t *pgdat, struct scan_control *sc)
 {
 	unsigned long file;
 	struct lruvec *target_lruvec;
+	bool bypass = false;
 
 	if (lru_gen_enabled())
 		return;
@@ -2437,7 +2438,9 @@ static void prepare_scan_control(pg_data_t *pgdat, struct scan_control *sc)
 	 * most accurate stats here. We may switch to regular stats flushing
 	 * in the future once it is cheap enough.
 	 */
-	mem_cgroup_flush_stats_ratelimited(sc->target_mem_cgroup);
+	trace_android_vh_mem_cgroup_flush_stats_bypass(sc->target_mem_cgroup, &bypass);
+	if (!bypass)
+		mem_cgroup_flush_stats_ratelimited(sc->target_mem_cgroup);
 
 	/*
 	 * Determine the scan balance between anon and file LRUs.
@@ -6967,6 +6970,9 @@ static bool pgdat_balanced(pg_data_t *pgdat, int order, int highest_zoneidx)
 			mark = promo_wmark_pages(zone);
 		else
 			mark = high_wmark_pages(zone);
+
+		trace_android_vh_mm_get_zone_mark(zone, &mark);
+
 		if (zone_watermark_ok_safe(zone, order, mark, highest_zoneidx))
 			return true;
 	}

@@ -10,6 +10,7 @@
 #include <linux/ptrace.h>
 #include <linux/slab.h>
 #include <linux/pagemap.h>
+#include <linux/page_size_compat.h>
 #include <linux/pgsize_migration.h>
 #include <linux/mempolicy.h>
 #include <linux/rmap.h>
@@ -98,13 +99,14 @@ unsigned long task_statm(struct mm_struct *mm,
 			 unsigned long *shared, unsigned long *text,
 			 unsigned long *data, unsigned long *resident)
 {
-	*shared = get_mm_counter_sum(mm, MM_FILEPAGES) +
-			get_mm_counter_sum(mm, MM_SHMEMPAGES);
-	*text = (PAGE_ALIGN(mm->end_code) - (mm->start_code & PAGE_MASK))
-								>> PAGE_SHIFT;
-	*data = mm->data_vm + mm->stack_vm;
-	*resident = *shared + get_mm_counter_sum(mm, MM_ANONPAGES);
-	return mm->total_vm;
+	*shared = __page_size_count(get_mm_counter_sum(mm, MM_FILEPAGES) +
+			get_mm_counter_sum(mm, MM_SHMEMPAGES));
+	*text = (__PAGE_ALIGN(mm->end_code) - (mm->start_code & __PAGE_MASK))
+								>> __PAGE_SHIFT;
+	*data = __page_size_count(mm->data_vm + mm->stack_vm);
+	*resident = __page_size_count(*shared + get_mm_counter_sum(mm, MM_ANONPAGES));
+
+	return __page_size_count(mm->total_vm);
 }
 
 #ifdef CONFIG_NUMA
@@ -1344,6 +1346,7 @@ static int show_smaps_rollup(struct seq_file *m, void *v)
 	struct vm_area_struct *vma;
 	unsigned long vma_start = 0, last_vma_end = 0;
 	int ret = 0;
+	int nr_contended = 0;
 	VMA_ITERATOR(vmi, mm, 0);
 
 	priv->task = get_proc_task(priv->inode);
@@ -1377,6 +1380,13 @@ static int show_smaps_rollup(struct seq_file *m, void *v)
 		if (mmap_lock_is_contended(mm)) {
 			vma_iter_invalidate(&vmi);
 			mmap_read_unlock(mm);
+			nr_contended++;
+			trace_android_vh_smaps_rollup_contended(mm->map_count,
+					nr_contended, &ret);
+			if (ret) {
+				release_task_mempolicy(priv);
+				goto out_put_mm;
+			}
 			ret = mmap_read_lock_killable(mm);
 			if (ret) {
 				release_task_mempolicy(priv);

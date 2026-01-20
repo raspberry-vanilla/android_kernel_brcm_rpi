@@ -5172,6 +5172,13 @@ static inline int task_fits_cpu(struct task_struct *p, int cpu)
 	unsigned long uclamp_min = uclamp_eff_value(p, UCLAMP_MIN);
 	unsigned long uclamp_max = uclamp_eff_value(p, UCLAMP_MAX);
 	unsigned long util = task_util_est(p);
+	bool fits = true, done = false;
+
+	trace_android_rvh_task_fits_cpu(p, util, uclamp_min, uclamp_max, cpu, &fits, &done);
+
+	if (done)
+		return fits;
+
 	/*
 	 * Return true only if the cpu fully fits the task requirements, which
 	 * include the utilization but also the performance hints.
@@ -11846,7 +11853,7 @@ static int need_active_balance(struct lb_env *env)
 	return 0;
 }
 
-static int active_load_balance_cpu_stop(void *data);
+int active_load_balance_cpu_stop(void *data);
 
 static int should_we_balance(struct lb_env *env)
 {
@@ -12237,7 +12244,7 @@ update_next_balance(struct sched_domain *sd, unsigned long *next_balance)
  * least 1 task to be running on each physical CPU where possible, and
  * avoids physical / logical imbalances.
  */
-static int active_load_balance_cpu_stop(void *data)
+int active_load_balance_cpu_stop(void *data)
 {
 	struct rq *busiest_rq = data;
 	int busiest_cpu = cpu_of(busiest_rq);
@@ -12315,6 +12322,7 @@ out_unlock:
 
 	return 0;
 }
+EXPORT_SYMBOL_GPL(active_load_balance_cpu_stop);
 
 /*
  * This flag serializes load-balancing passes over large domains
@@ -12346,14 +12354,8 @@ static inline bool update_newidle_cost(struct sched_domain *sd, u64 cost)
 		/*
 		 * Track max cost of a domain to make sure to not delay the
 		 * next wakeup on the CPU.
-		 *
-		 * sched_balance_newidle() bumps the cost whenever newidle
-		 * balance fails, and we don't want things to grow out of
-		 * control.  Use the sysctl_sched_migration_cost as the upper
-		 * limit, plus a litle extra to avoid off by ones.
 		 */
-		sd->max_newidle_lb_cost =
-			min(cost, sysctl_sched_migration_cost + 200);
+		sd->max_newidle_lb_cost = cost;
 		sd->last_decay_max_lb_cost = jiffies;
 	} else if (time_after(jiffies, sd->last_decay_max_lb_cost + HZ)) {
 		/*
@@ -13077,17 +13079,10 @@ static int sched_balance_newidle(struct rq *this_rq, struct rq_flags *rf)
 
 			t1 = sched_clock_cpu(this_cpu);
 			domain_cost = t1 - t0;
+			update_newidle_cost(sd, domain_cost);
+
 			curr_cost += domain_cost;
 			t0 = t1;
-
-			/*
-			 * Failing newidle means it is not effective;
-			 * bump the cost so we end up doing less of it.
-			 */
-			if (!pulled_task)
-				domain_cost = (3 * sd->max_newidle_lb_cost) / 2;
-
-			update_newidle_cost(sd, domain_cost);
 		}
 
 		/*
