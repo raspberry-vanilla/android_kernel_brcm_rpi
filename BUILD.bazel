@@ -1535,6 +1535,8 @@ _RPI_OVERLAY_OUTS = [
     "arch/arm64/boot/dts/overlays/hifiberry-dacplus-std.dtbo",
     "arch/arm64/boot/dts/overlays/hifiberry-digi.dtbo",
     "arch/arm64/boot/dts/overlays/hifiberry-digi-pro.dtbo",
+    "arch/arm64/boot/dts/overlays/hifiberry-studio-dac8x.dtbo",
+    "arch/arm64/boot/dts/overlays/hifiberry-studio-dac8x-pro.dtbo",
     "arch/arm64/boot/dts/overlays/highperi.dtbo",
     "arch/arm64/boot/dts/overlays/hy28a.dtbo",
     "arch/arm64/boot/dts/overlays/hy28b-2017.dtbo",
