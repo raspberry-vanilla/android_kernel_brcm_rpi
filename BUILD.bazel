@@ -1772,6 +1772,7 @@ _RPI_OVERLAY_OUTS = [
     "arch/arm64/boot/dts/overlays/vc4-kms-dpi-panel.dtbo",
     "arch/arm64/boot/dts/overlays/vc4-kms-dsi-7inch.dtbo",
     "arch/arm64/boot/dts/overlays/vc4-kms-dsi-generic.dtbo",
+    "arch/arm64/boot/dts/overlays/vc4-kms-dsi-ili79600-10-1inch.dtbo",
     "arch/arm64/boot/dts/overlays/vc4-kms-dsi-ili9881-5inch.dtbo",
     "arch/arm64/boot/dts/overlays/vc4-kms-dsi-ili9881-7inch.dtbo",
     "arch/arm64/boot/dts/overlays/vc4-kms-dsi-lt070me05000.dtbo",
