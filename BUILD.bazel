@@ -1485,6 +1485,7 @@ pkg_install(
 )
 
 _RPI_OVERLAY_OUTS = [
+    # keep sorted
     "arch/arm64/boot/dts/overlays/act-led.dtbo",
     "arch/arm64/boot/dts/overlays/adafruit18.dtbo",
     "arch/arm64/boot/dts/overlays/adafruit-st7735r.dtbo",
@@ -1856,60 +1857,121 @@ _RPI_OVERLAY_OUTS = [
     "arch/arm64/boot/dts/overlays/ws2812-pio.dtbo",
 ]
 
+_RPI_MODULE_OUTS = [
+    # keep sorted
+]
+
 kernel_build(
     name = "rpi4_defconfig",
-    outs = [
-        ".config",
-    ],
+    srcs = [":kernel_aarch64_sources"],
+    outs = [".config"],
+    arch = "arm64",
+    build_config = "build.config.rpi",
+    check_defconfig = "disabled",
+    defconfig = "arch/arm64/configs/gki_defconfig",
+    make_goals = [".config"],
+    makefile = ":Makefile",
+    pre_defconfig_fragments = ["arch/arm64/configs/bcm2711_gki.fragment"],
+)
+
+kernel_build(
+    name = "rpi4_old_defconfig",
+    srcs = [":kernel_aarch64_sources"],
+    outs = [".config"],
     arch = "arm64",
     build_config = "build.config.rpi",
     check_defconfig = "disabled",
     defconfig = "arch/arm64/configs/android_rpi4_defconfig",
-    make_goals = [
-        "android_rpi4_defconfig",
-    ],
+    make_goals = ["android_rpi4_defconfig"],
     makefile = ":Makefile",
 )
 
 kernel_build(
+    name = "rpi4_save_defconfig",
+    srcs = [":kernel_aarch64_sources"],
+    outs = ["defconfig"],
+    arch = "arm64",
+    build_config = "build.config.rpi",
+    check_defconfig = "disabled",
+    defconfig = "arch/arm64/configs/gki_defconfig",
+    make_goals = ["savedefconfig"],
+    makefile = ":Makefile",
+    pre_defconfig_fragments = ["arch/arm64/configs/bcm2711_gki.fragment"],
+)
+
+kernel_build(
     name = "rpi4",
+    srcs = [":kernel_aarch64_sources"],
     outs = _RPI_OVERLAY_OUTS + [
-        "arch/arm64/boot/Image",
+        "Image",
+        "System.map",
         "arch/arm64/boot/dts/broadcom/bcm2711-rpi-400.dtb",
         "arch/arm64/boot/dts/broadcom/bcm2711-rpi-4-b.dtb",
         "arch/arm64/boot/dts/broadcom/bcm2711-rpi-cm4.dtb",
         "arch/arm64/boot/dts/broadcom/bcm2711-rpi-cm4-io.dtb",
         "arch/arm64/boot/dts/broadcom/bcm2711-rpi-cm4s.dtb",
+        "modules.builtin",
+        "modules.builtin.modinfo",
+        "vmlinux",
+        "vmlinux.symvers",
     ],
     arch = "arm64",
     build_config = "build.config.rpi",
     defconfig = "arch/arm64/configs/android_rpi4_defconfig",
     make_goals = [
-         "Image",
-         "dtbs",
+        "Image",
+        "modules",
+        "dtbs",
     ],
     makefile = ":Makefile",
+    module_outs = get_gki_modules_list("arm64") + get_kunit_modules_list("arm64") + _RPI_MODULE_OUTS,
+    strip_modules = True,
 )
 
 kernel_build(
     name = "rpi5_defconfig",
-    outs = [
-        ".config",
-    ],
+    srcs = [":kernel_aarch64_sources"],
+    outs = [".config"],
+    arch = "arm64",
+    build_config = "build.config.rpi",
+    check_defconfig = "disabled",
+    defconfig = "arch/arm64/configs/gki_defconfig",
+    make_goals = [".config"],
+    makefile = ":Makefile",
+    pre_defconfig_fragments = ["arch/arm64/configs/bcm2712_gki.fragment"],
+)
+
+kernel_build(
+    name = "rpi5_old_defconfig",
+    srcs = [":kernel_aarch64_sources"],
+    outs = [".config"],
     arch = "arm64",
     build_config = "build.config.rpi",
     check_defconfig = "disabled",
     defconfig = "arch/arm64/configs/android_rpi5_defconfig",
-    make_goals = [
-        "android_rpi5_defconfig",
-    ],
+    make_goals = ["android_rpi5_defconfig"],
     makefile = ":Makefile",
 )
 
 kernel_build(
+    name = "rpi5_save_defconfig",
+    srcs = [":kernel_aarch64_sources"],
+    outs = ["defconfig"],
+    arch = "arm64",
+    build_config = "build.config.rpi",
+    check_defconfig = "disabled",
+    defconfig = "arch/arm64/configs/gki_defconfig",
+    make_goals = ["savedefconfig"],
+    makefile = ":Makefile",
+    pre_defconfig_fragments = ["arch/arm64/configs/bcm2712_gki.fragment"],
+)
+
+kernel_build(
     name = "rpi5",
+    srcs = [":kernel_aarch64_sources"],
     outs = _RPI_OVERLAY_OUTS + [
-        "arch/arm64/boot/Image",
+        "Image",
+        "System.map",
         "arch/arm64/boot/dts/broadcom/bcm2712d0-rpi-5-b.dtb",
         "arch/arm64/boot/dts/broadcom/bcm2712-rpi-500.dtb",
         "arch/arm64/boot/dts/broadcom/bcm2712-rpi-5-b.dtb",
@@ -1917,15 +1979,22 @@ kernel_build(
         "arch/arm64/boot/dts/broadcom/bcm2712-rpi-cm5-cm5io.dtb",
         "arch/arm64/boot/dts/broadcom/bcm2712-rpi-cm5l-cm4io.dtb",
         "arch/arm64/boot/dts/broadcom/bcm2712-rpi-cm5l-cm5io.dtb",
+        "modules.builtin",
+        "modules.builtin.modinfo",
+        "vmlinux",
+        "vmlinux.symvers",
     ],
     arch = "arm64",
     build_config = "build.config.rpi",
     defconfig = "arch/arm64/configs/android_rpi5_defconfig",
     make_goals = [
-         "Image",
-         "dtbs",
+        "Image",
+        "modules",
+        "dtbs",
     ],
     makefile = ":Makefile",
+    module_outs = get_gki_modules_list("arm64") + get_kunit_modules_list("arm64") + _RPI_MODULE_OUTS,
+    strip_modules = True,
 )
 
 # allmodconfig build tests.
