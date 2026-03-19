@@ -17,6 +17,9 @@
 #include <drm/drm_print.h>
 #include <drm/drm_probe_helper.h>
 #include <linux/backlight.h>
+ANDROID_KABI_DECLONLY(acpi_device_id);
+ANDROID_KABI_DECLONLY(device_node);
+ANDROID_KABI_DECLONLY(of_device_id);
 
 struct panel_bridge {
 	struct drm_bridge bridge;
