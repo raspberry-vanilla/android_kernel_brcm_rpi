@@ -1096,6 +1096,7 @@ out_unlock:
 
 	return next;
 }
+EXPORT_SYMBOL_GPL(mem_cgroup_iter);
 
 /**
  * mem_cgroup_iter_break - abort a hierarchy walk prematurely
@@ -4345,11 +4346,13 @@ static ssize_t memory_oom_group_write(struct kernfs_open_file *of,
 
 enum {
 	MEMORY_RECLAIM_SWAPPINESS = 0,
+	MEMORY_RECLAIM_SWAPPINESS_MAX,
 	MEMORY_RECLAIM_NULL,
 };
 
 static const match_table_t tokens = {
 	{ MEMORY_RECLAIM_SWAPPINESS, "swappiness=%d"},
+	{ MEMORY_RECLAIM_SWAPPINESS_MAX, "swappiness=max"},
 	{ MEMORY_RECLAIM_NULL, NULL },
 };
 
@@ -4382,6 +4385,9 @@ static ssize_t memory_reclaim(struct kernfs_open_file *of, char *buf,
 				return -EINVAL;
 			if (swappiness < MIN_SWAPPINESS || swappiness > MAX_SWAPPINESS)
 				return -EINVAL;
+			break;
+		case MEMORY_RECLAIM_SWAPPINESS_MAX:
+			swappiness = SWAPPINESS_ANON_ONLY;
 			break;
 		default:
 			return -EINVAL;

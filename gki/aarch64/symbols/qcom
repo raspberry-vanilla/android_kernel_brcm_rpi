@@ -43,6 +43,7 @@
   __arch_copy_from_user
   __arch_copy_to_user
   arch_freq_scale
+  arch_invalidate_pmem
   arch_stack_walk
   arch_timer_read_counter
   argv_free
@@ -733,6 +734,7 @@
   dev_pm_qos_remove_notifier
   dev_pm_qos_remove_request
   dev_pm_qos_update_request
+  dev_pm_set_dedicated_wake_irq
   dev_pm_set_wake_irq
   _dev_printk
   __dev_queue_xmit
@@ -962,6 +964,7 @@
   drm_edid_is_valid
   drm_edid_raw
   drm_edid_read_ddc
+  drm_edid_to_speaker_allocation
   drm_encoder_cleanup
   drm_encoder_init
   __drm_err
@@ -3480,6 +3483,7 @@
   __traceiter_android_vh_ufs_send_uic_command
   __traceiter_android_vh_ufs_update_sdev
   __traceiter_android_vh_update_topology_flags_workfn
+  __traceiter_android_vh_xhci_handle_offload
   __traceiter_binder_transaction_received
   __traceiter_cpu_frequency_limits
   __traceiter_cpu_idle
@@ -3628,6 +3632,7 @@
   __tracepoint_android_vh_ufs_send_uic_command
   __tracepoint_android_vh_ufs_update_sdev
   __tracepoint_android_vh_update_topology_flags_workfn
+  __tracepoint_android_vh_xhci_handle_offload
   __tracepoint_binder_transaction_received
   __tracepoint_cpu_frequency_limits
   __tracepoint_cpu_idle
@@ -4037,6 +4042,8 @@
   vmalloc_to_page
   vmalloc_to_pfn
   vmap
+  vmap_pages_range_noflush
+  __vmap_pages_range_noflush
   vmemdup_user
   vmf_insert_mixed
   vmf_insert_pfn
@@ -4117,6 +4124,7 @@
   xfrm_lookup
   xhci_create_secondary_interrupter
   xhci_get_endpoint_index
+  xhci_handle_event_trb
   xhci_initialize_ring_info
   xhci_remove_secondary_interrupter
   xhci_sideband_add_endpoint

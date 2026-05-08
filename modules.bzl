@@ -35,6 +35,7 @@ _COMMON_GKI_MODULES_LIST = [
     "drivers/net/usb/rtl8150.ko",
     "drivers/net/usb/usbnet.ko",
     "drivers/net/wwan/wwan.ko",
+    "drivers/usb/host/xhci-pci-renesas.ko",
     "drivers/usb/mon/usbmon.ko",
     "drivers/usb/serial/ftdi_sio.ko",
     "drivers/virtio/virtio_balloon.ko",

@@ -11,6 +11,7 @@
 #include <linux/blk-mq.h>
 #include <linux/blk_types.h>
 #include <linux/blkdev.h>
+#include <linux/compat.h>
 #include <linux/cred.h>
 #include <linux/errname.h>
 #include <linux/ethtool.h>
@@ -54,7 +55,7 @@ const gfp_t RUST_CONST_HELPER___GFP_HIGHMEM = ___GFP_HIGHMEM;
 const gfp_t RUST_CONST_HELPER___GFP_NOWARN = ___GFP_NOWARN;
 const blk_features_t RUST_CONST_HELPER_BLK_FEAT_ROTATIONAL = BLK_FEAT_ROTATIONAL;
 
-#ifdef CONFIG_ASHMEM_RUST
+#ifdef CONFIG_ASHMEM
 #include "../../drivers/staging/android/ashmem.h"
 const size_t RUST_CONST_HELPER_ASHMEM_NAME_PREFIX_LEN = ASHMEM_NAME_PREFIX_LEN;
 const size_t RUST_CONST_HELPER_ASHMEM_FULL_NAME_LEN = ASHMEM_FULL_NAME_LEN;

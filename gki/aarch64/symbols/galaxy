@@ -91,6 +91,8 @@
   __traceiter_android_vh_madvise_pageout_return_error
   __traceiter_android_vh_meminfo_proc_show
   __traceiter_android_vh_migration_target_bypass
+  __traceiter_android_vh_mm_free
+  __traceiter_android_vh_mm_init
   __traceiter_android_vh_mutex_wait_finish
   __traceiter_android_vh_mutex_wait_start
   __traceiter_android_vh_page_cache_readahead_start
@@ -113,6 +115,7 @@
   __traceiter_android_vh_split_large_folio_bypass
   __traceiter_android_vh_sync_irq_wait_finish
   __traceiter_android_vh_sync_irq_wait_start
+  __traceiter_android_vh_task_mem
   __traceiter_android_vh_try_to_freeze_todo
   __traceiter_android_vh_try_to_freeze_todo_unfrozen
   __traceiter_android_vh_tune_scan_control
@@ -125,6 +128,7 @@
   __traceiter_android_vh_zs_shrinker_bypass
   __traceiter_console
   __traceiter_error_report_end
+  __traceiter_rss_stat
   __traceiter_vm_unmapped_area
   __traceiter_mark_victim
   __traceiter_android_vh_handle_add_skipped_blks
@@ -133,6 +137,7 @@
   __traceiter_android_vh_handle_add_blks_map
   __traceiter_android_vh_handle_add_fec_mismatch_blks
   __traceiter_android_vh_handle_get_b_info
+  __traceiter_android_vh_reasm_timer_adjust
   __tracepoint_android_rvh_arm64_serror_panic
   __tracepoint_android_rvh_die_kernel_fault
   __tracepoint_android_rvh_do_el1_bti
@@ -178,6 +183,8 @@
   __tracepoint_android_vh_madvise_pageout_return_error
   __tracepoint_android_vh_meminfo_proc_show
   __tracepoint_android_vh_migration_target_bypass
+  __tracepoint_android_vh_mm_free
+  __tracepoint_android_vh_mm_init
   __tracepoint_android_vh_mutex_wait_finish
   __tracepoint_android_vh_mutex_wait_start
   __tracepoint_android_vh_page_cache_readahead_start
@@ -200,6 +207,7 @@
   __tracepoint_android_vh_split_large_folio_bypass
   __tracepoint_android_vh_sync_irq_wait_finish
   __tracepoint_android_vh_sync_irq_wait_start
+  __tracepoint_android_vh_task_mem
   __tracepoint_android_vh_tune_scan_control
   __tracepoint_android_vh_try_to_freeze_todo
   __tracepoint_android_vh_try_to_freeze_todo_unfrozen
@@ -212,6 +220,7 @@
   __tracepoint_android_vh_zs_shrinker_bypass
   __tracepoint_console
   __tracepoint_error_report_end
+  __tracepoint_rss_stat
   __tracepoint_vm_unmapped_area
   __tracepoint_mark_victim
   __tracepoint_android_vh_handle_add_fec_mismatch_blks
@@ -220,6 +229,7 @@
   __tracepoint_android_vh_handle_add_skipped_blks
   __tracepoint_android_vh_handle_add_blks_map
   __tracepoint_android_vh_handle_get_b_info
+  __tracepoint_android_vh_reasm_timer_adjust
   usb_alloc_dev
   usb_set_device_state
   usbnet_change_mtu

@@ -215,6 +215,13 @@
   blk_mq_sched_mark_restart_hctx
   blk_mq_sched_try_insert_merge
   elv_rqhash_add
+  blkcg_print_blkgs
+  blkg_conf_init
+  blkg_conf_prep
+  blkg_conf_exit
+  __blkg_prfill_u64
+  blkcg_root
+  blkcg_activate_policy
 
 # required by mi_damon.ko
   folio_deactivate
@@ -470,6 +477,25 @@
   __traceiter_android_vh_reclaim_before_kswapd
   __tracepoint_android_vh_reclaim_before_kswapd
 
+# required by mi_ext_lru.ko
+mem_cgroup_iter
+__traceiter_android_vh_readahead_add_folio
+__tracepoint_android_vh_readahead_add_folio
+__traceiter_android_vh_mm_split_huge_page_bypass
+__tracepoint_android_vh_mm_split_huge_page_bypass
+__traceiter_android_vh_mm_try_split_folio_bypass
+__tracepoint_android_vh_mm_try_split_folio_bypass
+__traceiter_android_vh_mm_free_page
+__tracepoint_android_vh_mm_free_page
+__traceiter_android_vh_mm_isolate_priv_lru
+__tracepoint_android_vh_mm_isolate_priv_lru
+__traceiter_android_vh_folio_skip_activate
+__tracepoint_android_vh_folio_skip_activate
+__traceiter_android_vh_folio_trylock_clear_bypass
+__tracepoint_android_vh_folio_trylock_clear_bypass
+__traceiter_android_vh_filemap_adjust_folio_flags
+__tracepoint_android_vh_filemap_adjust_folio_flags
+
 #required by mem_reclaim_ctl.ko
 __traceiter_android_vh_page_should_be_protected
 __tracepoint_android_vh_page_should_be_protected
@@ -530,6 +556,8 @@ __tracepoint_android_vh_remove_mapping_failed
 __tracepoint_android_vh_filemap_get_folio_end
 __tracepoint_android_vh_do_new_mount_fc
 __tracepoint_android_vh_put_super
+LZ4_compress_default
+find_inode_nowait
 
 #required by mi_mempool.ko
 __traceiter_android_vh_mmput
@@ -571,6 +599,7 @@ __traceiter_android_vh_mmap_lock_init
 __tracepoint_android_vh_mmap_lock_init
 __traceiter_android_vh_mmap_lock_free
 __tracepoint_android_vh_mmap_lock_free
+cpumask_any_distribute
 
 __tracepoint_android_vh_mm_get_zone_mark
 __traceiter_android_vh_mm_get_zone_mark

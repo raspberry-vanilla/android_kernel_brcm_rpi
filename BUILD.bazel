@@ -393,6 +393,9 @@ common_kernel(
     outs = X86_64_OUTS,
     arch = "x86_64",
     build_gki_artifacts = True,
+    # We use aarch64 here because it's readily available and improves performance.
+    # See b/500458317 for more on x86_64 collection efforts.
+    clang_autofdo_profile = ":gki/aarch64/afdo/kernel.afdo",
     ddk_module_headers = [":all_headers_x86_64"],
     defconfig = "arch/x86/configs/gki_defconfig",
     extra_dist = [
@@ -897,7 +900,6 @@ _DB845C_MODULE_OUTS = [
     "drivers/usb/host/ohci-hcd.ko",
     "drivers/usb/host/ohci-pci.ko",
     "drivers/usb/host/ohci-platform.ko",
-    "drivers/usb/host/xhci-pci-renesas.ko",
     "drivers/usb/typec/mux/fsa4480.ko",
     "drivers/usb/typec/mux/nb7vpq904m.ko",
     "drivers/usb/typec/mux/wcd939x-usbss.ko",
@@ -2442,10 +2444,13 @@ ddk_headers(
 ddk_headers(
     name = "all_headers_allowlist_exynos",
     hdrs = [
+        "drivers/android/binder/rust_binder.h",
+        "drivers/android/binder/rust_binder_hooks.h",
         "drivers/android/binder_alloc.h",
         "drivers/android/binder_internal.h",
         "drivers/android/binder_trace.h",
         "drivers/android/dbitmap.h",
+        "kernel/futex/futex.h",
         "kernel/sched/cpudeadline.h",
         "kernel/sched/cpupri.h",
         "kernel/sched/ext.h",

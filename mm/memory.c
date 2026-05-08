@@ -180,6 +180,8 @@ static int __init init_zero_pfn(void)
 }
 early_initcall(init_zero_pfn);
 
+EXPORT_TRACEPOINT_SYMBOL_GPL(rss_stat);
+
 void mm_trace_rss_stat(struct mm_struct *mm, int member)
 {
 	trace_rss_stat(mm, member);
@@ -4323,6 +4325,7 @@ vm_fault_t do_swap_page(struct vm_fault *vmf)
 				 * to entry reuse.
 				 */
 				if (swapcache_prepare(entry, nr_pages)) {
+					trace_android_vh_do_swap_page_wait(folio, vmf);
 					/*
 					 * Relax a bit to prevent rapid
 					 * repeated page faults.
@@ -4381,6 +4384,7 @@ vm_fault_t do_swap_page(struct vm_fault *vmf)
 		goto out_release;
 	}
 
+	trace_android_vh_do_swap_page_folio_lock_check(folio, vmf);
 	ret |= folio_lock_or_retry(folio, vmf);
 	if (ret & VM_FAULT_RETRY)
 		goto out_release;
@@ -5289,8 +5293,18 @@ static vm_fault_t do_fault_around(struct vm_fault *vmf)
 	pgoff_t pte_off = pte_index(vmf->address);
 	/* The page offset of vmf->address within the VMA. */
 	pgoff_t vma_off = vmf->pgoff - vmf->vma->vm_pgoff;
+	pgoff_t nr_data_pages = vma_data_pages(vmf->vma);
 	pgoff_t from_pte, to_pte;
 	vm_fault_t ret;
+
+	/*
+	 * Fault occurred in the padding region. There are no file-cache pages
+	 * to map in this region, so skip fault-around.
+	 */
+	if (vma_off >= nr_data_pages)
+		return 0;
+
+	trace_android_vh_do_fault_around(vmf, &nr_pages);
 
 	/* The PTE offset of the start address, clamped to the VMA. */
 	from_pte = max(ALIGN_DOWN(pte_off, nr_pages),
@@ -5298,7 +5312,7 @@ static vm_fault_t do_fault_around(struct vm_fault *vmf)
 
 	/* The PTE offset of the end address, clamped to the VMA and PTE. */
 	to_pte = min3(from_pte + nr_pages, (pgoff_t)PTRS_PER_PTE,
-		      pte_off + vma_data_pages(vmf->vma) - vma_off) - 1;
+		      pte_off + nr_data_pages - vma_off) - 1;
 
 	if (pmd_none(*vmf->pmd)) {
 		vmf->prealloc_pte = pte_alloc_one(vmf->vma->vm_mm);

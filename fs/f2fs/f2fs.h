@@ -68,9 +68,14 @@ enum {
 	FAULT_MAX,
 };
 
-#ifdef CONFIG_F2FS_FAULT_INJECTION
-#define F2FS_ALL_FAULT_TYPE		(GENMASK(FAULT_MAX - 1, 0))
+/* indicate which option to update */
+enum fault_option {
+	FAULT_RATE	= 1,	/* only update fault rate */
+	FAULT_TYPE	= 2,	/* only update fault type */
+	FAULT_ALL	= 4,	/* reset all fault injection options/stats */
+};
 
+#ifdef CONFIG_F2FS_FAULT_INJECTION
 struct f2fs_fault_info {
 	atomic_t inject_ops;
 	int inject_rate;
@@ -157,6 +162,7 @@ enum f2fs_lock_name {
 	LOCK_NAME_GC_LOCK,
 	LOCK_NAME_CP_GLOBAL,
 	LOCK_NAME_IO_RWSEM,
+	LOCK_NAME_MAX,
 };
 
 /*
@@ -273,7 +279,6 @@ enum {
 #define DEF_CP_INTERVAL			60	/* 60 secs */
 #define DEF_IDLE_INTERVAL		5	/* 5 secs */
 #define DEF_DISABLE_INTERVAL		5	/* 5 secs */
-#define DEF_ENABLE_INTERVAL		16	/* 16 secs */
 #define DEF_DISABLE_QUICK_INTERVAL	1	/* 1 secs */
 #define DEF_UMOUNT_DISCARD_TIMEOUT	5	/* 5 secs */
 
@@ -619,6 +624,8 @@ enum {
 };
 
 #define DEFAULT_RETRY_IO_COUNT	8	/* maximum retry read IO or flush count */
+
+#define MAX_FLUSH_RETRY_COUNT	3	/* maximum flush retry count in f2fs_enable_checkpoint() */
 
 /* congestion wait timeout value, default: 20ms */
 #define	DEFAULT_IO_TIMEOUT	(msecs_to_jiffies(20))
@@ -1155,6 +1162,7 @@ enum count_type {
 	F2FS_RD_META,
 	F2FS_DIO_WRITE,
 	F2FS_DIO_READ,
+	F2FS_SKIPPED_WRITE,	/* skip or fail during f2fs_enable_checkpoint() */
 	NR_COUNT_TYPE,
 };
 
@@ -1355,7 +1363,10 @@ struct f2fs_time_stat {
 
 struct f2fs_lock_context {
 	struct f2fs_time_stat ts;
+	int orig_nice;
+	int new_nice;
 	bool lock_trace;
+	bool need_restore;
 };
 
 struct f2fs_gc_control {
@@ -1390,6 +1401,7 @@ enum {
 	SBI_IS_RESIZEFS,			/* resizefs is in process */
 	SBI_IS_FREEZING,			/* freezefs is in process */
 	SBI_IS_WRITABLE,			/* remove ro mountoption transiently */
+	SBI_ENABLE_CHECKPOINT,			/* indicate it's during f2fs_enable_checkpoint() */
 	MAX_SBI_FLAG,
 };
 
@@ -1399,7 +1411,6 @@ enum {
 	DISCARD_TIME,
 	GC_TIME,
 	DISABLE_TIME,
-	ENABLE_TIME,
 	UMOUNT_DISCARD_TIMEOUT,
 	MAX_TIME,
 };
@@ -1481,6 +1492,9 @@ enum {
 
 /* a threshold of maximum elapsed time in critical region to print tracepoint */
 #define MAX_LOCK_ELAPSED_TIME		500
+
+#define F2FS_DEFAULT_TASK_PRIORITY		(DEFAULT_PRIO)
+#define F2FS_CRITICAL_TASK_PRIORITY		NICE_TO_PRIO(0)
 
 static inline int f2fs_test_bit(unsigned int nr, char *addr);
 static inline void f2fs_set_bit(unsigned int nr, char *addr);
@@ -1575,6 +1589,7 @@ struct compress_io_ctx {
 struct decompress_io_ctx {
 	u32 magic;			/* magic number to indicate page is compressed */
 	struct inode *inode;		/* inode the context belong to */
+	struct f2fs_sb_info *sbi;	/* f2fs_sb_info pointer */
 	pgoff_t cluster_idx;		/* cluster index number */
 	unsigned int cluster_size;	/* page count in cluster */
 	unsigned int log_cluster_size;	/* log of cluster size */
@@ -1615,6 +1630,7 @@ struct decompress_io_ctx {
 
 	bool failed;			/* IO error occurred before decompression? */
 	bool need_verity;		/* need fs-verity verification after decompression? */
+	unsigned char compress_algorithm;	/* backup algorithm type */
 	void *private;			/* payload buffer for specified decompression algorithm */
 	void *private2;			/* extra payload buffer */
 	struct work_struct verity_work;	/* work to verify the decompressed pages */
@@ -1879,6 +1895,15 @@ struct f2fs_sb_info {
 
 	/* max elapsed time threshold in critical region that lock covered */
 	unsigned long long max_lock_elapsed_time;
+
+	/* enable/disable to adjust task priority in critical region covered by lock */
+	unsigned int adjust_lock_priority;
+
+	/* adjust priority for task which is in critical region covered by lock */
+	unsigned int lock_duration_priority;
+
+	/* priority for critical task, e.g. f2fs_ckpt, f2fs_gc threads */
+	long critical_task_priority;
 
 #ifdef CONFIG_F2FS_FS_COMPRESSION
 	struct kmem_cache *page_array_slab;	/* page array entry */
@@ -4849,10 +4874,11 @@ static inline bool f2fs_need_verity(const struct inode *inode, pgoff_t idx)
 
 #ifdef CONFIG_F2FS_FAULT_INJECTION
 extern int f2fs_build_fault_attr(struct f2fs_sb_info *sbi, unsigned long rate,
-							unsigned long type);
+					unsigned long type, enum fault_option fo);
 #else
 static inline int f2fs_build_fault_attr(struct f2fs_sb_info *sbi,
-					unsigned long rate, unsigned long type)
+					unsigned long rate, unsigned long type,
+					enum fault_option fo)
 {
 	return 0;
 }
