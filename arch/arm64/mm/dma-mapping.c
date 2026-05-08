@@ -17,22 +17,8 @@ void arch_sync_dma_for_device(phys_addr_t paddr, size_t size,
 			      enum dma_data_direction dir)
 {
 	unsigned long start = (unsigned long)phys_to_virt(paddr);
-	unsigned long end = start + size;
 
-	switch (dir) {
-	case DMA_BIDIRECTIONAL:
-		dcache_clean_inval_poc(start, end);
-		break;
-	case DMA_TO_DEVICE:
-		dcache_clean_poc(start, end);
-		break;
-	case DMA_FROM_DEVICE:
-		dcache_inval_poc(start, end);
-		break;
-	case DMA_NONE:
-	default:
-		break;
-	}
+	dcache_clean_poc(start, start + size);
 }
 
 void arch_sync_dma_for_cpu(phys_addr_t paddr, size_t size,
