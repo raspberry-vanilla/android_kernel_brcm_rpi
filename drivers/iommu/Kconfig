@@ -399,4 +399,11 @@ config PKVM_PVIOMMU_SELFTEST
 	help
 	  Basic test for PKVM_PVIOMMU
 
+config BCM2712_IOMMU
+       bool "BCM2712 IOMMU driver"
+       depends on ARM64 && ARCH_BCM
+       select IOMMU_API
+       help
+	 IOMMU driver for BCM2712
+
 endif # IOMMU_SUPPORT

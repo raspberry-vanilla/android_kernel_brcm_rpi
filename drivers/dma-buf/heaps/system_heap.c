@@ -66,6 +66,11 @@ static const unsigned int orders[] = {ORDER_1M, ORDER_64K, ORDER_FOR_PAGE_SIZE};
 
 #define NUM_ORDERS ARRAY_SIZE(orders)
 
+static unsigned int module_max_order = orders[0];
+
+module_param_named(max_order, module_max_order, uint, 0400);
+MODULE_PARM_DESC(max_order, "Maximum allocation order override.");
+
 static bool needs_swiotlb_bounce(struct device *dev, struct sg_table *table)
 {
 	struct iommu_domain *domain = iommu_get_domain_for_dev(dev);
@@ -390,7 +395,7 @@ static struct dma_buf *system_heap_do_allocate(struct dma_heap *heap,
 	struct system_heap_buffer *buffer;
 	DEFINE_DMA_BUF_EXPORT_INFO(exp_info);
 	unsigned long size_remaining = len;
-	unsigned int max_order = orders[0];
+	unsigned int max_order = module_max_order;
 	struct dma_buf *dmabuf;
 	struct sg_table *table;
 	struct scatterlist *sg;
@@ -540,6 +545,9 @@ static int __init system_heap_create(void)
 	dma_coerce_mask_and_coherent(dma_heap_get_dev(sys_uncached_heap), DMA_BIT_MASK(64));
 	mb(); /* make sure we only set allocate after dma_mask is set */
 	system_uncached_heap_ops.allocate = system_uncached_heap_allocate;
+
+	if (module_max_order > orders[0])
+		module_max_order = orders[0];
 
 	return 0;
 }

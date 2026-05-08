@@ -17,6 +17,8 @@
 #include <linux/elf.h>
 #include <linux/init.h>
 #include <linux/kernel.h>
+#include <linux/of.h>
+#include <linux/of_platform.h>
 #include <linux/personality.h>
 #include <linux/preempt.h>
 #include <linux/printk.h>
@@ -275,6 +277,31 @@ static int c_show(struct seq_file *m, void *v)
 	seq_printf(m, "CPU revision\t: %d\n\n", MIDR_REVISION(midr));
 
 	trace_android_rvh_cpuinfo_c_show(m);
+
+	if (cpumask_next(cpu, cpu_online_mask )>= nr_cpu_ids) {
+		struct device_node *np;
+		const char *model;
+		const char *serial;
+		u32 revision;
+
+		np = of_find_node_by_path("/system");
+		if (np) {
+			if (!of_property_read_u32(np, "linux,revision", &revision))
+				seq_printf(m, "Revision\t: %04x\n", revision);
+			of_node_put(np);
+		}
+
+		np = of_find_node_by_path("/");
+		if (np) {
+			if (!of_property_read_string(np, "serial-number",
+							&serial))
+				seq_printf(m, "Serial\t\t: %s\n", serial);
+			if (!of_property_read_string(np, "model",
+							&model))
+				seq_printf(m, "Model\t\t: %s\n", model);
+			of_node_put(np);
+		}
+	}
 
 	return 0;
 }
