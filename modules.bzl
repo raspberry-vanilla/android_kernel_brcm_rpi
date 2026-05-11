@@ -83,11 +83,17 @@ _ARM_GKI_MODULES_LIST = [
 
 _ARM64_GKI_MODULES_LIST = [
     # keep sorted
+    "arch/arm64/crypto/aes-neon-blk.ko",
     "arch/arm64/geniezone/gzvm.ko",
     "drivers/android/binder/rust_binder.ko",
     "drivers/char/hw_random/cctrng.ko",
     "drivers/misc/open-dice.ko",
     "drivers/virt/halla/exynos-hvm.ko",
+    "fs/efivarfs/efivarfs.ko",
+    "fs/pstore/pstore_blk.ko",
+    "fs/pstore/pstore_zone.ko",
+    "sound/pci/hda/snd-hda-codec-hdmi.ko",
+    "sound/soc/generic/snd-soc-audio-graph-card.ko",
 ]
 
 _X86_GKI_MODULES_LIST = [
