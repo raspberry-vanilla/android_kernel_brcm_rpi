@@ -343,7 +343,15 @@ struct io_ring_ctx {
 
 	spinlock_t		completion_lock;
 
+	/*
+	 * ANDROID
+	 * The io_buffers_comp variable was removed in 6.12.81, but needs to remain to keep the ABI
+	 * "stable"
+	 * DO NOT TOUCH OR USE!
+	 * See Bug 512370883 for more details if you are curious.
+	 */
 	struct list_head	io_buffers_comp;
+
 	struct list_head	cq_overflow_list;
 	struct io_hash_table	cancel_table;
 
@@ -363,6 +371,13 @@ struct io_ring_ctx {
 	unsigned int		file_alloc_start;
 	unsigned int		file_alloc_end;
 
+	/*
+	 * ANDROID
+	 * The io_buffers_cache variable was removed in 6.12.81, but needs to remain to keep
+	 * the ABI "stable"
+	 * DO NOT TOUCH OR USE!
+	 * See Bug 512370883 for more details if you are curious.
+	 */
 	struct list_head	io_buffers_cache;
 
 	/* Keep this last, we don't need it for the fast path */
@@ -634,10 +649,13 @@ struct io_kiocb {
 		struct io_buffer	*kbuf;
 
 		/*
-		 * stores buffer ID for ring provided buffers, valid IFF
-		 * REQ_F_BUFFER_RING is set.
+		 * ANDROID
+		 * This buf_list variable was removed in 6.12.81, but needs to remain to keep
+		 * gendwarfsyms from crashing.
+		 * DO NOT TOUCH OR USE!
+		 * See Bug 512370883 for more details if you are curious.
 		 */
-		struct io_buffer_list	*buf_list;
+		struct io_buffer_list   *buf_list;
 	};
 
 	union {
