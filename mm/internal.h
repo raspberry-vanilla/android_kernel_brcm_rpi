@@ -803,6 +803,11 @@ struct compact_control {
 	bool alloc_contig;		/* alloc_contig_range allocation */
 };
 
+struct compact_control_ext {
+	struct compact_control *cc;
+	unsigned int nr_migrate_file_pages;	/* Number of file pages to migrate */
+};
+
 /*
  * Used in direct compaction when a page should be taken from the freelists
  * immediately when one is created during the free path.
@@ -1017,6 +1022,16 @@ static inline struct file *maybe_unlock_mmap_for_io(struct vm_fault *vmf,
 	}
 	return fpin;
 }
+
+static inline bool vma_supports_mlock(const struct vm_area_struct *vma)
+{
+	if (vma->vm_flags & (VM_SPECIAL | VM_DROPPABLE))
+		return false;
+	if (vma_is_dax(vma) || is_vm_hugetlb_page(vma))
+		return false;
+	return vma != get_gate_vma(current->mm);
+}
+
 #else /* !CONFIG_MMU */
 static inline void unmap_mapping_folio(struct folio *folio) { }
 static inline void mlock_new_folio(struct folio *folio) { }
