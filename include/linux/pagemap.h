@@ -657,8 +657,16 @@ static inline void *detach_page_private(struct page *page)
 #ifdef CONFIG_NUMA
 struct folio *filemap_alloc_folio_noprof(gfp_t gfp, unsigned int order);
 #else
+extern void _trace_android_vh_filemap_alloc_folio(gfp_t gfp, unsigned int order,
+					   bool *alloc_fail);
+
 static inline struct folio *filemap_alloc_folio_noprof(gfp_t gfp, unsigned int order)
 {
+	bool alloc_fail = false;
+	_trace_android_vh_filemap_alloc_folio(gfp, order, &alloc_fail);
+	if (alloc_fail)
+		return NULL;
+
 	return folio_alloc_noprof(gfp, order);
 }
 #endif
@@ -1342,7 +1350,7 @@ struct readahead_control {
 	unsigned long _pflags;
 
 	ANDROID_OEM_DATA(1);
-	ANDROID_KABI_RESERVE(1);
+	ANDROID_KABI_USE(1, pgoff_t _max_index); /* limit readahead to _max_index, inclusive */
 };
 
 #define DEFINE_READAHEAD(ractl, f, r, m, i)				\
@@ -1351,6 +1359,7 @@ struct readahead_control {
 		.mapping = m,						\
 		.ra = r,						\
 		._index = i,						\
+		._max_index = ULONG_MAX,				\
 	}
 
 #define VM_READAHEAD_PAGES	(SZ_128K / PAGE_SIZE)

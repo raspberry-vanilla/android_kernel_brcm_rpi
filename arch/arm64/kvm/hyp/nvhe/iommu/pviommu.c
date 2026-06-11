@@ -265,6 +265,7 @@ static int __smccc_prot_linux(u64 prot)
 static bool pkvm_guest_iommu_map(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
 {
 	size_t total_mapped = 0;
+	struct pkvm_hyp_vm *vm = pkvm_hyp_vcpu_to_hyp_vm(hyp_vcpu);
 	struct kvm_vcpu *vcpu = &hyp_vcpu->vcpu;
 	u64 domain = smccc_get_arg2(vcpu);
 	u64 iova = smccc_get_arg3(vcpu);
@@ -313,7 +314,7 @@ static bool pkvm_guest_iommu_map(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exit_code)
 		kvm_iommu_map_pages(domain, iova, paddr,
 				    PAGE_SIZE, pinned_size / PAGE_SIZE,
 				    iommu_prot, &mapped);
-		WARN_ON(__pkvm_unuse_dma(paddr, pinned_size, hyp_vcpu));
+		WARN_ON(__pkvm_unuse_dma(paddr, pinned_size, vm));
 		if (!mapped) {
 			if (!__need_req(vcpu)) {
 				smccc_ret = SMCCC_RET_INVALID_PARAMETER;
@@ -395,12 +396,25 @@ bool kvm_handle_pviommu_hvc(struct kvm_vcpu *vcpu, u64 *exit_code)
 	u64 iommu_op = smccc_get_arg1(vcpu);
 	struct pkvm_hyp_vcpu *hyp_vcpu = container_of(vcpu, struct pkvm_hyp_vcpu, vcpu);
 	struct pkvm_hyp_vm *vm = pkvm_hyp_vcpu_to_hyp_vm(hyp_vcpu);
+	int ret;
 
 	/*
 	 * Eagerly fill the vm iommu pool to avoid deadlocks from donation path while
 	 * doing IOMMU operations.
 	 */
-	refill_hyp_pool(&vm->iommu_pool, &hyp_vcpu->host_vcpu->arch.iommu_mc);
+	ret = refill_hyp_pool(&vm->iommu_pool, &hyp_vcpu->host_vcpu->arch.iommu_mc);
+	switch (ret) {
+	case 0:
+		break;
+	case -ENOMEMHOSTS2:
+		if (pkvm_request_host_s2(hyp_vcpu, exit_code, true))
+			goto out_guest_err;
+
+		return false;
+	default:
+		goto out_guest_err;
+	}
+
 	switch (iommu_op) {
 	case KVM_PVIOMMU_OP_ALLOC_DOMAIN:
 		return pkvm_guest_iommu_alloc_domain(hyp_vcpu, exit_code);
@@ -416,6 +430,7 @@ bool kvm_handle_pviommu_hvc(struct kvm_vcpu *vcpu, u64 *exit_code)
 		return pkvm_guest_iommu_unmap(hyp_vcpu, exit_code);
 	}
 
+out_guest_err:
 	smccc_set_retval(vcpu, SMCCC_RET_NOT_SUPPORTED, 0, 0, 0);
 	return true;
 }

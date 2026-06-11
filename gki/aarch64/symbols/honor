@@ -126,6 +126,8 @@
   __mod_lruvec_state
   mem_cgroup_update_lru_size
   folio_referenced
+  get_reclaim_params
+  set_reclaim_params
   __traceiter_android_vh_mem_cgroup_free
   __tracepoint_android_vh_mem_cgroup_free
   __traceiter_android_vh_mem_cgroup_alloc
@@ -156,6 +158,8 @@
   __tracepoint_android_rvh_vmalloc_node_bypass
   __traceiter_android_rvh_vfree_bypass
   __tracepoint_android_rvh_vfree_bypass
+  __traceiter_android_rvh_do_read_fault
+  __tracepoint_android_rvh_do_read_fault
   __traceiter_android_vh_should_fault_around
   __tracepoint_android_vh_should_fault_around
   __traceiter_android_vh_process_madvise_begin
@@ -457,6 +461,8 @@
   __tracepoint_android_rvh_panic_unhandled
   __tracepoint_android_vh_sk_free
   __tracepoint_task_newtask
+  _trace_android_vh_pcpu_rwsem_lock_acquired
+  _trace_android_vh_pcpu_rwsem_lock_released
   filp_open_block
   flush_signals
   jiffies64_to_msecs

@@ -4,6 +4,7 @@
  * Author: Christoffer Dall <c.dall@virtualopensystems.com>
  */
 
+#include <linux/arm-smccc.h>
 #include <linux/bug.h>
 #include <linux/cpu_pm.h>
 #include <linux/errno.h>
@@ -2122,8 +2123,17 @@ static void __init cpu_prepare_hyp_mode(int cpu, u32 hyp_va_bits)
 	if (cpus_have_final_cap(ARM64_KVM_HVHE))
 		params->hcr_el2 |= HCR_E2H;
 	params->vttbr = params->vtcr = 0;
+	/*
+	 * Software mirror of HFGWTR_EL2: ___kvm_hyp_init() writes this over
+	 * the value set by __init_el2_fgt() (el2_setup.h), so every
+	 * trap-disable bit set there must be replicated here. nPOR_EL1 /
+	 * nS2POR_EL1 are a deliberate superset of that baseline.
+	 */
 	params->hfgwtr_el2 = HFGWTR_EL2_nSMPRI_EL1_MASK | HFGWTR_EL2_nTPIDR2_EL0_MASK |
-			     HFGWTR_EL2_nGCS_EL0_MASK | HFGWTR_EL2_nGCS_EL1_MASK;
+			     HFGWTR_EL2_nGCS_EL0_MASK | HFGWTR_EL2_nGCS_EL1_MASK |
+			     HFGWTR_EL2_nPIR_EL1_MASK | HFGWTR_EL2_nPIRE0_EL1_MASK |
+			     HFGWTR_EL2_nPOR_EL1_MASK | HFGWTR_EL2_nPOR_EL0_MASK |
+			     HFGWTR_EL2_nS2POR_EL1_MASK;
 
 	/*
 	 * Flush the init params from the data cache because the struct will
@@ -2640,6 +2650,22 @@ static int init_pkvm_host_sve_state(void)
 	return 0;
 }
 
+static int pkvm_check_sme_dvmsync_fw_call(void)
+{
+	struct arm_smccc_res res;
+
+	if (!cpus_have_final_cap(ARM64_WORKAROUND_4193714))
+		return 0;
+
+	arm_smccc_1_1_smc(ARM_SMCCC_CPU_WORKAROUND_4193714, &res);
+	if (res.a0) {
+		kvm_err("pKVM requires firmware support for C1-Pro erratum 4193714\n");
+		return -ENODEV;
+	}
+
+	return 0;
+}
+
 /*
  * Finalizes the initialization of hyp mode, once everything else is initialized
  * and the initialziation process cannot fail.
@@ -2837,6 +2863,10 @@ static int __init init_hyp_mode(void)
 		}
 
 		err = init_pkvm_host_sve_state();
+		if (err)
+			goto out_err;
+
+		err = pkvm_check_sme_dvmsync_fw_call();
 		if (err)
 			goto out_err;
 

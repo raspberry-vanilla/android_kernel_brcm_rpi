@@ -44,6 +44,8 @@
 #include <linux/ramfs.h>
 #include <linux/page_idle.h>
 #include <linux/page_size_compat.h>
+#include <linux/pgsize_migration.h>
+#include <linux/vma_readahead_boundary.h>
 #include <linux/migrate.h>
 #include <linux/pipe_fs_i.h>
 #include <linux/splice.h>
@@ -1045,6 +1047,18 @@ struct folio *filemap_alloc_folio_noprof(gfp_t gfp, unsigned int order)
 	return folio_alloc_noprof(gfp, order);
 }
 EXPORT_SYMBOL(filemap_alloc_folio_noprof);
+#else
+/*
+ * trace_android_vh_filemap_alloc_folio is called in include/linux/pagemap.h
+ * by including include/trace/hooks/mm.h, which will result to build-err.
+ * So we create func: _trace_android_vh_filemap_alloc_folio.
+ */
+void _trace_android_vh_filemap_alloc_folio(gfp_t gfp, unsigned int order,
+					   bool *alloc_fail)
+{
+	trace_android_vh_filemap_alloc_folio(gfp, order, alloc_fail);
+}
+EXPORT_SYMBOL_GPL(_trace_android_vh_filemap_alloc_folio);
 #endif
 
 /*
@@ -3313,6 +3327,9 @@ static struct file *do_sync_mmap_readahead(struct vm_fault *vmf)
 	if (skip)
 		return fpin;
 
+	if (is_vma_readahead_boundary_enabled())
+		ractl._max_index = vmf->vma->vm_pgoff + vma_data_pages(vmf->vma) - 1;
+
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
 	/* Use the readahead code, even if readahead is disabled */
 	if ((vm_flags & VM_HUGEPAGE) && HPAGE_PMD_ORDER <= MAX_PAGECACHE_ORDER) {
@@ -3376,7 +3393,7 @@ static struct file *do_sync_mmap_readahead(struct vm_fault *vmf)
 		 */
 		struct vm_area_struct *vma = vmf->vma;
 		unsigned long start = vma->vm_pgoff;
-		unsigned long end = start + vma_pages(vma);
+		unsigned long end = start + vma_data_pages(vma);
 		unsigned long ra_end;
 
 		ra->order = exec_folio_order();
@@ -3391,6 +3408,8 @@ static struct file *do_sync_mmap_readahead(struct vm_fault *vmf)
 		 * mmap read-around
 		 */
 		ra->start = max_t(long, 0, vmf->pgoff - ra->ra_pages / 2);
+		if (is_vma_readahead_boundary_enabled())
+			ra->start = max(ra->start, vmf->vma->vm_pgoff);
 		ra->size = ra->ra_pages;
 		ra->async_size = ra->ra_pages / 4;
 		ra->order = 0;
@@ -3402,6 +3421,7 @@ static struct file *do_sync_mmap_readahead(struct vm_fault *vmf)
 	ractl._index = ra->start;
 	trace_android_vh_page_cache_readahead_start(file, vmf->pgoff,
 			ra->size, true);
+	trace_android_vh_customize_ractl(&ractl, ra, vmf->vma, false);
 	page_cache_ra_order(&ractl, ra);
 	trace_android_vh_page_cache_readahead_end(file, vmf->pgoff);
 	return fpin;
@@ -3443,6 +3463,8 @@ static struct file *do_async_mmap_readahead(struct vm_fault *vmf,
 	}
 
 	if (folio_test_readahead(folio)) {
+		if (is_vma_readahead_boundary_enabled())
+			ractl._max_index = vmf->vma->vm_pgoff + vma_data_pages(vmf->vma) - 1;
 		fpin = maybe_unlock_mmap_for_io(vmf, fpin);
 		trace_android_vh_page_cache_readahead_start(file, vmf->pgoff,
 				ra->ra_pages, false);
@@ -3884,6 +3906,7 @@ static vm_fault_t filemap_map_order0_folio(struct vm_fault *vmf,
 
 	set_pte_range(vmf, folio, page, 1, addr);
 	(*rss)++;
+	trace_android_vh_map_order0_folio(vmf->vma->vm_file, vmf->pgoff, folio, ret);
 	return ret;
 
 out:
@@ -3907,6 +3930,7 @@ vm_fault_t filemap_map_pages(struct vm_fault *vmf,
 	unsigned int nr_pages = 0, folio_type;
 	unsigned short mmap_miss = 0, mmap_miss_saved;
 	pgoff_t first_pgoff = 0;
+	pgoff_t orig_start_pgoff = start_pgoff;
 
 	/*
 	 * Recalculate end_pgoff based on file_end before calling
@@ -3921,6 +3945,7 @@ vm_fault_t filemap_map_pages(struct vm_fault *vmf,
 	if (!folio)
 		goto out;
 	first_pgoff = xas.xa_index;
+	orig_start_pgoff = xas.xa_index;
 
 	/*
 	 * Do not allow to map with PMD across i_size to preserve
@@ -3976,7 +4001,8 @@ out:
 		WRITE_ONCE(file->f_ra.mmap_miss, 0);
 	else
 		WRITE_ONCE(file->f_ra.mmap_miss, mmap_miss_saved - mmap_miss);
-	trace_android_vh_filemap_map_pages(file, first_pgoff, last_pgoff, ret);
+	trace_android_vh_filemap_map_pages(file, orig_start_pgoff,
+					first_pgoff, last_pgoff, ret);
 
 	return ret;
 }

@@ -162,7 +162,7 @@ struct user_event_mm;
  */
 #define is_special_task_state(state)					\
 	((state) & (__TASK_STOPPED | __TASK_TRACED | TASK_PARKED |	\
-		    TASK_DEAD | TASK_FROZEN))
+		    TASK_DEAD | TASK_WAKING | TASK_FROZEN))
 
 #ifdef CONFIG_DEBUG_ATOMIC_SLEEP
 # define debug_normal_state_change(state_value)				\
@@ -889,6 +889,7 @@ struct task_struct {
 	int				recent_used_cpu;
 	int				wake_cpu;
 	int				on_rq;
+	int				is_blocked;
 
 	int				prio;
 	int				static_prio;
@@ -1710,10 +1711,10 @@ struct task_struct {
 	struct unwind_task_info		unwind_info;
 #endif
 
+	struct task_dma_buf_info *dmabuf_info;
+
 	/* CPU-specific state of this task: */
 	struct thread_struct		thread;
-
-	struct task_dma_buf_info *dmabuf_info;
 
 	/*
 	 * New fields for task_struct should be added above here, so that
