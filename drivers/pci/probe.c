@@ -2487,12 +2487,14 @@ bool pci_bus_read_dev_vendor_id(struct pci_bus *bus, int devfn, u32 *l,
 }
 EXPORT_SYMBOL(pci_bus_read_dev_vendor_id);
 
-#if IS_ENABLED(CONFIG_PCI_PWRCTL)
 static struct platform_device *pci_pwrctrl_create_device(struct pci_bus *bus, int devfn)
 {
 	struct pci_host_bridge *host = pci_find_host_bridge(bus);
 	struct platform_device *pdev;
 	struct device_node *np;
+
+	if (brcm_pcie_pwrctrl_quirk(dev_of_node(&bus->dev)))
+		return NULL;
 
 	np = of_pci_find_child_device(dev_of_node(&bus->dev), devfn);
 	if (!np)
@@ -2530,12 +2532,6 @@ err_put_of_node:
 
 	return NULL;
 }
-#else
-static struct platform_device *pci_pwrctrl_create_device(struct pci_bus *bus, int devfn)
-{
-	return NULL;
-}
-#endif
 
 /*
  * Read the config data for a PCI device, sanity-check it,

@@ -1646,7 +1646,11 @@ struct task_struct {
 #else
 	ANDROID_KABI_RESERVE(2);
 #endif
-	ANDROID_KABI_RESERVE(3);
+	ANDROID_KABI_USE(3, struct {
+		/* Save user-dumpable when mm goes away */
+		unsigned	user_dumpable:1;
+		});
+
 	ANDROID_KABI_RESERVE(4);
 	ANDROID_KABI_RESERVE(5);
 	ANDROID_KABI_RESERVE(6);
