@@ -54,6 +54,7 @@
 #include "mm.c"
 #include "mman.c"
 #include "mutex.c"
+#include "net/genetlink.c"
 #include "page.c"
 #include "pid_namespace.c"
 #include "poll.c"

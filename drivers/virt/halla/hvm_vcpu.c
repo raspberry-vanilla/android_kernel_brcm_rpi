@@ -322,19 +322,36 @@ static long hvm_vcpu_ioctl(struct file *filp, unsigned int ioctl,
 	return ret;
 }
 
-static const struct file_operations hvm_vcpu_fops = {
-	.unlocked_ioctl = hvm_vcpu_ioctl,
-};
-
-/* caller must hold the vm lock */
-static void hvm_destroy_vcpu(struct hvm_vcpu *vcpu)
+static int hvm_vcpu_release(struct inode *inode, struct file *filp)
 {
-	if (!vcpu)
-		return;
+	struct hvm_vcpu *vcpu = filp->private_data;
+	struct hvm *hvm = vcpu->hvm;
 
-	/* Destroy vcpu in Halla */
+	/*
+	 * Detach this vcpu from hvm->vcpus[] before freeing it, so a
+	 * later VM fd release running hvm_destroy_vcpus() cannot find a
+	 * dangling slot.  Serialise the slot update against
+	 * hvm_destroy_vcpus() with hvm->lock.
+	 */
+	mutex_lock(&hvm->lock);
+	if (vcpu->vcpuid < HVM_MAX_VCPUS &&
+	    hvm->vcpus[vcpu->vcpuid] == vcpu)
+		hvm->vcpus[vcpu->vcpuid] = NULL;
+	mutex_unlock(&hvm->lock);
+
+	/*
+	 * Stop the idle hrtimer before freeing the vcpu so its callback
+	 * cannot dereference the freed object.
+	 */
+	hrtimer_cancel(&vcpu->idle_hrtimer);
+
+	/*
+	 * Tell the hypervisor to drop this vcpu if the VM teardown path
+	 * has not already done so.  HVC_FID_HVM_DESTROY_VCPU is idempotent
+	 * on the hypervisor side.
+	 */
 	exynos_hvc(HVC_FID_HVM_DESTROY_VCPU,
-		   ((vcpu->hvm->vm_id << 16) | vcpu->vcpuid),
+		   ((hvm->vm_id << 16) | vcpu->vcpuid),
 		   0, 0, 0);
 
 	/*
@@ -346,19 +363,42 @@ static void hvm_destroy_vcpu(struct hvm_vcpu *vcpu)
 	memset(vcpu->run, 0, HVM_VCPU_RUN_MAP_SIZE);
 	free_pages_exact(vcpu->run, HVM_VCPU_RUN_MAP_SIZE);
 	kfree(vcpu);
+
+	hvm_vm_put(hvm);
+	return 0;
 }
 
+static const struct file_operations hvm_vcpu_fops = {
+	.unlocked_ioctl = hvm_vcpu_ioctl,
+	.release        = hvm_vcpu_release,
+};
+
 /**
- * hvm_destroy_vcpus() - Destroy all vcpus, caller has to hold the vm lock
+ * hvm_destroy_vcpus() - Detach all live vcpus from the hypervisor.
  *
  * @hvm: vm struct that owns the vcpus
+ *
+ * Called from the VM fd release path with hvm->lock held.  Only the
+ * hypervisor-side state is torn down here; the kernel-side hvm_vcpu
+ * objects (and their shared run pages) are owned by the vcpu fd and
+ * are released by hvm_vcpu_release() when the last reference to that
+ * fd goes away.  After this call vcpu->hvm is still a valid pointer
+ * because each vcpu fd holds a kref on the VM.
  */
 void hvm_destroy_vcpus(struct hvm *hvm)
 {
 	int i;
 
 	for (i = 0; i < hvm->nr_vcpus; i++) {
-		hvm_destroy_vcpu(hvm->vcpus[i]);
+		struct hvm_vcpu *vcpu = hvm->vcpus[i];
+
+		if (!vcpu)
+			continue;
+
+		exynos_hvc(HVC_FID_HVM_DESTROY_VCPU,
+			   ((hvm->vm_id << 16) | vcpu->vcpuid),
+			   0, 0, 0);
+
 		hvm->vcpus[i] = NULL;
 	}
 	hvm->nr_vcpus = 0;
@@ -416,18 +456,33 @@ int hvm_vm_ioctl_create_vcpu(struct hvm *hvm, u32 cpuid)
 	if (ret < 0)
 		goto free_vcpu_run;
 
+	hvm_vtimer_init_regs(vcpu);
+	hvm_idle_hrtimer_init(vcpu);
+
+	/*
+	 * Take a reference on the VM for the vcpu fd; the matching put is
+	 * in hvm_vcpu_release().  Acquire it before installing the fd so
+	 * that an immediate close from userspace cannot race the increment.
+	 * vcpu state must also be fully initialised before the fd is
+	 * installed, otherwise a concurrent close could enter
+	 * hvm_vcpu_release() against a half-built vcpu (e.g. uninitialised
+	 * idle_hrtimer).
+	 */
+	hvm_vm_get(hvm);
+
 	ret = create_vcpu_fd(vcpu);
 	if (ret < 0)
-		goto free_vcpu_run;
+		goto put_vm;
 	hvm->vcpus[cpuid] = vcpu;
 	hvm->nr_vcpus += 1;
 
-	hvm_vtimer_init_regs(vcpu);
-
-	hvm_idle_hrtimer_init(vcpu);
-
 	return ret;
 
+put_vm:
+	exynos_hvc(HVC_FID_HVM_DESTROY_VCPU,
+		   ((hvm->vm_id << 16) | vcpu->vcpuid),
+		   0, 0, 0);
+	hvm_vm_put(hvm);
 free_vcpu_run:
 	free_pages_exact(vcpu->run, HVM_VCPU_RUN_MAP_SIZE);
 free_vcpu:

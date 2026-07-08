@@ -635,7 +635,6 @@ __mutex_lock_common(struct mutex *lock, unsigned int state, unsigned int subclas
 	}
 
 	raw_spin_lock_irqsave(&lock->wait_lock, flags);
-	raw_spin_lock(&current->blocked_lock);
 	/*
 	 * After waiting to acquire the wait_lock, try again.
 	 */
@@ -667,6 +666,7 @@ __mutex_lock_common(struct mutex *lock, unsigned int state, unsigned int subclas
 	}
 
 	trace_android_vh_mutex_wait_start(lock);
+	raw_spin_lock(&current->blocked_lock);
 	__set_task_blocked_on(current, lock);
 	set_current_state(state);
 	trace_contention_begin(lock, LCB_F_MUTEX);
@@ -682,6 +682,7 @@ __mutex_lock_common(struct mutex *lock, unsigned int state, unsigned int subclas
 		if (__mutex_trylock(lock))
 			break; /* acquired */;
 
+		raw_spin_unlock(&current->blocked_lock);
 		/*
 		 * Check for signals and kill conditions while holding
 		 * wait_lock. This ensures the lock cancellation is ordered
@@ -698,7 +699,6 @@ __mutex_lock_common(struct mutex *lock, unsigned int state, unsigned int subclas
 				goto err;
 		}
 
-		raw_spin_unlock(&current->blocked_lock);
 		raw_spin_unlock_irqrestore(&lock->wait_lock, flags);
 		/* Make sure we do wakeups before calling schedule */
 		wake_up_q(&wake_q);
@@ -710,11 +710,12 @@ __mutex_lock_common(struct mutex *lock, unsigned int state, unsigned int subclas
 
 		raw_spin_lock_irqsave(&lock->wait_lock, flags);
 		raw_spin_lock(&current->blocked_lock);
-
 		/*
-		 * Re-set blocked_on_state as unlock path set it to WAKING/RUNNABLE
+		 * As we likely have been woken up by task
+		 * that has cleared our blocked_on state, re-set
+		 * it to the lock we are trying to acquire.
 		 */
-		current->blocked_on_state = BO_BLOCKED;
+		__set_task_blocked_on(current, lock);
 		set_current_state(state);
 		/*
 		 * Here we order against unlock; we must either see it change
@@ -733,15 +734,16 @@ __mutex_lock_common(struct mutex *lock, unsigned int state, unsigned int subclas
 			 * and clear blocked on so we don't become unselectable
 			 * to run.
 			 */
-			current->blocked_on_state = BO_RUNNABLE;
+			__clear_task_blocked_on(current, lock);
 			raw_spin_unlock(&current->blocked_lock);
 			raw_spin_unlock_irqrestore(&lock->wait_lock, flags);
+
 			trace_contention_begin(lock, LCB_F_MUTEX | LCB_F_SPIN);
 			opt_acquired = mutex_optimistic_spin(lock, ww_ctx, &waiter);
+
 			raw_spin_lock_irqsave(&lock->wait_lock, flags);
 			raw_spin_lock(&current->blocked_lock);
-			current->blocked_on_state = BO_BLOCKED;
-			set_current_state(state);
+			__set_task_blocked_on(current, lock);
 
 			if (opt_acquired)
 				break;
@@ -751,6 +753,7 @@ __mutex_lock_common(struct mutex *lock, unsigned int state, unsigned int subclas
 	__clear_task_blocked_on(current, lock);
 	__set_current_state(TASK_RUNNING);
 	trace_android_vh_mutex_wait_finish(lock);
+	raw_spin_unlock(&current->blocked_lock);
 
 	if (ww_ctx) {
 		/*
@@ -774,7 +777,6 @@ skip_wait:
 	if (ww_ctx)
 		ww_mutex_lock_acquired(ww, ww_ctx);
 
-	raw_spin_unlock(&current->blocked_lock);
 	raw_spin_unlock_irqrestore(&lock->wait_lock, flags);
 	wake_up_q(&wake_q);
 	trace_android_vh_record_mutex_lock_starttime(lock, jiffies);
@@ -782,14 +784,13 @@ skip_wait:
 	return 0;
 
 err:
-	__clear_task_blocked_on(current, lock);
+	clear_task_blocked_on(current, lock);
 	__set_current_state(TASK_RUNNING);
 	trace_android_vh_mutex_wait_finish(lock);
 	__mutex_remove_waiter(lock, &waiter);
 err_early_kill:
-	WARN_ON(__get_task_blocked_on(current));
+	WARN_ON(get_task_blocked_on(current));
 	trace_contention_end(lock, ret);
-	raw_spin_unlock(&current->blocked_lock);
 	raw_spin_unlock_irqrestore(&lock->wait_lock, flags);
 	debug_mutex_free_waiter(&waiter);
 	mutex_release(&lock->dep_map, ip);
@@ -995,10 +996,10 @@ static noinline void __sched __mutex_unlock_slowpath(struct mutex *lock, unsigne
 	}
 
 	raw_spin_lock_irqsave(&lock->wait_lock, flags);
+	raw_spin_lock(&current->blocked_lock);
 	debug_mutex_unlock(lock);
 
 	if (sched_proxy_exec()) {
-		raw_spin_lock(&current->blocked_lock);
 		/*
 		 * If we have a task boosting current, and that task was boosting
 		 * current through this lock, hand the lock to that task, as that
@@ -1012,7 +1013,7 @@ static noinline void __sched __mutex_unlock_slowpath(struct mutex *lock, unsigne
 			next_lock = __get_task_blocked_on(donor);
 			if (next_lock == lock) {
 				next = donor;
-				__set_blocked_on_waking(donor);
+				__set_task_blocked_on_waking(donor, next_lock);
 				wake_q_add(&wake_q, donor);
 				current->blocked_donor = NULL;
 			}
@@ -1033,17 +1034,16 @@ static noinline void __sched __mutex_unlock_slowpath(struct mutex *lock, unsigne
 
 		raw_spin_lock_nested(&next->blocked_lock, SINGLE_DEPTH_NESTING);
 		debug_mutex_wake_waiter(lock, waiter);
-		WARN_ON_ONCE(__get_task_blocked_on(next) != lock);
-		__set_blocked_on_waking(next);
+		__set_task_blocked_on_waking(next, lock);
 		raw_spin_unlock(&next->blocked_lock);
 		wake_q_add(&wake_q, next);
+
 	}
 
 	if (owner & MUTEX_FLAG_HANDOFF)
 		__mutex_handoff(lock, next);
 
-	if (sched_proxy_exec())
-		raw_spin_unlock(&current->blocked_lock);
+	raw_spin_unlock(&current->blocked_lock);
 	trace_android_vh_mutex_unlock_slowpath_before_wakeq(lock);
 	preempt_disable();
 	raw_spin_unlock_irqrestore(&lock->wait_lock, flags);

@@ -882,9 +882,14 @@ static int madvise_free_single_vma(struct vm_area_struct *vma,
 static long madvise_dontneed_single_vma(struct vm_area_struct *vma,
 					unsigned long start, unsigned long end)
 {
+	struct zap_details details = {
+		.zap_flags = ZAP_FLAG_RECLAIM_PT,
+		.even_cows = true,
+	};
+
 	madvise_vma_pad_pages(vma, start, end);
 
-	zap_page_range_single(vma, start, end - start, NULL);
+	zap_page_range_single(vma, start, end - start, &details);
 	return 0;
 }
 

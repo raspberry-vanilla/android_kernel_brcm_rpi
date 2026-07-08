@@ -1216,6 +1216,8 @@
   genl_register_family
   genl_unregister_family
   __genphy_config_aneg
+  genphy_c45_pma_read_ext_abilities
+  genphy_c45_read_lpa
   genphy_read_abilities
   genphy_read_mmd_unsupported
   genphy_read_status
@@ -1889,6 +1891,7 @@
   mdiobus_modify_changed
   __mdiobus_read
   mdiobus_read
+  __mdiobus_modify_changed
   __mdiobus_register
   mdiobus_unregister
   __mdiobus_write

@@ -350,6 +350,8 @@
   __tracepoint_android_vh_tcp_select_window
   __traceiter_android_vh_uplink_send_msg
   __tracepoint_android_vh_uplink_send_msg
+  __traceiter_tcp_send_reset
+  __tracepoint_tcp_send_reset
   __traceiter_android_vh_tcp_fastsyn
   __tracepoint_android_vh_tcp_fastsyn
   __traceiter_android_vh_tcp_state_change

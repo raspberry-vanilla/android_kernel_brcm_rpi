@@ -113,9 +113,18 @@ static int hvm_register_vm_pgtable(struct hvm *hvm)
 	size_t size = PAGE_SIZE * 2;
 	unsigned long ret;
 
+	mutex_lock(&hvm->lock);
+
+	if (hvm->pgtable_num >= HVM_MAX_VM_PGTABLE_SIZE) {
+		mutex_unlock(&hvm->lock);
+		return -ENOSPC;
+	}
+
 	buf = hvm_alloc_pages(size);
-	if (buf == NULL)
+	if (buf == NULL) {
+		mutex_unlock(&hvm->lock);
 		return -ENOMEM;
+	}
 
 	buf_pa = virt_to_phys(buf);
 
@@ -123,10 +132,13 @@ static int hvm_register_vm_pgtable(struct hvm *hvm)
 			 hvm->vm_id, buf_pa, size, 0);
 	if (ret) {
 		hvm_free_pages(buf, size);
+		mutex_unlock(&hvm->lock);
 		return -EINVAL;
 	}
 
 	hvm->vm_pgtable[hvm->pgtable_num++] = buf;
+
+	mutex_unlock(&hvm->lock);
 
 	return 0;
 }

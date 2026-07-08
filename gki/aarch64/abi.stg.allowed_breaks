@@ -192,6 +192,61 @@ type 'struct tegra_mc_ops' changed
   member 'int(* probe_device)(struct tegra_mc*, struct device*)' changed
     offset changed by -64
 
+type 'struct bindings::bindings_raw::net' changed
+  byte size changed from 0 to 4160
+  member 'u8 _unused[0]' was removed
+  member 'struct bindings::bindings_raw::refcount_struct passive' was added
+  member 'struct bindings::bindings_raw::spinlock rules_mod_lock' was added
+  member 'u32 dev_base_seq' was added
+  member 'u32 ifindex' was added
+  member 'struct bindings::bindings_raw::spinlock nsid_lock' was added
+  member 'struct bindings::bindings_raw::atomic_t fnhe_genid' was added
+  member 'struct bindings::bindings_raw::list_head list' was added
+  member 'struct bindings::bindings_raw::list_head exit_list' was added
+  member 'struct bindings::bindings_raw::llist_node defer_free_list' was added
+  member 'struct bindings::bindings_raw::llist_node cleanup_list' was added
+  member 'struct bindings::bindings_raw::key_tag* key_domain' was added
+  member 'struct bindings::bindings_raw::user_namespace* user_ns' was added
+  member 'struct bindings::bindings_raw::ucounts* ucounts' was added
+  member 'struct bindings::bindings_raw::idr netns_ids' was added
+  member 'struct bindings::bindings_raw::ns_common ns' was added
+  member 'struct bindings::bindings_raw::ref_tracker_dir refcnt_tracker' was added
+  member 'struct bindings::bindings_raw::ref_tracker_dir notrefcnt_tracker' was added
+  member 'struct bindings::bindings_raw::list_head dev_base_head' was added
+  member 'struct bindings::bindings_raw::proc_dir_entry* proc_net' was added
+  member 'struct bindings::bindings_raw::proc_dir_entry* proc_net_stat' was added
+  member 'struct bindings::bindings_raw::ctl_table_set sysctls' was added
+  member 'struct bindings::bindings_raw::sock* rtnl' was added
+  member 'struct bindings::bindings_raw::sock* genl_sock' was added
+  member 'struct bindings::bindings_raw::uevent_sock* uevent_sock' was added
+  member 'struct bindings::bindings_raw::hlist_head* dev_name_head' was added
+  member 'struct bindings::bindings_raw::hlist_head* dev_index_head' was added
+  member 'struct bindings::bindings_raw::xarray dev_by_index' was added
+  member 'struct bindings::bindings_raw::raw_notifier_head netdev_chain' was added
+  member 'u32 hash_mix' was added
+  member 'struct bindings::bindings_raw::net_device* loopback_dev' was added
+  member 'struct bindings::bindings_raw::list_head rules_ops' was added
+  member 'struct bindings::bindings_raw::netns_core core' was added
+  member 'struct bindings::bindings_raw::netns_mib mib' was added
+  member 'struct bindings::bindings_raw::netns_packet packet' was added
+  member 'struct bindings::bindings_raw::netns_unix unx' was added
+  member 'struct bindings::bindings_raw::netns_nexthop nexthop' was added
+  member 'u64 __bindgen_padding_0[6]' was added
+  member 'struct bindings::bindings_raw::netns_ipv4 ipv4' was added
+  member 'struct bindings::bindings_raw::netns_ipv6 ipv6' was added
+  member 'struct bindings::bindings_raw::netns_ieee802154_lowpan ieee802154_lowpan' was added
+  member 'struct bindings::bindings_raw::netns_nf nf' was added
+  member 'struct bindings::bindings_raw::netns_ct ct' was added
+  member 'struct bindings::bindings_raw::sk_buff_head wext_nlevents' was added
+  member 'struct bindings::bindings_raw::net_generic* gen' was added
+  member 'struct bindings::bindings_raw::netns_bpf bpf' was added
+  member 'u64 __bindgen_padding_1[3]' was added
+  member 'struct bindings::bindings_raw::netns_xfrm xfrm' was added
+  member 'u64 net_cookie' was added
+  member 'struct bindings::bindings_raw::netns_can can' was added
+  member 'struct bindings::bindings_raw::netns_xdp xdp' was added
+  member 'struct bindings::bindings_raw::sock* diag_nlsk' was added
+
 type 'struct task_struct' changed
   member 'u64 __kabi_reserved3' was removed
   member 'union { struct { unsigned int user_dumpable:1; }; struct { u64 __kabi_reserved3; }; union { }; }' was added

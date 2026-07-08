@@ -29,7 +29,8 @@ use kernel::{
     sync::poll::PollTable,
     sync::{
         lock::{spinlock::SpinLockBackend, Guard},
-        Arc, ArcBorrow, CondVar, CondVarTimeoutResult, Mutex, SpinLock, UniqueArc,
+        poll::PollCondVarBox,
+        Arc, ArcBorrow, CondVar, CondVarTimeoutResult, SetOnce, SpinLock, UniqueArc,
     },
     task::Task,
     types::{ARef, Either},
@@ -173,23 +174,28 @@ impl ProcessInner {
     /// taken while holding the inner process lock.
     pub(crate) fn push_work(
         &mut self,
+        proc: &Process,
         work: DLArc<dyn DeliverToRead>,
     ) -> Result<(), (BinderError, DLArc<dyn DeliverToRead>)> {
+        let sync = work.should_sync_wakeup();
+
         // Try to find a ready thread to which to push the work.
         if let Some(thread) = self.ready_threads.pop_front() {
             work.on_thread_selected(&thread);
 
             // Push to thread while holding state lock. This prevents the thread from giving up
             // (for example, because of a signal) when we're about to deliver work.
-            match thread.push_work(work) {
+            match thread.push_work_inner(work, sync) {
                 PushWorkRes::Ok => Ok(()),
+                PushWorkRes::OkNotifyPoll => {
+                    proc.notify_poll(sync);
+                    Ok(())
+                }
                 PushWorkRes::FailedDead(work) => Err((BinderError::new_dead(), work)),
             }
         } else if self.is_dead {
             Err((BinderError::new_dead(), work))
         } else {
-            let sync = work.should_sync_wakeup();
-
             // Didn't find a thread waiting for proc work; this can happen
             // in two scenarios:
             // 1. All threads are busy handling transactions
@@ -197,17 +203,12 @@ impl ProcessInner {
             //    the kernel driver soon and pick up this work.
             // 2. Threads are using the (e)poll interface, in which case
             //    they may be blocked on the waitqueue without having been
-            //    added to waiting_threads. For this case, we just iterate
-            //    over all threads not handling transaction work, and
-            //    wake them all up. We wake all because we don't know whether
-            //    a thread that called into (e)poll is handling non-binder
-            //    work currently.
+            //    added to waiting_threads. For this case, we wake it up
+            //    directly.
             self.work.push_back(work);
 
             // Wake up polling threads, if any.
-            for thread in self.threads.values() {
-                thread.notify_if_poll_ready(sync);
-            }
+            proc.notify_poll(sync);
 
             Ok(())
         }
@@ -230,11 +231,11 @@ impl ProcessInner {
 
         // If we decided that we need to push work, push either to the process or to a thread if
         // one is specified.
-        if let Some(node) = push {
+        if let Some(pnode) = push {
             if let Some(thread) = othread {
-                thread.push_work_deferred(node);
+                thread.push_work_deferred(pnode);
             } else {
-                let _ = self.push_work(node);
+                let _ = self.push_work(&node.owner, pnode);
                 // Nothing to do: `push_work` may fail if the process is dead, but that's ok as in
                 // that case, it doesn't care about the notification.
             }
@@ -467,7 +468,13 @@ pub(crate) struct Process {
     // Node references are in a different lock to avoid recursive acquisition when
     // incrementing/decrementing a node in another process.
     #[pin]
-    node_refs: Mutex<ProcessNodeRefs>,
+    node_refs: SpinLock<ProcessNodeRefs>,
+
+    // Synchronizes `register_wait` calls to the `PollCondVarBox`.
+    //
+    // The `PollCondVarBox` is not stored here because synchronization is
+    // done for `register_wait` only. Wakeups do not take this lock.
+    poll: SetOnce<PollCondVarBox>,
 
     // Work node for deferred work item.
     #[pin]
@@ -526,12 +533,13 @@ impl Process {
                 default_priority: prio::get_default_prio_from_task(current),
                 inner <- kernel::new_spinlock!(ProcessInner::new(), "Process::inner"),
                 pages <- ShrinkablePageRange::new(&super::BINDER_SHRINKER),
-                node_refs <- kernel::new_mutex!(ProcessNodeRefs::new(), "Process::node_refs"),
+                node_refs <- kernel::new_spinlock!(ProcessNodeRefs::new(), "Process::node_refs"),
                 freeze_wait <- kernel::new_condvar!("Process::freeze_wait"),
                 task: current.group_leader().into(),
                 defer_work <- kernel::new_work!("Process::defer_work"),
                 links <- ListLinks::new(),
                 stats: BinderStats::new(),
+                poll: SetOnce::new(),
             }),
             GFP_KERNEL,
         )?;
@@ -731,7 +739,7 @@ impl Process {
 
     pub(crate) fn push_work(&self, work: DLArc<dyn DeliverToRead>) -> BinderResult {
         // If push_work fails, drop the work item outside the lock.
-        let res = self.inner.lock().push_work(work);
+        let res = self.inner.lock().push_work(self, work);
         match res {
             Ok(()) => Ok(()),
             Err((err, work)) => {
@@ -876,14 +884,17 @@ impl Process {
         let handle = unused_id.as_u32();
 
         // Do a lookup again as node may have been inserted before the lock was reacquired.
-        if let Some(handle_ref) = refs.by_node.get(&node_ref.node.global_id()) {
-            let handle = *handle_ref;
-            let info = refs.by_handle.get_mut(&handle).unwrap();
-            info.node_ref().absorb(node_ref);
-            return Ok(handle);
-        }
+        let by_node_slot = match refs.by_node.entry(node_ref.node.global_id()) {
+            rbtree::Entry::Vacant(by_node_slot) => by_node_slot,
+            rbtree::Entry::Occupied(handle_ref) => {
+                // The node was inserted by another thread while we didn't hold the lock.
+                let handle = handle_ref.get();
+                let info = refs.by_handle.get_mut(handle).unwrap();
+                info.node_ref().absorb(node_ref);
+                return Ok(*handle);
+            }
+        };
 
-        let gid = node_ref.node.global_id();
         let (info_proc, info_node) = {
             let info_init = NodeRefInfo::new(node_ref, handle, self.into());
             match info.pin_init_with(info_init) {
@@ -899,6 +910,9 @@ impl Process {
         // first thing in `deferred_release`, process cleanup will not miss the items inserted into
         // `refs` below.
         if self.inner.lock().is_dead {
+            // Explicitly drop the lock so that `info_proc` and `info_node` are dropped outside of
+            // the lock.
+            drop(refs_lock);
             return Err(ESRCH);
         }
 
@@ -906,7 +920,7 @@ impl Process {
         // `info_node` into the right node's `refs` list.
         unsafe { info_proc.node_ref2().node.insert_node_info(info_node) };
 
-        refs.by_node.insert(reserve1.into_node(gid, handle));
+        by_node_slot.insert(handle, reserve1);
         by_handle_slot.insert(info_proc, reserve2);
         unused_id.acquire();
         Ok(handle)
@@ -957,23 +971,36 @@ impl Process {
 
         // To preserve original binder behaviour, we only fail requests where the manager tries to
         // increment references on itself.
+        let _to_free_by_handle;
+        let _to_free_by_node;
+        let _to_free_freeze_listener;
+        let _to_free_freeze_listener_cleanup;
         let mut refs = self.node_refs.lock();
         if let Some(info) = refs.by_handle.get_mut(&handle) {
             if info.node_ref().update(inc, strong) {
                 // Clean up death if there is one attached to this node reference.
-                if let Some(death) = info.death().take() {
+                //
+                // We remove the entire `info` below, so no need to remove `death` from `info`.
+                if let Some(death) = info.death().as_ref() {
                     death.set_cleared(true);
-                    self.remove_from_delivered_deaths(&death);
+                    self.remove_from_delivered_deaths(death);
                 }
 
                 // Remove reference from process tables, and from the node's `refs` list.
 
                 // SAFETY: We are removing the `NodeRefInfo` from the right node.
                 unsafe { info.node_ref2().node.remove_node_info(&info) };
-
                 let id = info.node_ref().node.global_id();
-                refs.by_handle.remove(&handle);
-                refs.by_node.remove(&id);
+
+                if let Some(freeze) = *info.freeze() {
+                    if let Some(fl) = refs.freeze_listeners.remove(&freeze) {
+                        _to_free_freeze_listener_cleanup = fl.on_process_cleanup(&self);
+                        _to_free_freeze_listener = fl;
+                    }
+                }
+
+                _to_free_by_handle = refs.by_handle.remove_node(&handle);
+                _to_free_by_node = refs.by_node.remove_node(&id);
                 refs.handle_is_present.release_id(handle as usize);
 
                 if let Some(shrink) = refs.handle_is_present.shrink_request() {
@@ -1009,7 +1036,7 @@ impl Process {
         if let Ok(Some(node)) = inner.get_existing_node(ptr, cookie) {
             if let Some(node) = node.inc_ref_done_locked(strong, &mut inner) {
                 // This only fails if the process is dead.
-                let _ = inner.push_work(node);
+                let _ = inner.push_work(self, node);
             }
         }
         Ok(())
@@ -1301,7 +1328,10 @@ impl Process {
 
         // Update state and determine if we need to queue a work item. We only need to do it when
         // the node is not dead or if the user already completed the death notification.
-        if death.set_cleared(false) {
+        let should_schedule = death.set_cleared(false);
+        drop(refs);
+
+        if should_schedule {
             if let Some(death) = ListArc::try_from_arc_or_drop(death) {
                 let _ = thread.push_work_if_looper(death);
             }
@@ -1384,19 +1414,17 @@ impl Process {
             // SAFETY: We are removing the `NodeRefInfo` from the right node.
             unsafe { info.node_ref2().node.remove_node_info(&info) };
 
-            // Remove all death notifications from the nodes (that belong to a different process).
-            let death = if let Some(existing) = info.death().take() {
-                existing
-            } else {
-                continue;
-            };
-            death.set_cleared(false);
+            // Clear death notifications from the nodes (that belong to a different process).
+            // No need to remove them from `info` as we clear info below.
+            if let Some(death) = info.death().as_ref() {
+                death.set_cleared(false);
+            }
         }
 
         // Clean up freeze listeners.
         let freeze_listeners = take(&mut self.node_refs.lock().freeze_listeners);
         for listener in freeze_listeners.values() {
-            listener.on_process_exit(&self);
+            listener.on_process_cleanup(&self);
         }
         drop(freeze_listeners);
 
@@ -1524,6 +1552,15 @@ impl Process {
                     Err(ENOMEM)
                 }
             }
+        }
+    }
+
+    pub(crate) fn notify_poll(&self, sync: bool) {
+        if let Some(poll) = self.poll.as_ref() {
+            if sync {
+                poll.notify_sync();
+            }
+            poll.notify_all();
         }
     }
 }
@@ -1717,7 +1754,24 @@ impl Process {
         table: PollTable<'_>,
     ) -> Result<u32> {
         let thread = this.get_current_thread()?;
-        let (from_proc, mut mask) = thread.poll(file, table);
+        {
+            let poll = loop {
+                if let Some(poll) = this.poll.as_ref() {
+                    break poll;
+                }
+
+                let poll = PollCondVarBox::new(
+                    kernel::c_str!("Process::poll"),
+                    kernel::static_lock_class!(),
+                )?;
+                // Reuse our existing lock to synchronize callers initializing.
+                let _guard = this.node_refs.lock();
+                this.poll.populate(poll);
+            };
+
+            table.register_wait(file, poll);
+        }
+        let (from_proc, mut mask) = thread.poll()?;
         if mask == 0 && from_proc && !this.inner.lock().work.is_empty() {
             mask |= bindings::POLLIN;
         }

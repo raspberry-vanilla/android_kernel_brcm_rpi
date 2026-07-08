@@ -8,6 +8,7 @@
 #define __HVM_DRV_H__
 
 #include <linux/eventfd.h>
+#include <linux/kref.h>
 #include <linux/list.h>
 #include <linux/mm.h>
 #include <linux/mutex.h>
@@ -379,6 +380,8 @@ struct hvm_vcpu {
  * structure for management of VMs
  */
 struct hvm {
+	struct kref kref;
+
 	struct hvm_vcpu *vcpus[HVM_MAX_VCPUS];
 	struct mm_struct *mm;
 	struct hvm_memslot memslot[HVM_MAX_MEM_REGION];
@@ -428,6 +431,9 @@ void hvm_vtimer_exit(void);
 int hvm_dev_ioctl_create_vm(unsigned long vm_type);
 
 void hvm_destroy_all_vms(void);
+
+void hvm_vm_get(struct hvm *hvm);
+void hvm_vm_put(struct hvm *hvm);
 
 void hvm_destroy_vcpus(struct hvm *hvm);
 
