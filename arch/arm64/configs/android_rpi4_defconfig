@@ -1,6 +1,6 @@
 #
 # Automatically generated file; DO NOT EDIT.
-# Linux/arm64 6.12.89 Kernel Configuration
+# Linux/arm64 6.12.90 Kernel Configuration
 #
 CONFIG_CC_VERSION_TEXT="Android (14043575, +pgo, +bolt, +lto, +mlgo, based on r536225) clang version 19.0.1 (https://android.googlesource.com/toolchain/llvm-project b3a530ec6537146650e42be89f1089e9a3588460)"
 CONFIG_GCC_VERSION=0
@@ -295,7 +295,7 @@ CONFIG_PERF_EVENTS=y
 CONFIG_SYSTEM_DATA_VERIFICATION=y
 CONFIG_PROFILING=y
 CONFIG_RUST=y
-CONFIG_RUSTC_VERSION_TEXT="rustc 1.82.0-dev (f6e511eec 2024-10-15) (Android Rust Toolchain version linux-15123656)"
+CONFIG_RUSTC_VERSION_TEXT="rustc 1.82.0-dev (f6e511eec 2024-10-15) (Android Rust Toolchain version linux-glibc-15545352)"
 CONFIG_BINDGEN_VERSION_TEXT="bindgen 0.69.5"
 CONFIG_TRACEPOINTS=y
 
@@ -1117,6 +1117,7 @@ CONFIG_LOCK_MM_AND_FIND_VMA=y
 CONFIG_EXECMEM=y
 CONFIG_NUMA_MEMBLKS=y
 CONFIG_NUMA_EMU=y
+CONFIG_PT_RECLAIM=y
 
 #
 # Data Access Monitoring
@@ -5321,7 +5322,7 @@ CONFIG_HID_MICROSOFT=y
 # CONFIG_HID_MONTEREY is not set
 CONFIG_HID_MULTITOUCH=y
 CONFIG_HID_NINTENDO=y
-# CONFIG_NINTENDO_FF is not set
+CONFIG_NINTENDO_FF=y
 # CONFIG_HID_NTI is not set
 # CONFIG_HID_NTRIG is not set
 # CONFIG_HID_NVIDIA_SHIELD is not set
