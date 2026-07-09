@@ -88,6 +88,10 @@ static const struct mmc_fixup __maybe_unused mmc_sd_fixups[] = {
 		   cid_rev(1, 0, 0, 0), -1ull, SDIO_ANY_ID, SDIO_ANY_ID, add_quirk_sd,
 		   MMC_QUIRK_WORKING_SD_CQ, EXT_CSD_REV_ANY),
 
+	_FIXUP_EXT(CID_NAME_ANY, CID_MANFID_TRANSCEND_SD, 0x4a60, CID_YEAR_ANY, CID_MONTH_ANY,
+		   cid_rev(2, 0, 2026, 4), -1ull, SDIO_ANY_ID, SDIO_ANY_ID, add_quirk_sd,
+		   MMC_QUIRK_WORKING_SD_CQ, EXT_CSD_REV_ANY),
+
 	END_FIXUP
 };
 
@@ -192,6 +196,15 @@ static const struct mmc_fixup __maybe_unused mmc_blk_fixups[] = {
 		  MMC_QUIRK_TRIM_BROKEN),
 
 	/*
+	 * On Some Kingston eMMCs, secure erase/trim time is independent
+	 * of erase size, fixed at approximately 2 seconds.
+	 */
+	MMC_FIXUP("IY2964", CID_MANFID_KINGSTON, 0x0100, add_quirk_mmc,
+		  MMC_QUIRK_FIXED_SECURE_ERASE_TRIM_TIME),
+	MMC_FIXUP("IB2932", CID_MANFID_KINGSTON, 0x0100, add_quirk_mmc,
+		  MMC_QUIRK_FIXED_SECURE_ERASE_TRIM_TIME),
+
+	/*
 	 * Some SD cards reports discard support while they don't
 	 */
 	MMC_FIXUP(CID_NAME_ANY, CID_MANFID_SANDISK_SD, 0x5344, add_quirk_sd,
@@ -230,6 +243,9 @@ static const struct mmc_fixup __maybe_unused mmc_ext_csd_fixups[] = {
 	 */
 	MMC_FIXUP_EXT_CSD_REV(CID_NAME_ANY, CID_MANFID_NUMONYX,
 			      0x014e, add_quirk, MMC_QUIRK_BROKEN_HPI, 6),
+
+	MMC_FIXUP(CID_NAME_ANY, CID_MANFID_SANDISK_MMC, CID_OEMID_ANY, add_quirk_mmc,
+		  MMC_QUIRK_BROKEN_MDT),
 
 	END_FIXUP
 };
