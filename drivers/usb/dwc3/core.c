@@ -1352,11 +1352,11 @@ static void dwc3_set_axi_pipe_limit(struct dwc3 *dwc)
 		dev_err(dev, "Invalid axi_pipe_limit property\n");
 		return;
 	}
-	cfg = dwc3_readl(dwc->regs, DWC3_GSBUSCFG1);
+	cfg = dwc3_readl(dwc, DWC3_GSBUSCFG1);
 	cfg &= ~DWC3_GSBUSCFG1_PIPETRANSLIMIT(15);
 	cfg |= DWC3_GSBUSCFG1_PIPETRANSLIMIT(dwc->axi_pipe_limit - 1);
 
-	dwc3_writel(dwc->regs, DWC3_GSBUSCFG1, cfg);
+	dwc3_writel(dwc, DWC3_GSBUSCFG1, cfg);
 }
 
 /**
@@ -1570,7 +1570,7 @@ static int dwc3_core_init(struct dwc3 *dwc)
 		u8 tx_maxburst = dwc->tx_max_burst_prd;
 
 		if (tx_thr_num && tx_maxburst) {
-			reg = dwc3_readl(dwc->regs, DWC3_GTXTHRCFG);
+			reg = dwc3_readl(dwc, DWC3_GTXTHRCFG);
 			reg |= DWC3_GTXTHRCFG_PKTCNTSEL;
 
 			reg &= ~DWC3_GTXTHRCFG_TXPKTCNT(~0);
@@ -1579,7 +1579,7 @@ static int dwc3_core_init(struct dwc3 *dwc)
 			reg &= ~DWC3_GTXTHRCFG_MAXTXBURSTSIZE(~0);
 			reg |= DWC3_GTXTHRCFG_MAXTXBURSTSIZE(tx_maxburst);
 
-			dwc3_writel(dwc->regs, DWC3_GTXTHRCFG, reg);
+			dwc3_writel(dwc, DWC3_GTXTHRCFG, reg);
 		}
 	}
 
