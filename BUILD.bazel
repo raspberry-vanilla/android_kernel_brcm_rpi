@@ -213,6 +213,7 @@ filegroup(
         "gki/aarch64/symbols/honor",
         "gki/aarch64/symbols/imx",
         "gki/aarch64/symbols/kunit",
+        "gki/aarch64/symbols/lenovo",
         "gki/aarch64/symbols/mtk",
         "gki/aarch64/symbols/oplus",
         "gki/aarch64/symbols/pixel",
@@ -649,6 +650,7 @@ kernel_abi(
     name = "wonder_aarch64_abi",
     kernel_build = ":wonder_aarch64",
     kernel_modules = [":wonder_ddk_modules"],
+    kmi_symbol_list_add_only = True,
 )
 
 kernel_modules_install(
@@ -984,6 +986,7 @@ kernel_build(
 kernel_abi(
     name = "db845c_abi",
     kernel_build = ":db845c",
+    kmi_symbol_list_add_only = True,
 )
 
 kernel_modules_install(

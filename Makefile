@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0
 VERSION = 6
 PATCHLEVEL = 18
-SUBLEVEL = 31
+SUBLEVEL = 32
 EXTRAVERSION =
 NAME = Baby Opossum Posse
 
@@ -2023,7 +2023,9 @@ KBUILD_MODULES :=
 endif # CONFIG_MODULES
 
 PHONY += modpost
-modpost: $(if $(single-build),, $(if $(KBUILD_MIXED_TREE), vmlinux.symvers, $(if $(KBUILD_BUILTIN), vmlinux.o))) \
+modpost: $(if $(single-build),, $(if $(KBUILD_EXTMOD),, \
+	 $(if $(KBUILD_MIXED_TREE), vmlinux.symvers, \
+	 $(if $(KBUILD_BUILTIN), vmlinux.o)))) \
 	 $(if $(KBUILD_MODULES), modules_check)
 	$(Q)$(MAKE) -f $(srctree)/scripts/Makefile.modpost
 
