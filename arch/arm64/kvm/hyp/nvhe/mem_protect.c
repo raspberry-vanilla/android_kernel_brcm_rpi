@@ -345,6 +345,29 @@ static void invalidate_icache_guest_page(void *va, size_t size)
 	}
 }
 
+static void hyp_flush_page(phys_addr_t phys, size_t size)
+{
+	WARN_ON(!PAGE_ALIGNED(size));
+
+	while (size) {
+		size_t __size = size == PMD_SIZE ? size : PAGE_SIZE;
+		void *addr = __fixmap_guest_page(__hyp_va(phys), &__size);
+
+		/*
+		 * Prefer kvm_flush_dcache_to_poc() over __clean_dcache_guest_page()
+		 * here as the latter may elide the CMO under the assumption that FWB
+		 * will be enabled on CPUs that support it. This is incorrect for the
+		 * host stage-2 and would otherwise lead to a malicious host potentially
+		 * being able to read the contents of newly reclaimed guest pages.
+		 */
+		kvm_flush_dcache_to_poc(addr, __size);
+		__fixunmap_guest_page(__size);
+
+		size -= __size;
+		phys += __size;
+	}
+}
+
 int kvm_guest_prepare_stage2(struct pkvm_hyp_vm *vm, void *pgd,
 			     enum kvm_pgtable_stage2_flags flags)
 {
@@ -406,7 +429,7 @@ static enum pkvm_page_state guest_get_page_state(kvm_pte_t pte, u64 addr)
 }
 
 int __pkvm_guest_relinquish_to_host(struct pkvm_hyp_vcpu *vcpu,
-				    u64 ipa, u64 *ppa)
+				    u64 ipa, u64 flags, u64 *ppa)
 {
 	struct pkvm_hyp_vm *vm = pkvm_hyp_vcpu_to_hyp_vm(vcpu);
 	enum pkvm_page_state state;
@@ -454,7 +477,10 @@ int __pkvm_guest_relinquish_to_host(struct pkvm_hyp_vcpu *vcpu,
 	if (ret)
 		goto end;
 
-	hyp_poison_page(phys, PAGE_SIZE);
+	if (!(flags & KVM_FUNC_MEM_RELINQUISH_NO_POISON))
+		hyp_poison_page(phys, PAGE_SIZE);
+	else
+		hyp_flush_page(phys, PAGE_SIZE);
 	psci_mem_protect_dec(1);
 
 	WARN_ON(host_stage2_set_owner_locked(phys, PAGE_SIZE, PKVM_ID_HOST));
@@ -3250,7 +3276,7 @@ void pkvm_ownership_selftest(void *base)
 
 	selftest_state.host = PKVM_PAGE_OWNED;
 	selftest_state.guest[0] = PKVM_NOPAGE;
-	assert_transition_res(0,	__pkvm_guest_relinquish_to_host, vcpu, gfn * PAGE_SIZE, &pa);
+	assert_transition_res(0,	__pkvm_guest_relinquish_to_host, vcpu, gfn * PAGE_SIZE, 0, &pa);
 	WARN_ON(pa != phys);
 
 	selftest_state.host = PKVM_NOPAGE;

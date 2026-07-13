@@ -75,7 +75,7 @@ int __pkvm_install_ioguard_page(struct pkvm_hyp_vcpu *hyp_vcpu, u64 ipa,
 				u64 nr_pages, u64 *nr_guarded);
 bool __pkvm_check_ioguard_page(struct pkvm_hyp_vcpu *hyp_vcpu);
 int __pkvm_guest_relinquish_to_host(struct pkvm_hyp_vcpu *vcpu,
-				    u64 ipa, u64 *ppa);
+				    u64 ipa, u64 flags, u64 *ppa);
 int __pkvm_use_dma(u64 phys_addr, size_t size, struct pkvm_hyp_vcpu *hyp_vcpu);
 int __pkvm_unuse_dma(u64 phys_addr, size_t size, struct pkvm_hyp_vcpu *hyp_vcpu);
 u64 __pkvm_ptdump_get_config(pkvm_handle_t handle, enum pkvm_ptdump_ops op);

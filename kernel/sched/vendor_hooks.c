@@ -111,6 +111,7 @@ EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_set_cpus_allowed_ptr);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_update_blocked_fair);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_rvh_set_task_comm);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_move_entity);
+EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_sca_migrate_same);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_scx_restore_flags);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_enq_to_priq);
 EXPORT_TRACEPOINT_SYMBOL_GPL(android_vh_scx_switch_repeat_skip);

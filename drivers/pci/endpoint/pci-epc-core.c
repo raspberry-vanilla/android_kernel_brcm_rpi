@@ -386,19 +386,19 @@ EXPORT_SYMBOL_GPL(pci_epc_get_msix);
  * @epc: the EPC device on which MSI-X has to be configured
  * @func_no: the physical endpoint function number in the EPC device
  * @vfunc_no: the virtual endpoint function number in the physical function
- * @interrupts: number of MSI-X interrupts required by the EPF
+ * @nr_irqs: number of MSI-X interrupts required by the EPF
  * @bir: BAR where the MSI-X table resides
  * @offset: Offset pointing to the start of MSI-X table
  *
  * Invoke to set the required number of MSI-X interrupts.
  */
-int pci_epc_set_msix(struct pci_epc *epc, u8 func_no, u8 vfunc_no,
-		     u16 interrupts, enum pci_barno bir, u32 offset)
+int pci_epc_set_msix(struct pci_epc *epc, u8 func_no, u8 vfunc_no, u16 nr_irqs,
+		     enum pci_barno bir, u32 offset)
 {
 	int ret;
 
 	if (IS_ERR_OR_NULL(epc) || func_no >= epc->max_functions ||
-	    interrupts < 1 || interrupts > 2048)
+	    nr_irqs < 1 || nr_irqs > 2048)
 		return -EINVAL;
 
 	if (vfunc_no > 0 && (!epc->max_vfs || vfunc_no > epc->max_vfs[func_no]))
@@ -408,8 +408,7 @@ int pci_epc_set_msix(struct pci_epc *epc, u8 func_no, u8 vfunc_no,
 		return 0;
 
 	mutex_lock(&epc->lock);
-	ret = epc->ops->set_msix(epc, func_no, vfunc_no, interrupts - 1, bir,
-				 offset);
+	ret = epc->ops->set_msix(epc, func_no, vfunc_no, nr_irqs, bir, offset);
 	mutex_unlock(&epc->lock);
 
 	return ret;

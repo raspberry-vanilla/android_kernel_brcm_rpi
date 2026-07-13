@@ -2977,6 +2977,13 @@ out:
 kvm_pfn_t hva_to_pfn(unsigned long addr, bool atomic, bool interruptible,
 		     bool *async, bool write_fault, bool *writable)
 {
+	return __hva_to_pfn(addr, atomic, interruptible, async, write_fault, writable, NULL);
+}
+
+kvm_pfn_t __hva_to_pfn(unsigned long addr, bool atomic, bool interruptible,
+		       bool *async, bool write_fault, bool *writable,
+		       struct file **backing_file)
+{
 	struct vm_area_struct *vma;
 	kvm_pfn_t pfn;
 	int npages, r;
@@ -3013,8 +3020,12 @@ retry:
 		r = hva_to_pfn_remapped(vma, addr, write_fault, writable, &pfn);
 		if (r == -EAGAIN)
 			goto retry;
-		if (r < 0)
+		if (r < 0) {
 			pfn = KVM_PFN_ERR_FAULT;
+		} else if (backing_file && vma->vm_file) {
+			get_file(vma->vm_file);
+			*backing_file = vma->vm_file;
+		}
 	} else {
 		if (async && vma_is_valid(vma, write_fault))
 			*async = true;

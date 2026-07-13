@@ -14,6 +14,7 @@
   alarm_cancel
   alarm_init
   alarm_start_relative
+  arch_touch_nmi_watchdog
   alarmtimer_get_rtcdev
   alarm_try_to_cancel
   alloc_chrdev_region
@@ -2926,6 +2927,8 @@
   __traceiter_android_vh_aes_expandkey
   __traceiter_android_vh_alter_futex_plist_add
   __traceiter_android_vh_arch_set_freq_scale
+  __traceiter_android_vh_binder_looper_exited
+  __traceiter_android_vh_binder_looper_state_registered
   __traceiter_android_vh_binder_proc_transaction_finish
   __traceiter_android_vh_binder_restore_priority
   __traceiter_android_vh_binder_set_priority
@@ -2949,6 +2952,7 @@
   __traceiter_android_vh_free_one_page_flag_check
   __traceiter_android_vh_free_pages_prepare_init
   __traceiter_android_vh_ipi_stop
+  __traceiter_android_vh_lock_task_fork
   __traceiter_android_vh_mm_compaction_begin
   __traceiter_android_vh_mm_compaction_end
   __traceiter_android_vh_mm_kcompactd_cpu_online
@@ -2986,6 +2990,7 @@
   __traceiter_android_vh_ufs_compl_command
   __traceiter_android_vh_ufs_eh_timed_out
   __traceiter_android_vh_ufs_fill_prdt
+  __traceiter_android_vh_ufs_mcq_cleanup
   __traceiter_android_vh_ufs_prepare_command
   __traceiter_android_vh_ufs_send_command
   __traceiter_android_vh_ufs_send_tm_command
@@ -3099,6 +3104,8 @@
   __tracepoint_android_vh_aes_expandkey
   __tracepoint_android_vh_alter_futex_plist_add
   __tracepoint_android_vh_arch_set_freq_scale
+  __tracepoint_android_vh_binder_looper_exited
+  __tracepoint_android_vh_binder_looper_state_registered
   __tracepoint_android_vh_binder_proc_transaction_finish
   __tracepoint_android_vh_binder_restore_priority
   __tracepoint_android_vh_binder_set_priority
@@ -3122,6 +3129,7 @@
   __tracepoint_android_vh_free_one_page_flag_check
   __tracepoint_android_vh_free_pages_prepare_init
   __tracepoint_android_vh_ipi_stop
+  __tracepoint_android_vh_lock_task_fork
   __tracepoint_android_vh_mm_compaction_begin
   __tracepoint_android_vh_mm_compaction_end
   __tracepoint_android_vh_mm_kcompactd_cpu_online
@@ -3159,6 +3167,7 @@
   __tracepoint_android_vh_ufs_compl_command
   __tracepoint_android_vh_ufs_eh_timed_out
   __tracepoint_android_vh_ufs_fill_prdt
+  __tracepoint_android_vh_ufs_mcq_cleanup
   __tracepoint_android_vh_ufs_prepare_command
   __tracepoint_android_vh_ufs_send_command
   __tracepoint_android_vh_ufs_send_tm_command

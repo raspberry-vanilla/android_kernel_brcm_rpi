@@ -3553,6 +3553,7 @@
   tegra_ivc_write_get_next_frame
   tegra_mc_get_carveout_info
   tegra_mc_probe_device
+  tegra_pinctrl_probe
   tegra_powergate_power_off
   tegra_powergate_sequence_power_up
   tegra_sku_info

@@ -255,3 +255,15 @@ type 'struct bindings::bindings_raw::task_struct' changed
   member 'u64 __kabi_reserved3' was removed
   member 'union bindings::bindings_raw::task_struct__bindgen_ty_3 __bindgen_anon_3' was added
 
+type 'struct cfs_rq' changed
+  member 'u64 min_vruntime' was removed
+  member 'union { struct { union { u64 min_vruntime; u64 zero_vruntime; }; }; struct { u64 __kabi_renamedmin_vruntime; }; union { }; }' was added
+
+type 'struct task_struct' changed
+  member 'union { cpumask_var_t cpumask_sme_dvmsync; struct { u64 __kabi_reserved2; }; union { }; }' was removed
+  member 'union { u64 __donotuse_b448672457; struct { u64 __kabi_reserved2; }; union { }; }' was added
+
+type 'union bindings::bindings_raw::task_struct__bindgen_ty_2' changed
+  member 'struct bindings::bindings_raw::cpumask cpumask_sme_dvmsync[1]' was removed
+  member 'u64 __donotuse_b448672457' was added
+

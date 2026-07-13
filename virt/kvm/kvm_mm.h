@@ -22,6 +22,9 @@
 
 kvm_pfn_t hva_to_pfn(unsigned long addr, bool atomic, bool interruptible,
 		     bool *async, bool write_fault, bool *writable);
+kvm_pfn_t __hva_to_pfn(unsigned long addr, bool atomic, bool interruptible,
+		       bool *async, bool write_fault, bool *writable,
+		       struct file **backing_file);
 
 #ifdef CONFIG_HAVE_KVM_PFNCACHE
 void gfn_to_pfn_cache_invalidate_start(struct kvm *kvm,

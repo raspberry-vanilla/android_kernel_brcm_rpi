@@ -297,6 +297,7 @@
   __traceiter_android_vh_cpufreq_fast_switch
   __traceiter_android_vh_exit_check
   __traceiter_android_vh_move_entity
+  __traceiter_android_vh_sca_migrate_same
   __traceiter_android_vh_scx_restore_flags
   __traceiter_android_vh_task_should_scx
   __traceiter_android_vh_enq_to_priq
@@ -452,6 +453,7 @@
   __tracepoint_android_vh_cpufreq_fast_switch
   __tracepoint_android_vh_exit_check
   __tracepoint_android_vh_move_entity
+  __tracepoint_android_vh_sca_migrate_same
   __tracepoint_android_vh_scx_restore_flags
   __tracepoint_android_vh_task_should_scx
   __tracepoint_android_vh_enq_to_priq

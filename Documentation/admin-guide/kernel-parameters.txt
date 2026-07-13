@@ -2802,6 +2802,14 @@
 			[KVM,ARM] Minimum order for each protected VM fault.
 			This range from 0 (default) to 9.
 
+	kvm-arm.psci_mem_protect=
+			[KVM,ARM,EARLY] Control usage of PSCI MEM_PROTECT.
+
+			force: Enforce PSCI MEM_PROTECT handling regardless of
+			advertised PSCI version.
+
+			off: Skip PSCI MEM_PROTECT handling.
+
 	kvm-arm.vgic_v3_group0_trap=
 			[KVM,ARM,EARLY] Trap guest accesses to GICv3 group-0
 			system registers

@@ -24,6 +24,7 @@ void __noreturn __host_enter(struct kvm_cpu_context *host_ctxt);
 
 /* Config options set by the host. */
 struct kvm_host_psci_config __ro_after_init kvm_host_psci_config;
+enum kvm_psci_mem_protect_mode __ro_after_init kvm_psci_mem_protect_mode;
 
 static void (*pkvm_psci_notifier)(enum pkvm_psci_notification, struct user_pt_regs *);
 static void pkvm_psci_notify(enum pkvm_psci_notification notif, struct kvm_cpu_context *host_ctxt)
@@ -265,7 +266,12 @@ static u64 psci_mem_protect(s64 offset)
 
 	hyp_assert_lock_held(&mem_protect_lock);
 
-	if (!offset || kvm_host_psci_config.version < PSCI_VERSION(1, 1))
+	if (!offset)
+		return cnt;
+
+	if (kvm_psci_mem_protect_mode == KVM_PSCI_MEM_PROTECT_OFF ||
+	    (kvm_psci_mem_protect_mode != KVM_PSCI_MEM_PROTECT_FORCE &&
+		kvm_host_psci_config.version < PSCI_VERSION(1, 1)))
 		return cnt;
 
 	if (!cnt || !new)

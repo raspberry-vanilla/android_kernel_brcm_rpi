@@ -378,7 +378,7 @@ int __pkvm_reclaim_dying_guest_page(pkvm_handle_t handle, u64 pfn, u64 gfn, u8 o
 
 	hyp_read_lock(&vm_table_lock);
 	hyp_vm = get_vm_by_handle(handle);
-	if (!hyp_vm || !hyp_vm->is_dying)
+	if (!hyp_vm || (hyp_vm->is_dying != PROTECTED_VM_DEAD))
 		goto unlock;
 
 	ret = __pkvm_host_reclaim_page(hyp_vm, pfn, gfn << PAGE_SHIFT, order);
@@ -1071,9 +1071,23 @@ int __pkvm_start_teardown_vm(pkvm_handle_t handle)
 		goto unlock;
 	}
 
-	hyp_vm->is_dying = true;
+	hyp_vm->is_dying = PROTECTED_VM_DYING;
 
 unlock:
+	hyp_write_unlock(&vm_table_lock);
+
+	/*
+	 * vCPUs are quiescent, but assigned devices may still be issuing DMA
+	 * via the guest's SMMU domains. Block DMA and tear down guest IOMMU
+	 * translations *before* allowing __pkvm_host_reclaim_page() to hand
+	 * OWNED pages (which may still carry a DMA hyp_page->refcount) back
+	 * to the host.
+	 */
+	pkvm_devices_teardown(hyp_vm);
+	pkvm_pviommu_teardown(hyp_vm);
+
+	hyp_write_lock(&vm_table_lock);
+	hyp_vm->is_dying = PROTECTED_VM_DEAD;
 	hyp_write_unlock(&vm_table_lock);
 
 	return ret;
@@ -1092,7 +1106,7 @@ int __pkvm_finalize_teardown_vm(pkvm_handle_t handle)
 	if (!hyp_vm) {
 		err = -ENOENT;
 		goto err_unlock;
-	} else if (!hyp_vm->is_dying) {
+	} else if (hyp_vm->is_dying != PROTECTED_VM_DEAD) {
 		err = -EBUSY;
 		goto err_unlock;
 	}
@@ -1109,10 +1123,6 @@ int __pkvm_finalize_teardown_vm(pkvm_handle_t handle)
 		err = kvm_dying_guest_reclaim_ffa_resources(hyp_vm);
 	} while (err == -EAGAIN);
 	WARN_ON(err);
-
-	pkvm_devices_teardown(hyp_vm);
-
-	pkvm_pviommu_teardown(hyp_vm);
 
 	/*
 	 * At this point all page tables are destroyed and should be pushed to the pool
@@ -1826,15 +1836,16 @@ static bool pkvm_memrelinquish_call(struct pkvm_hyp_vcpu *hyp_vcpu,
 {
 	struct kvm_vcpu *vcpu = &hyp_vcpu->vcpu;
 	u64 ipa = smccc_get_arg1(vcpu);
+	/* TODO: use arg2 as nr_pages */
 	u64 arg2 = smccc_get_arg2(vcpu);
-	u64 arg3 = smccc_get_arg3(vcpu);
+	u64 flags = smccc_get_arg3(vcpu);
 	u64 pa = 0;
 	int ret;
 
-	if (arg2 || arg3)
+	if (arg2 || (flags != 0 && flags != KVM_FUNC_MEM_RELINQUISH_NO_POISON))
 		goto out_guest_err;
 
-	ret = __pkvm_guest_relinquish_to_host(hyp_vcpu, ipa, &pa);
+	ret = __pkvm_guest_relinquish_to_host(hyp_vcpu, ipa, flags, &pa);
 	if (ret == -E2BIG) {
 		if (pkvm_request_split(hyp_vcpu, PAGE_ALIGN_DOWN(ipa), 1, exit_code))
 			goto out_guest_err;

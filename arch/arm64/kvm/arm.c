@@ -3060,6 +3060,26 @@ static int __init early_kvm_wfe_trap_policy_cfg(char *arg)
 }
 early_param("kvm-arm.wfe_trap_policy", early_kvm_wfe_trap_policy_cfg);
 
+static int early_psci_mem_protect_cfg(char *arg)
+{
+	if (!arg)
+		return -EINVAL;
+
+	if (strcmp(arg, "force") == 0) {
+		kvm_psci_mem_protect_mode = KVM_PSCI_MEM_PROTECT_FORCE;
+		return 0;
+	}
+
+	if (strcmp(arg, "off") == 0) {
+		kvm_psci_mem_protect_mode = KVM_PSCI_MEM_PROTECT_OFF;
+		return 0;
+	}
+
+	return -EINVAL;
+}
+
+early_param("kvm-arm.psci_mem_protect", early_psci_mem_protect_cfg);
+
 enum kvm_mode kvm_get_mode(void)
 {
 	return kvm_mode;

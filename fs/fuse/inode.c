@@ -1904,6 +1904,7 @@ int fuse_fill_super_common(struct super_block *sb, struct fuse_fs_context *ctx)
 	if (ctx->root_dir)
 		fm->sb->s_stack_depth = ctx->root_dir->f_inode->i_sb->s_stack_depth + 1;
 #endif
+
 	err = -ENOMEM;
 	root = fuse_get_root_inode(sb, ctx->rootmode, ctx->root_bpf,
 				   ctx->root_dir);

@@ -258,6 +258,7 @@ struct kvm_s2_mmu {
 };
 
 struct kvm_arch_memory_slot {
+	u64 pkvm_pf_count;
 };
 
 /**
@@ -278,7 +279,10 @@ struct kvm_pinned_page {
 		struct rb_node	 	node;
 		struct list_head 	list_node;
 	};
-	struct page		*page;
+	struct page		*_page;
+	struct file		*file;
+	struct kvm_memory_slot	*slot;
+	u64			pfn;
 	u64			ipa;
 	u64			__subtree_last;
 	u8			order;
@@ -290,6 +294,8 @@ struct kvm_pinned_page
 *kvm_pinned_pages_iter_next(struct kvm_pinned_page *ppage, u64 start, u64 end);
 void kvm_pinned_pages_remove(struct kvm_pinned_page *ppage,
 			     struct rb_root_cached *root);
+
+void pkvm_release_ppage(struct kvm_pinned_page *ppage, bool dirty);
 
 typedef unsigned int pkvm_handle_t;
 
@@ -696,6 +702,12 @@ struct kvm_host_data {
 	} host_debug_state;
 };
 
+enum kvm_psci_mem_protect_mode {
+	KVM_PSCI_MEM_PROTECT_AUTO,	/* Probe capabilities and call if supported */
+	KVM_PSCI_MEM_PROTECT_FORCE,	/* Enforce PSCI MEM_PROTECT handling */
+	KVM_PSCI_MEM_PROTECT_OFF,	/* Skip PSCI MEM_PROTECT handling */
+};
+
 struct kvm_host_psci_config {
 	/* PSCI version used by host. */
 	u32 version;
@@ -709,6 +721,9 @@ struct kvm_host_psci_config {
 	bool psci_0_1_cpu_off_implemented;
 	bool psci_0_1_migrate_implemented;
 };
+
+extern enum kvm_psci_mem_protect_mode kvm_nvhe_sym(kvm_psci_mem_protect_mode);
+#define kvm_psci_mem_protect_mode CHOOSE_NVHE_SYM(kvm_psci_mem_protect_mode)
 
 extern struct kvm_host_psci_config kvm_nvhe_sym(kvm_host_psci_config);
 #define kvm_host_psci_config CHOOSE_NVHE_SYM(kvm_host_psci_config)
