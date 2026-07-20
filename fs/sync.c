@@ -149,11 +149,11 @@ void emergency_sync(void)
  */
 SYSCALL_DEFINE1(syncfs, int, fd)
 {
-	struct fd f = fdget(fd);
+	CLASS(fd, f)(fd);
 	struct super_block *sb;
 	int ret, ret2;
 
-	if (!fd_file(f))
+	if (fd_empty(f))
 		return -EBADF;
 	sb = fd_file(f)->f_path.dentry->d_sb;
 
@@ -163,7 +163,6 @@ SYSCALL_DEFINE1(syncfs, int, fd)
 
 	ret2 = errseq_check_and_advance(&sb->s_wb_err, &fd_file(f)->f_sb_err);
 
-	fdput(f);
 	return ret ? ret : ret2;
 }
 
@@ -211,15 +210,13 @@ EXPORT_SYMBOL(vfs_fsync);
 
 static int do_fsync(unsigned int fd, int datasync)
 {
-	struct fd f = fdget(fd);
-	int ret = -EBADF;
+	CLASS(fd, f)(fd);
 
-	if (fd_file(f)) {
-		ret = vfs_fsync(fd_file(f), datasync);
-		fdput(f);
-		inc_syscfs(current);
-	}
-	return ret;
+	if (fd_empty(f))
+		return -EBADF;
+
+	inc_syscfs(current);
+	return vfs_fsync(fd_file(f), datasync);
 }
 
 SYSCALL_DEFINE1(fsync, unsigned int, fd)
@@ -362,16 +359,12 @@ out:
 int ksys_sync_file_range(int fd, loff_t offset, loff_t nbytes,
 			 unsigned int flags)
 {
-	int ret;
-	struct fd f;
+	CLASS(fd, f)(fd);
 
-	ret = -EBADF;
-	f = fdget(fd);
-	if (fd_file(f))
-		ret = sync_file_range(fd_file(f), offset, nbytes, flags);
+	if (fd_empty(f))
+		return -EBADF;
 
-	fdput(f);
-	return ret;
+	return sync_file_range(fd_file(f), offset, nbytes, flags);
 }
 
 SYSCALL_DEFINE4(sync_file_range, int, fd, loff_t, offset, loff_t, nbytes,
