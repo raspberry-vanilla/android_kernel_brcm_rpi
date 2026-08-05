@@ -4009,19 +4009,25 @@ static void do_activate_blocked_waiter(struct rq *target_rq, struct task_struct 
 			 */
 			return;
 		}
-		proxy_set_task_cpu(p, target_cpu);
-		rq_lock_irqsave(target_rq, &rf);
 		/*
-		 * proxy_enqueue_on_owner() called block_task() which
-		 * increments nr_uninterruptible/nr_iowait, so we need
-		 * to reverse that when we activate the blocked waiter
+		 * Have to make sure we handle nr_iowait adjustment before
+		 * we call proxy_set_task_cpu() to ensure we are adjusting
+		 * the same runqueue we left (where block_task()
+		 * incremented nr_iowait).
 		 */
-		if (p->sched_contributes_to_load)
-			target_rq->nr_uninterruptible--;
 		if (p->in_iowait) {
 			delayacct_blkio_end(p);
 			atomic_dec(&task_rq(p)->nr_iowait);
 		}
+		proxy_set_task_cpu(p, target_cpu);
+		rq_lock_irqsave(target_rq, &rf);
+		/*
+		 * proxy_enqueue_on_owner() called block_task() which
+		 * increments nr_uninterruptible, so we need to reverse
+		 * that when we activate the blocked waiter
+		 */
+		if (p->sched_contributes_to_load)
+			target_rq->nr_uninterruptible--;
 		update_rq_clock(target_rq);
 		activate_task(target_rq, p, en_flags);
 		resched_curr(target_rq);
@@ -7377,6 +7383,7 @@ static void proxy_enqueue_on_owner(struct rq *rq, struct task_struct *owner,
 	 * elsewhere before it's fully extricated from its old rq.
 	 */
 	list_add(&p->blocked_node, &owner->blocked_head);
+	proxy_resched_idle(rq);
 	block_task(rq, p, READ_ONCE(p->__state));
 }
 
@@ -7521,8 +7528,14 @@ find_proxy_task(struct rq *rq, struct task_struct *donor, struct rq_flags *rf)
 			WARN_ON(owner == p);
 			raw_spin_unlock(&p->blocked_lock);
 			raw_spin_lock(&owner->blocked_lock);
-			proxy_resched_idle(rq);
-			proxy_enqueue_on_owner(rq, owner, p);
+			/*
+			 * Before actually adding to the sleeping owner, double check
+			 * we didn't race with an owner wakeup before grabbing the
+			 * owner's blocked_lock.
+			 */
+			if (!READ_ONCE(owner->on_rq) || owner->se.sched_delayed)
+				proxy_enqueue_on_owner(rq, owner, p);
+
 			raw_spin_unlock(&owner->blocked_lock);
 			raw_spin_lock(&p->blocked_lock);
 
