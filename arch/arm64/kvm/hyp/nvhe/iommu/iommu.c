@@ -63,23 +63,34 @@ static inline bool kvm_iommu_is_ready(void)
 	return atomic_read_acquire(&kvm_iommu_idmap_initialized) == 1;
 }
 
-static bool kvm_iommu_donate_from_cma(phys_addr_t phys, unsigned long order)
+/*
+ * Return 1 if the donation can go in the block pool, 0 if the system pool and
+ * < 0 if it is invalid.
+ */
+static int kvm_iommu_donation_is_valid(phys_addr_t phys, unsigned long order)
 {
-	phys_addr_t end = phys + PAGE_SIZE * (1 << order);
+	phys_addr_t end = phys + PAGE_SIZE * (1UL << order);
+
+	if (order > MAX_PAGE_ORDER)
+		return -EINVAL;
 
 	if (end <= phys)
-		return false;
+		return -EINVAL;
+
+	if (!IS_ALIGNED(phys, PAGE_SIZE << order))
+		return -EINVAL;
+
+	if (phys >= cma_base + cma_size || end <= cma_base)
+		return 0;
+
+	/* overlaps the CMA region */
+	if (phys < cma_base || end > cma_base + cma_size)
+		return -EINVAL;
 
 	if (order != pmd_order)
-		return false;
+		return -EINVAL;
 
-	if (!IS_ALIGNED(phys, PMD_SIZE))
-		return false;
-
-	if (phys < cma_base || end > cma_base + cma_size)
-		return false;
-
-	return true;
+	return 1;
 }
 
 static struct hyp_pool *__get_empty_block_pool(phys_addr_t phys)
@@ -121,19 +132,22 @@ int kvm_iommu_refill(struct kvm_hyp_memcache *host_mc)
 		unsigned long order = FIELD_GET(~PAGE_MASK, tmp_mc.head);
 		phys_addr_t phys = tmp_mc.head & PAGE_MASK;
 		struct hyp_pool *pool = &iommu_system_pool;
-		u64 nr_pages;
+		bool block_pool;
 		void *addr;
+		int ret;
 
-		if (check_shl_overflow(1UL, order, &nr_pages) ||
-		    !IS_ALIGNED(phys, PAGE_SIZE << order))
-			return -EINVAL;
+		ret = kvm_iommu_donation_is_valid(phys, order);
+		if (ret < 0)
+			return ret;
+
+		block_pool = ret;
 
 		addr = admit_host_page(&tmp_mc, order);
 		if (!addr)
 			return -EINVAL;
 		*host_mc = tmp_mc;
 
-		if (kvm_iommu_donate_from_cma(phys, order)) {
+		if (block_pool) {
 			hyp_spin_lock(&__block_pools_lock);
 			pool = __get_empty_block_pool(phys);
 			hyp_spin_unlock(&__block_pools_lock);
@@ -154,57 +168,18 @@ int kvm_iommu_refill(struct kvm_hyp_memcache *host_mc)
 
 void kvm_iommu_reclaim(struct kvm_hyp_memcache *host_mc, int target)
 {
-	unsigned long prev_nr_pages = host_mc->nr_pages;
-	unsigned long block_pages = 1 << pmd_order;
-	int p = 0;
-
 	if (!kvm_iommu_ops)
 		return;
 
 	reclaim_hyp_pool(&iommu_system_pool, host_mc, target);
-
-	target -= host_mc->nr_pages - prev_nr_pages;
-
-	while (target > block_pages && p < MAX_BLOCK_POOLS) {
-		struct hyp_pool *pool = &iommu_block_pools[p];
-
-		hyp_spin_lock(&__block_pools_lock);
-
-		if (hyp_pool_free_pages(pool) == block_pages) {
-			reclaim_hyp_pool(pool, host_mc, block_pages);
-			hyp_pool_init_empty(pool, 1);
-			target -= block_pages;
-		}
-
-		hyp_spin_unlock(&__block_pools_lock);
-		p++;
-	}
 }
 
 int kvm_iommu_reclaimable(void)
 {
-	unsigned long reclaimable = 0;
-	int p;
-
 	if (!kvm_iommu_ops)
 		return 0;
 
-	reclaimable += hyp_pool_free_pages(&iommu_system_pool);
-
-	/*
-	 * This also accounts for blocks, allocated from the CMA region. This is
-	 * not exactly what the shrinker wants... but we need to have a way to
-	 * report this memory to the host.
-	 */
-
-	for (p = 0; p < MAX_BLOCK_POOLS; p++) {
-		unsigned long __free_pages = hyp_pool_free_pages(&iommu_block_pools[p]);
-
-		if (__free_pages == 1 << pmd_order)
-			reclaimable += __free_pages;
-	}
-
-	return reclaimable;
+	return hyp_pool_free_pages(&iommu_system_pool);
 }
 
 struct hyp_mgt_allocator_ops kvm_iommu_allocator_ops = {
@@ -254,7 +229,12 @@ static void *__kvm_iommu_alloc_pages(u8 order, struct hyp_pool **pool)
 			i = 0;
 	} while (i != last_block_pool);
 
-	WRITE_ONCE(__block_pools_available, 0);
+	/*
+	 * iommu_block_pools[] are only full when they can't handle the smallest
+	 * allocation possible.
+	 */
+	if (!order)
+		WRITE_ONCE(__block_pools_available, 0);
 
 	hyp_spin_unlock(&__block_pools_lock);
 
@@ -349,13 +329,13 @@ void kvm_iommu_reclaim_pages(void *p, u8 order)
 
 		if (phys >= pool->range_start && phys < pool->range_end) {
 			__kvm_iommu_reclaim_pages(pool, p, order);
+			WRITE_ONCE(__block_pools_available, 1);
 			hyp_spin_unlock(&__block_pools_lock);
 			return;
 		}
 	}
 
-	hyp_spin_lock(&__block_pools_lock);
-
+	hyp_spin_unlock(&__block_pools_lock);
 	WARN_ON(1);
 }
 

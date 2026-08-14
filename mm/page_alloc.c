@@ -7179,8 +7179,8 @@ static int __alloc_contig_verify_gfp_mask(gfp_t gfp_mask, gfp_t *gfp_cc_mask)
 {
 	const gfp_t reclaim_mask = __GFP_IO | __GFP_FS | __GFP_RECLAIM;
 	const gfp_t action_mask = __GFP_COMP | __GFP_RETRY_MAYFAIL | __GFP_NOWARN |
-				  __GFP_SKIP_KASAN;
-	const gfp_t cc_action_mask = __GFP_RETRY_MAYFAIL | __GFP_NOWARN;
+				  __GFP_SKIP_KASAN | __GFP_NORETRY;
+	const gfp_t cc_action_mask = __GFP_RETRY_MAYFAIL | __GFP_NOWARN | __GFP_NORETRY;
 
 	/*
 	 * We are given the range to allocate; node, mobility and placement
@@ -7203,9 +7203,13 @@ static int __alloc_contig_verify_gfp_mask(gfp_t gfp_mask, gfp_t *gfp_cc_mask)
 	 *
 	 * Traditionally we always had __GFP_HARDWALL|__GFP_RETRY_MAYFAIL set,
 	 * keep doing that to not degrade callers.
+	 * If the caller explicitly requested __GFP_NORETRY, respect it and
+	 * do not force __GFP_RETRY_MAYFAIL.
 	 */
 	*gfp_cc_mask = (gfp_mask & (reclaim_mask | cc_action_mask)) |
-			__GFP_HARDWALL | __GFP_MOVABLE | __GFP_RETRY_MAYFAIL;
+			__GFP_HARDWALL | __GFP_MOVABLE;
+	if (!(gfp_mask & __GFP_NORETRY))
+		*gfp_cc_mask |= __GFP_RETRY_MAYFAIL;
 	return 0;
 }
 

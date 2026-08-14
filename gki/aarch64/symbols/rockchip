@@ -572,6 +572,7 @@
   hdmi_audio_infoframe_pack
   hdmi_drm_infoframe_pack
   hdmi_infoframe_pack
+  hdmi_infoframe_log
   hdmi_vendor_infoframe_pack
   hex_dump_to_buffer
   hid_hw_close
@@ -3074,8 +3075,10 @@
   config_ep_by_speed
   config_group_init_type_name
   dev_get_stats
+  gether_attach_gadget
   gether_cleanup
   gether_connect
+  gether_detach_gadget
   gether_disconnect
   gether_get_dev_addr
   gether_get_host_addr

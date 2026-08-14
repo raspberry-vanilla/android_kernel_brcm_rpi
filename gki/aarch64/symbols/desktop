@@ -86,6 +86,9 @@
   cdev_device_add
   cdev_device_del
   cdev_init
+  cec_get_edid_phys_addr
+  cec_s_phys_addr
+  cec_unregister_adapter
   __check_object_size
   check_zeroed_user
   class_create
@@ -513,6 +516,8 @@
   dma_pool_create
   dma_pool_destroy
   dma_pool_free
+  dma_release_channel
+  dma_request_chan
   dma_resv_add_fence
   dma_resv_iter_first
   dma_resv_iter_next
@@ -837,6 +842,7 @@
   fget
   _find_first_bit
   _find_first_zero_bit
+  find_font
   find_get_pid
   _find_next_bit
   _find_next_zero_bit
@@ -906,6 +912,8 @@
   get_random_bytes
   get_random_u16
   get_random_u32
+  __get_random_u32_below
+  get_random_u8
   __get_task_comm
   get_task_mm
   get_unused_fd_flags
@@ -1219,6 +1227,7 @@
   ktime_get_mono_fast_ns
   ktime_get_raw
   ktime_get_raw_ts64
+  ktime_get_real_seconds
   ktime_get_real_ts64
   ktime_get_seconds
   ktime_get_ts64
@@ -1578,6 +1587,7 @@
   platform_device_msi_free_irqs_all
   platform_device_msi_init_and_alloc_irqs
   platform_device_put
+  platform_device_register
   platform_device_register_full
   platform_device_unregister
   __platform_driver_probe
@@ -1684,6 +1694,7 @@
   refcount_dec_and_mutex_lock
   refcount_dec_not_one
   refcount_warn_saturate
+  __refrigerator
   regcache_cache_only
   regcache_mark_dirty
   regcache_sync
@@ -1866,6 +1877,7 @@
   serial8250_unregister_port
   set_direct_map_default_noflush
   set_direct_map_invalid_noflush
+  set_freezable
   set_normalized_timespec64
   set_page_dirty_lock
   __SetPageMovable
@@ -2022,6 +2034,7 @@
   sock_release
   sort
   sort_r
+  __spi_alloc_controller
   spi_bus_lock
   spi_bus_unlock
   spi_controller_resume
@@ -2039,11 +2052,13 @@
   spi_mem_exec_op
   spi_mem_get_name
   spi_mem_supports_op
+  spi_register_controller
   __spi_register_driver
   spi_setup
   spi_sync
   spi_sync_locked
   spi_target_abort
+  spi_unregister_controller
   spmi_controller_add
   spmi_controller_remove
   __spmi_driver_register
@@ -2118,6 +2133,7 @@
   thermal_zone_device_update
   thermal_zone_get_temp
   thermal_zone_get_zone_by_name
+  time64_to_tm
   timecounter_init
   timecounter_read
   timer_delete
@@ -2352,33 +2368,48 @@
   __v4l2_async_register_subdev
   v4l2_async_unregister_subdev
   v4l2_compat_ioctl32
+  v4l2_ctrl_activate
+  v4l2_ctrl_add_handler
+  v4l2_ctrl_auto_cluster
+  v4l2_ctrl_cluster
   v4l2_ctrl_find
   v4l2_ctrl_g_ctrl
   v4l2_ctrl_g_ctrl_int64
+  __v4l2_ctrl_grab
   v4l2_ctrl_handler_free
   v4l2_ctrl_handler_init_class
   v4l2_ctrl_handler_setup
+  v4l2_ctrl_log_status
+  __v4l2_ctrl_modify_dimensions
   __v4l2_ctrl_modify_range
   v4l2_ctrl_new_custom
   v4l2_ctrl_new_std
   v4l2_ctrl_new_std_menu
   v4l2_ctrl_new_std_menu_items
+  v4l2_ctrl_poll
   v4l2_ctrl_request_complete
   v4l2_ctrl_request_setup
   __v4l2_ctrl_s_ctrl
   __v4l2_ctrl_s_ctrl_compound
+  __v4l2_ctrl_s_ctrl_string
   v4l2_ctrl_subdev_subscribe_event
   v4l2_ctrl_subscribe_event
+  v4l2_detect_cvt
+  v4l2_detect_gtf
+  v4l2_device_put
   v4l2_device_register
   __v4l2_device_register_subdev
   __v4l2_device_register_subdev_nodes
   v4l2_device_unregister
   v4l2_device_unregister_subdev
+  v4l2_dv_timings_presets
+  v4l2_enum_dv_timings_cap
   v4l2_event_queue
   v4l2_event_queue_fh
   v4l2_event_subdev_unsubscribe
   v4l2_event_subscribe
   v4l2_event_unsubscribe
+  v4l2_event_wake_all
   v4l2_fh_add
   v4l2_fh_del
   v4l2_fh_exit
@@ -2386,6 +2417,7 @@
   v4l2_fh_is_singular
   v4l2_fh_open
   v4l2_fh_release
+  v4l2_find_dv_timings_cap
   __v4l2_find_nearest_size
   v4l2_format_info
   v4l2_fwnode_endpoint_parse
@@ -2427,6 +2459,9 @@
   v4l2_m2m_suspend
   v4l2_m2m_try_schedule
   v4l2_m2m_unregister_media_controller
+  v4l2_match_dv_timings
+  v4l2_phys_addr_for_input
+  v4l2_phys_addr_validate
   v4l2_pipeline_link_notify
   v4l2_src_change_event_subscribe
   v4l2_subdev_call_wrappers
@@ -2436,6 +2471,7 @@
   v4l2_subdev_link_validate_default
   __v4l2_subdev_state_get_crop
   __v4l2_subdev_state_get_format
+  v4l2_valid_dv_timings
   v4l_bound_align_image
   __var_waitqueue
   vb2_buffer_done
@@ -2444,13 +2480,16 @@
   vb2_find_buffer
   vb2_fop_mmap
   vb2_fop_poll
+  vb2_fop_read
   vb2_fop_release
+  vb2_fop_write
   vb2_ioctl_create_bufs
   vb2_ioctl_dqbuf
   vb2_ioctl_expbuf
   vb2_ioctl_prepare_buf
   vb2_ioctl_qbuf
   vb2_ioctl_querybuf
+  vb2_ioctl_remove_bufs
   vb2_ioctl_reqbufs
   vb2_ioctl_streamoff
   vb2_ioctl_streamon
@@ -2459,12 +2498,16 @@
   vb2_plane_cookie
   vb2_plane_vaddr
   vb2_qbuf
+  vb2_queue_change_type
+  vb2_queue_error
   vb2_queue_init
   vb2_queue_release
   vb2_request_buffer_cnt
   vb2_request_object_is_buffer
   vb2_request_queue
   vb2_request_validate
+  vb2_video_unregister_device
+  vb2_vmalloc_memops
   vfree
   video_devdata
   video_device_alloc

@@ -1843,6 +1843,9 @@ static ssize_t fuse_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
 	if (fuse_is_bad(inode))
 		return -EIO;
 
+	if (iocb->ki_flags & IOCB_DONTCACHE)
+		return -EOPNOTSUPP;
+
 	if (FUSE_IS_DAX(inode))
 		return fuse_dax_write_iter(iocb, from);
 
@@ -3553,6 +3556,7 @@ static const struct file_operations fuse_file_operations = {
 	.poll		= fuse_file_poll,
 	.fallocate	= fuse_file_fallocate,
 	.copy_file_range = fuse_copy_file_range,
+	.fop_flags	= FOP_DONTCACHE,
 };
 
 static const struct address_space_operations fuse_file_aops  = {

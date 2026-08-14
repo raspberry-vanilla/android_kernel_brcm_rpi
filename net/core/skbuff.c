@@ -1084,6 +1084,11 @@ static void skb_kfree_head(void *head, unsigned int end_offset)
 static void skb_free_head(struct sk_buff *skb)
 {
 	unsigned char *head = skb->head;
+	bool handled = false;
+
+	trace_android_vh_skb_free_head(skb, &handled);
+	if (handled)
+		return;
 
 	if (skb->head_frag) {
 		if (skb_pp_recycle(skb, head))

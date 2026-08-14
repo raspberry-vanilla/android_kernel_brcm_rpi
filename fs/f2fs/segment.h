@@ -211,15 +211,6 @@ struct seg_entry {
 
 struct sec_entry {
 	unsigned int valid_blocks;	/* # of valid blocks in a section */
-};
-
-/*
- * This is supposed to be in the above struct sec_entry from the below
- * patch merged in 6.16-rc1, but applied to avoid ABI breakages in Android.
- *
- * deecd282bc39 "f2fs: add ckpt_valid_blocks to the section entry" in 6.16+
- */
-struct android_sec_entry {
 	unsigned int ckpt_valid_blocks; /* # of valid blocks last cp in a section */
 };
 
@@ -341,22 +332,6 @@ static inline struct sec_entry *get_sec_entry(struct f2fs_sb_info *sbi,
 	return &sit_i->sec_entries[GET_SEC_FROM_SEG(sbi, segno)];
 }
 
-/*
- * This is shared with all other mounts, but ensure only /data will
- * get memory allocated when a large section is defined.
- * Note, the below android_* are only applied to android16-6.12, since
- * the orignal patch [1] adds ckpt_valid_blocks in struct sec_entry,
- * which breaks ABI.
- *
- * [1] deecd282bc39 "f2fs: add ckpt_valid_blocks to the section entry" in 6.16+
- */
-extern struct android_sec_entry *android_sec_entries;
-static inline struct android_sec_entry *android_get_sec_entry(
-			struct f2fs_sb_info *sbi, unsigned int segno)
-{
-	return &android_sec_entries[GET_SEC_FROM_SEG(sbi, segno)];
-}
-
 static inline unsigned int get_valid_blocks(struct f2fs_sb_info *sbi,
 				unsigned int segno, bool use_section)
 {
@@ -374,7 +349,7 @@ static inline unsigned int get_ckpt_valid_blocks(struct f2fs_sb_info *sbi,
 				unsigned int segno, bool use_section)
 {
 	if (use_section && __is_large_section(sbi))
-		return android_get_sec_entry(sbi, segno)->ckpt_valid_blocks;
+		return get_sec_entry(sbi, segno)->ckpt_valid_blocks;
 	else
 		return get_seg_entry(sbi, segno)->ckpt_valid_blocks;
 }
@@ -392,7 +367,7 @@ static inline void set_ckpt_valid_blocks(struct f2fs_sb_info *sbi,
 
 		blocks += se->ckpt_valid_blocks;
 	}
-	android_get_sec_entry(sbi, segno)->ckpt_valid_blocks = blocks;
+	get_sec_entry(sbi, segno)->ckpt_valid_blocks = blocks;
 }
 
 #ifdef CONFIG_F2FS_CHECK_FS
@@ -410,13 +385,11 @@ static inline void sanity_check_valid_blocks(struct f2fs_sb_info *sbi,
 		blocks += se->ckpt_valid_blocks;
 	}
 
-	if (blocks != android_get_sec_entry(sbi, segno)->ckpt_valid_blocks) {
+	if (blocks != get_sec_entry(sbi, segno)->ckpt_valid_blocks) {
 		f2fs_err(sbi,
 			"Inconsistent ckpt valid blocks: "
 			"seg entry(%d) vs sec entry(%d) at secno %d",
-			blocks,
-			android_get_sec_entry(sbi, segno)->ckpt_valid_blocks,
-			secno);
+			blocks, get_sec_entry(sbi, segno)->ckpt_valid_blocks, secno);
 		f2fs_bug_on(sbi, 1);
 	}
 }

@@ -307,6 +307,9 @@ static long hvm_vcpu_ioctl(struct file *filp, unsigned int ioctl,
 	void __user *argp = (void __user *)arg;
 	struct hvm_vcpu *vcpu = filp->private_data;
 
+	if (vcpu->hvm->mm != current->mm)
+		return -EIO;
+
 	switch (ioctl) {
 	case HVM_VCPU_RUN:
 		ret = hvm_vcpu_run(vcpu, argp);

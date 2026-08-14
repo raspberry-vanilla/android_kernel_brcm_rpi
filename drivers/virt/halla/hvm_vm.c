@@ -109,11 +109,15 @@ hvm_vm_ioctl_set_memory_region(struct hvm *hvm,
 
 	memslot = &hvm->memslot[mem->slot];
 
+	mmap_read_lock(hvm->mm);
 	vma = vma_lookup(hvm->mm, mem->userspace_addr);
-	if (!vma)
+	if (!vma) {
+		mmap_read_unlock(hvm->mm);
 		return -EFAULT;
+	}
 
 	size = vma->vm_end - vma->vm_start;
+	mmap_read_unlock(hvm->mm);
 	if (size != mem->memory_size)
 		return -EINVAL;
 
@@ -513,6 +517,9 @@ static long hvm_vm_ioctl(struct file *filp, unsigned int ioctl,
 	long ret;
 	void __user *argp = (void __user *)arg;
 	struct hvm *hvm = filp->private_data;
+
+	if (hvm->mm != current->mm)
+		return -EIO;
 
 	switch (ioctl) {
 	case HVM_CHECK_EXTENSION: {

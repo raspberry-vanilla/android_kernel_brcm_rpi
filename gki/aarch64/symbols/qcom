@@ -1108,6 +1108,7 @@
   __ethtool_get_link_ksettings
   ethtool_op_get_link
   ethtool_op_get_ts_info
+  ethtool_params_from_link_mode
   ethtool_sprintf
   ethtool_virtdev_set_link_ksettings
   eth_type_trans
@@ -1836,6 +1837,7 @@
   l2tp_tunnel_register
   l2tp_udp_encap_recv
   l2tp_xmit_skb
+  led_blink_set_oneshot
   led_classdev_flash_register_ext
   led_classdev_flash_unregister
   led_classdev_unregister
@@ -1845,6 +1847,7 @@
   led_set_brightness_sync
   led_set_flash_brightness
   led_set_flash_timeout
+  led_stop_software_blink
   led_trigger_event
   led_trigger_register
   led_trigger_register_simple
@@ -4082,6 +4085,8 @@
   vsnprintf
   vsprintf
   vunmap
+  vunmap_range_noflush
+  __vunmap_range_noflush
   vzalloc_noprof
   wait_for_completion
   wait_for_completion_interruptible

@@ -43,6 +43,8 @@ pub mod error;
 pub mod firmware;
 pub mod fs;
 pub mod id_pool;
+#[doc(hidden)]
+pub mod impl_flags;
 pub mod init;
 pub mod ioctl;
 pub mod jump_label;
