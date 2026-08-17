@@ -294,6 +294,7 @@
   dev_get_by_name
   device_add
   device_add_groups
+  device_attach
   device_create
   device_create_file
   device_create_managed_software_node
@@ -318,6 +319,7 @@
   device_property_read_u32_array
   device_property_read_u8_array
   device_register
+  device_release_driver
   device_remove_file
   device_remove_groups
   device_rename
@@ -1111,6 +1113,7 @@
   irq_set_chip_data
   irq_set_irq_type
   irq_set_irq_wake
+  irq_set_parent
   irq_to_desc
   is_midr_in_range_list
   is_vmalloc_addr
@@ -1868,6 +1871,7 @@
   shrinker_alloc
   shrinker_free
   shrinker_register
+  si_meminfo
   simple_attr_open
   simple_attr_read
   simple_attr_release
@@ -2127,6 +2131,8 @@
   trace_handle_return
   __traceiter_android_rvh_gup_longterm_locked
   __traceiter_android_rvh_hw_protection_shutdown
+  __traceiter_android_rvh_meminfo_proc_show
+  __traceiter_android_rvh_read_swap_cache_async_timeout
   __traceiter_android_rvh_task_fits_cpu
   __traceiter_android_rvh_ufs_reprogram_all_keys
   __traceiter_android_rvh_update_load_sum
@@ -2184,6 +2190,8 @@
   trace_output_call
   __tracepoint_android_rvh_gup_longterm_locked
   __tracepoint_android_rvh_hw_protection_shutdown
+  __tracepoint_android_rvh_meminfo_proc_show
+  __tracepoint_android_rvh_read_swap_cache_async_timeout
   __tracepoint_android_rvh_task_fits_cpu
   __tracepoint_android_rvh_ufs_reprogram_all_keys
   __tracepoint_android_rvh_update_load_sum

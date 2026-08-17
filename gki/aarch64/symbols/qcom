@@ -3279,6 +3279,8 @@
   topology_update_done
   _totalram_pages
   touch_atime
+  trace_array_get_by_name
+  trace_array_set_clr_event
   trace_array_put
   __trace_bprintk
   trace_clock_local

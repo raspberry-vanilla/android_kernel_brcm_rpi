@@ -605,7 +605,12 @@ static int pkvm_check_processor_compat(void)
 
 static int pkvm_enable_virtualization_cpu(void)
 {
-	return pkvm_hypercall(enable_virtualization_cpu);
+	/*
+	 * There is nothing to do here as virtualization was already enabled
+	 * during pKVM initialization and is never disabled or re-enabled later.
+	 */
+
+	return 0;
 }
 
 static void pkvm_disable_virtualization_cpu(void)
@@ -1389,7 +1394,8 @@ static fastpath_t pkvm_vcpu_run(struct kvm_vcpu *vcpu, u64 run_flags)
 	if (unlikely(vmx_get_exit_reason(vcpu).failed_vmentry))
 		return EXIT_FASTPATH_NONE;
 
-	if (vcpu->arch.exception.pending || vcpu->arch.exception.injected)
+	if (vcpu->arch.nmi_injected || vcpu->arch.interrupt.injected ||
+	    vcpu->arch.exception.pending || vcpu->arch.exception.injected)
 		kvm_make_request(KVM_REQ_EVENT, vcpu);
 
 	exit_fastpath = EXIT_FASTPATH_EXIT_HANDLED;

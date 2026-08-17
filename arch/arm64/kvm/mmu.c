@@ -2104,7 +2104,7 @@ static int pkvm_mem_abort_device(struct kvm_vcpu *vcpu, struct kvm_memory_slot *
 
 		device = !pfn_is_map_memory(pfn);
 		if (device) {
-			int ret = kvm_call_hyp_nvhe(__pkvm_host_map_guest_mmio, pfn, gfn);
+			int ret = kvm_call_refill_hyp_nvhe(__pkvm_host_map_guest_mmio, pfn, gfn);
 			/* Ignore EEXIST as we might have raced with another vCPU. */
 			if (ret && (ret != -EEXIST)) {
 				return ret;
@@ -2235,8 +2235,8 @@ int pkvm_mem_abort_range(struct kvm_vcpu *vcpu, phys_addr_t fault_ipa, size_t si
 }
 
 /*
- * Splitting is only expected on the back of a relinquish guest HVC in the pKVM case, while
- * pkvm_pgtable_stage2_split() can be called with dirty logging.
+ * Splitting is expected on the back of a share or a relinquish guest HVC in the pKVM
+ * case, while pkvm_pgtable_stage2_split() can be called with dirty logging.
  */
 int __pkvm_pgtable_stage2_split(struct kvm_vcpu *vcpu, phys_addr_t ipa, size_t size)
 {
@@ -2244,6 +2244,7 @@ int __pkvm_pgtable_stage2_split(struct kvm_vcpu *vcpu, phys_addr_t ipa, size_t s
 	struct kvm_hyp_memcache *hyp_memcache = &vcpu->arch.stage2_mc;
 	struct kvm_pinned_page *ppage, *tmp;
 	struct kvm_memory_slot *memslot;
+	struct arm_smccc_res res = { };
 	struct kvm *kvm = vcpu->kvm;
 	int idx, p, ret, nr_pages;
 	struct page **pages;
@@ -2295,7 +2296,10 @@ int __pkvm_pgtable_stage2_split(struct kvm_vcpu *vcpu, phys_addr_t ipa, size_t s
 		goto end;
 	}
 
-	ret = kvm_call_hyp_nvhe(__pkvm_host_split_guest, ipa >> PAGE_SHIFT, size);
+	arm_smccc_1_1_hvc(KVM_HOST_SMCCC_FUNC(__pkvm_host_split_guest),
+			  ipa >> PAGE_SHIFT, size, &res);
+	WARN_ON(res.a0 != SMCCC_RET_SUCCESS);
+	ret = res.a1;
 	if (ret)
 		goto end;
 
@@ -2329,6 +2333,10 @@ end:
 	if (ret)
 		unpin_user_pages(pages, nr_pages);
 	kfree(pages);
+
+	/* Servicing a hyp request allocates, so it must run outside the mmu_lock. */
+	if (ret && res.a1)
+		ret = __pkvm_handle_smccc_req(&res, NULL);
 
 unlock_srcu:
 	srcu_read_unlock(&vcpu->kvm->srcu, idx);
