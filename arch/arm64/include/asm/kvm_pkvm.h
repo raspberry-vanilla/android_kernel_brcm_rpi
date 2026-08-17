@@ -294,21 +294,37 @@ static inline unsigned long pvm_supported_vcpu_features(void)
 	(kvm_has_feat(kvm, ID_AA64ISAR1_EL1, LS64, LS64) ? 0ULL : HCRX_nLS64) | \
 	0
 
+struct pkvm_moveable_reg;
+
+typedef void(pkvm_emulate_handler)(struct pkvm_moveable_reg *region, u64 offset,
+				   bool write, u64 *reg, u8 reg_size);
+
 enum pkvm_moveable_reg_type {
 	PKVM_MREG_MEMORY,
 	PKVM_MREG_PROTECTED_RANGE,
 	PKVM_MREG_ASSIGN_MMIO,
+	PKVM_MREG_EMULATE_MMIO,
 };
 
 struct pkvm_moveable_reg {
 	phys_addr_t start;
 	u64 size;
 	enum pkvm_moveable_reg_type type;
+	pkvm_emulate_handler *cb;
+	void *priv;
 };
 
 #define PKVM_NR_MOVEABLE_REGS 512
 extern struct pkvm_moveable_reg kvm_nvhe_sym(pkvm_moveable_regs)[];
 extern unsigned int kvm_nvhe_sym(pkvm_moveable_regs_nr);
+extern void kvm_nvhe_sym(pkvm_handle_forward_req)(struct pkvm_moveable_reg *region, u64 offset,
+						  bool write, u64 *reg, u8 reg_size);
+extern void kvm_nvhe_sym(pkvm_handle_gic_emulation)(struct pkvm_moveable_reg *region, u64 offset,
+						    bool write, u64 *reg, u8 reg_size);
+extern void kvm_nvhe_sym(pkvm_handle_rdist_emulation)(struct pkvm_moveable_reg *region, u64 offset,
+						      bool write, u64 *reg, u8 reg_size);
+extern void kvm_nvhe_sym(pkvm_handle_vlpi_emulation)(struct pkvm_moveable_reg *region, u64 offset,
+						     bool write, u64 *reg, u8 reg_size);
 
 extern struct memblock_region kvm_nvhe_sym(hyp_memory)[];
 extern unsigned int kvm_nvhe_sym(hyp_memblock_nr);

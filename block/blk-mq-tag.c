@@ -609,10 +609,19 @@ int blk_mq_tag_update_depth(struct blk_mq_hw_ctx *hctx,
 	 * a new set of tags before freeing the old one.
 	 */
 	if (tdepth > tags->nr_tags) {
-		struct blk_mq_tag_set *set = hctx->queue->tag_set;
+		struct request_queue *q = hctx->queue;
+		struct blk_mq_tag_set *set = q->tag_set;
 		struct blk_mq_tags *new;
 
 		if (!can_grow)
+			return -EINVAL;
+
+		/*
+		 * Restrict the queue depth if ZWOR is supported and an I/O
+		 * scheduler has been configured to prevent deadlocks.
+		 */
+		if (blk_use_zwor(q) && hctx->sched_tags &&
+		    tdepth > q->tag_set->queue_depth)
 			return -EINVAL;
 
 		/*

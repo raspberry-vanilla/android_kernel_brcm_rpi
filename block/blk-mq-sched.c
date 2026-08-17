@@ -446,13 +446,17 @@ int blk_mq_init_sched(struct request_queue *q, struct elevator_type *e)
 	unsigned long i;
 	int ret;
 
-	/*
-	 * Default to double of smaller one between hw queue_depth and 128,
-	 * since we don't split into sync/async like the old code did.
-	 * Additionally, this is a per-hw queue depth.
-	 */
-	q->nr_requests = 2 * min_t(unsigned int, q->tag_set->queue_depth,
-				   BLKDEV_DEFAULT_RQ);
+	q->nr_requests = min(q->tag_set->queue_depth, BLKDEV_DEFAULT_RQ);
+	if (!blk_use_zwor(q)) {
+		/*
+		 * Default to double of smaller one between hw queue_depth and
+		 * 128, since we don't split into sync/async like the old code
+		 * did. Additionally, this is a per-hw queue depth. Only double
+		 * the queue depth if ZWOR is not supported because otherwise a
+		 * deadlock might occur.
+		 */
+		q->nr_requests *= 2;
+	}
 
 	if (blk_mq_is_shared_tags(flags)) {
 		ret = blk_mq_init_sched_shared_tags(q);

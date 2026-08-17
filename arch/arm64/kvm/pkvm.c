@@ -11,6 +11,7 @@
 #include <linux/interval_tree_generic.h>
 #include <linux/io.h>
 #include <linux/iommu.h>
+#include <linux/irqchip/arm-gic-v3.h>
 #include <linux/kmemleak.h>
 #include <linux/kvm_host.h>
 #include <asm/kvm_mmu.h>
@@ -179,6 +180,77 @@ static int __init register_moveable_fdt_resource(struct device_node *np,
 	return 0;
 }
 
+static int pkvm_register_gic_redist_cb(phys_addr_t phys, u64 size)
+{
+	unsigned int idx = kvm_nvhe_sym(pkvm_moveable_regs_nr);
+
+	if (idx >= PKVM_NR_MOVEABLE_REGS)
+		return -ENOMEM;
+	if (size < SZ_64K)
+		return -EINVAL;
+
+	moveable_regs[idx].start = phys;
+	moveable_regs[idx].size = SZ_64K;
+	moveable_regs[idx].type = PKVM_MREG_EMULATE_MMIO;
+	moveable_regs[idx].cb = lm_alias(&kvm_nvhe_sym(pkvm_handle_rdist_emulation));
+	idx++;
+
+	/* Skip SGI_Base to avoid bottlenecking vgic with emulation */
+
+	if (size >= 3 * SZ_64K) {
+		if (idx >= PKVM_NR_MOVEABLE_REGS)
+			return -ENOMEM;
+
+		moveable_regs[idx].start = phys + SZ_128K;
+		moveable_regs[idx].size = SZ_64K;
+		moveable_regs[idx].type = PKVM_MREG_EMULATE_MMIO;
+		moveable_regs[idx].cb =
+			lm_alias(&kvm_nvhe_sym(pkvm_handle_vlpi_emulation));
+		idx++;
+	}
+
+	kvm_nvhe_sym(pkvm_moveable_regs_nr) = idx;
+	return 0;
+}
+
+static int __init register_its_emulated_region(void)
+{
+	int ret = 0, i = kvm_nvhe_sym(pkvm_moveable_regs_nr);
+	struct device_node *np;
+	struct resource res;
+
+	for_each_compatible_node(np, NULL, "arm,gic-v3-its") {
+		ret = of_address_to_resource(np, 0, &res);
+		if (ret)
+			return ret;
+
+		if (i >= PKVM_NR_MOVEABLE_REGS) {
+			ret = -ENOMEM;
+			goto out_fail;
+		}
+
+		if (!PAGE_ALIGNED(res.start) || !PAGE_ALIGNED(resource_size(&res))) {
+			ret = -EINVAL;
+			goto out_fail;
+		}
+
+		moveable_regs[i].start = res.start;
+		moveable_regs[i].type = PKVM_MREG_EMULATE_MMIO;
+		moveable_regs[i].cb = lm_alias(&kvm_nvhe_sym(pkvm_handle_gic_emulation));
+		moveable_regs[i].size = min_t(u64, resource_size(&res),
+					      PAGE_ALIGN_DOWN(GITS_TRANSLATER));
+		i++;
+	}
+	kvm_nvhe_sym(pkvm_moveable_regs_nr) = i;
+	return i;
+out_fail:
+	of_node_put(np);
+	kvm_nvhe_sym(pkvm_moveable_regs_nr) = 0;
+	return ret;
+}
+
+DEFINE_STATIC_KEY_FALSE(kvm_its_hardening);
+
 static int __init register_moveable_regions(void)
 {
 	struct memblock_region *reg;
@@ -194,6 +266,20 @@ static int __init register_moveable_regions(void)
 		i++;
 	}
 	kvm_nvhe_sym(pkvm_moveable_regs_nr) = i;
+
+	if (static_branch_unlikely(&kvm_its_hardening)) {
+		ret = register_its_emulated_region();
+		if (ret < 0)
+			return ret;
+
+		ret = gic_pkvm_iter_early_redists(pkvm_register_gic_redist_cb);
+		if (ret < 0) {
+			kvm_err("Failed to register GIC redistributors for emulation: %d\n",
+				ret);
+			kvm_nvhe_sym(pkvm_moveable_regs_nr) = 0;
+			return ret;
+		}
+	}
 
 	for_each_compatible_node(np, NULL, "pkvm,protected-region") {
 		ret = register_moveable_fdt_resource(np, PKVM_MREG_PROTECTED_RANGE);
@@ -670,16 +756,63 @@ static void __init _kvm_host_prot_finalize(void *arg)
 		WRITE_ONCE(*err, -EINVAL);
 }
 
+#define ITS_PRIV_NUM_PAGES	(2UL)
+
+static int pkvm_init_its_emulation(phys_addr_t dev_addr, struct its_shadow_tables *shadow)
+{
+	size_t its_priv_sz = ITS_PRIV_NUM_PAGES << PAGE_SHIFT;
+	void *its_state;
+	int ret;
+
+	its_state = alloc_pages_exact(its_priv_sz, GFP_ATOMIC);
+	if (!its_state)
+		return -ENOMEM;
+
+	ret = kvm_call_hyp_nvhe(__pkvm_init_its_emulation, dev_addr, its_state, ITS_PRIV_NUM_PAGES,
+				shadow);
+	if (ret)
+		free_pages_exact(its_state, its_priv_sz);
+
+	return ret;
+}
+
+static int pkvm_init_redist_emulation(phys_addr_t dev_addr)
+{
+	void *redist_state;
+	int ret;
+
+	redist_state = (void *)__get_free_page(GFP_ATOMIC);
+	if (!redist_state)
+		return -ENOMEM;
+
+	ret = kvm_call_hyp_nvhe(__pkvm_init_redist_emulation, dev_addr,
+				redist_state);
+	if (ret)
+		free_page((unsigned long)redist_state);
+
+	return ret;
+}
+
 static int __init pkvm_drop_host_privileges(void)
 {
 	int ret = 0;
+	unsigned long its_flags;
 
 	/*
 	 * Flip the static key upfront as that may no longer be possible
 	 * once the host stage 2 is installed.
 	 */
 	static_branch_enable(&kvm_protected_mode_initialized);
+
+	if (static_branch_unlikely(&kvm_its_hardening))
+		its_start_deprivilege(&its_flags);
+
 	on_each_cpu(_kvm_host_prot_finalize, &ret, 1);
+
+	if (static_branch_unlikely(&kvm_its_hardening)) {
+		its_end_deprivilege(ret, &its_flags, &pkvm_init_its_emulation);
+		gic_redist_deprivilege(&pkvm_init_redist_emulation);
+	}
 	return ret;
 }
 
@@ -1923,3 +2056,11 @@ static int early_ffa_unmap_on_lend_cfg(char *arg)
 }
 
 early_param("kvm-arm.ffa-unmap-on-lend", early_ffa_unmap_on_lend_cfg);
+
+static int early_its_hardening_cfg(char *arg)
+{
+	static_branch_enable(&kvm_its_hardening);
+	return 0;
+}
+
+early_param("kvm-arm.its_hardening", early_its_hardening_cfg);

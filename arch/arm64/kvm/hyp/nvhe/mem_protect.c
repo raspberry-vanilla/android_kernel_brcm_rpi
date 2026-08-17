@@ -15,6 +15,7 @@
 #include <asm/stage2_pgtable.h>
 
 #include <hyp/fault.h>
+#include <hyp/adjust_pc.h>
 
 #include <nvhe/gfp.h>
 #include <nvhe/iommu.h>
@@ -899,6 +900,45 @@ unlock:
 	return ret;
 }
 
+static bool handle_host_mmio_trap(struct kvm_cpu_context *host_ctxt, u64 esr, u64 addr)
+{
+	u64 offset, reg_value = 0, start, end;
+	u8 reg_size, reg_index;
+	bool write;
+	int i;
+
+	for (i = 0; i < pkvm_moveable_regs_nr; i++) {
+		if (pkvm_moveable_regs[i].type != PKVM_MREG_EMULATE_MMIO ||
+		    !pkvm_moveable_regs[i].cb)
+			continue;
+
+		start = pkvm_moveable_regs[i].start;
+		end = start + pkvm_moveable_regs[i].size;
+		reg_size = BIT((esr & ESR_ELx_SAS) >> ESR_ELx_SAS_SHIFT);
+
+		if (start > addr || addr + reg_size > end)
+			continue;
+
+		reg_index = (esr & ESR_ELx_SRT_MASK) >> ESR_ELx_SRT_SHIFT;
+		write = (esr & ESR_ELx_WNR) == ESR_ELx_WNR;
+		offset = addr - start;
+
+		if (write && reg_index != 31)
+			reg_value = host_ctxt->regs.regs[reg_index];
+
+		pkvm_moveable_regs[i].cb(&pkvm_moveable_regs[i], offset, write,
+					 &reg_value, reg_size);
+
+		if (!write && reg_index != 31)
+			host_ctxt->regs.regs[reg_index] = reg_value;
+
+		kvm_skip_host_instr();
+		return true;
+	}
+
+	return false;
+}
+
 static void (*illegal_abt_notifier)(struct user_pt_regs *regs);
 
 int __pkvm_register_illegal_abt_notifier(void (*cb)(struct user_pt_regs *))
@@ -980,6 +1020,10 @@ void handle_host_mem_abort(struct kvm_cpu_context *host_ctxt)
 
 	if (is_dabt(esr) && !addr_is_memory(addr) &&
 	    kvm_iommu_host_dabt_handler(host_ctxt, esr, addr))
+		goto return_to_host;
+
+	if (is_dabt(esr) && !addr_is_memory(addr) &&
+	    handle_host_mmio_trap(host_ctxt, esr, addr))
 		goto return_to_host;
 
 	switch (esr & ESR_ELx_FSC_TYPE) {

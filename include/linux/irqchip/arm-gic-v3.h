@@ -612,6 +612,8 @@
  */
 #define GIC_IRQ_TYPE_LPI		0xa110c8ed
 
+#define ITS_ITT_ALIGN		SZ_256
+
 struct rdists {
 	struct {
 		raw_spinlock_t	rd_lock;
@@ -632,6 +634,16 @@ struct rdists {
 	bool			has_rvpeid;
 	bool			has_direct_lpi;
 	bool			has_vpend_valid_dirty;
+};
+
+/*
+ * The ITS command block, which is what the ITS actually parses.
+ */
+struct its_cmd_block {
+	union {
+		u64	raw_cmd[4];
+		__le64	raw_cmd_le[4];
+	};
 };
 
 struct irq_domain;
@@ -663,6 +675,35 @@ void gic_v3_dist_wait_for_rwp(void);
 
 int its_save_disable(void);
 void its_restore_enable(void);
+
+/*
+ * The ITS_BASER structure - contains memory information, cached
+ * value of BASER register configuration and ITS page size.
+ */
+struct its_baser {
+	void		*base;
+	void		*shadow;
+	u64		val;
+	u32		order;
+	u32		psz;
+};
+
+struct its_shadow_tables {
+	struct its_baser	tables[GITS_BASER_NR_REGS];
+	void			*cmd_shadow;
+	void			*cmd_original;
+	void			*cmd_write;
+	size_t			cmdq_len;
+};
+
+typedef int (*its_init_emulate)(phys_addr_t its_phys_base, struct its_shadow_tables *shadow);
+
+void its_start_deprivilege(unsigned long *flags);
+int its_end_deprivilege(int ret, unsigned long *flags, its_init_emulate cb);
+
+int __init gic_pkvm_iter_early_redists(int (*cb)(phys_addr_t, u64));
+
+int gic_redist_deprivilege(int (*cb)(phys_addr_t));
 
 #endif
 

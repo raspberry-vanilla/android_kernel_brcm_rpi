@@ -77,17 +77,6 @@ struct its_collection {
 	u16			col_id;
 };
 
-/*
- * The ITS_BASER structure - contains memory information, cached
- * value of BASER register configuration and ITS page size.
- */
-struct its_baser {
-	void		*base;
-	u64		val;
-	u32		order;
-	u32		psz;
-};
-
 struct its_device;
 
 /*
@@ -128,8 +117,6 @@ struct its_node {
 #define is_v4(its)		(!!((its)->typer & GITS_TYPER_VLPIS))
 #define is_v4_1(its)		(!!((its)->typer & GITS_TYPER_VMAPP))
 #define device_ids(its)		(FIELD_GET(GITS_TYPER_DEVBITS, (its)->typer) + 1)
-
-#define ITS_ITT_ALIGN		SZ_256
 
 /* The maximum number of VPEID bits supported by VLPI commands */
 #define ITS_MAX_VPEID_BITS						\
@@ -518,16 +505,6 @@ struct its_cmd_desc {
 			bool group;
 			bool clear;
 		} its_vsgi_cmd;
-	};
-};
-
-/*
- * The ITS command block, which is what the ITS actually parses.
- */
-struct its_cmd_block {
-	union {
-		u64	raw_cmd[4];
-		__le64	raw_cmd_le[4];
 	};
 };
 
@@ -3494,6 +3471,7 @@ static struct its_device *its_create_device(struct its_node *its, u32 dev_id,
 	nr_ites = max(2, nvecs);
 	sz = nr_ites * (FIELD_GET(GITS_TYPER_ITT_ENTRY_SIZE, its->typer) + 1);
 	sz = max(sz, ITS_ITT_ALIGN);
+	sz = PAGE_ALIGN(sz);
 
 	itt = itt_alloc_pool(its->numa_node, sz);
 
@@ -5212,6 +5190,147 @@ static int __init its_compute_its_list_map(struct its_node *its)
 
 	return its_number;
 }
+
+static void its_free_shadow_tables(struct its_shadow_tables *shadow)
+{
+	int i;
+
+	if (shadow->cmd_shadow)
+		its_free_pages(shadow->cmd_shadow, get_order(ITS_CMD_QUEUE_SZ));
+
+	for (i = 0; i < GITS_BASER_NR_REGS; i++) {
+		if (!shadow->tables[i].shadow)
+			continue;
+
+		its_free_pages(shadow->tables[i].shadow, shadow->tables[i].order);
+	}
+
+	its_free_pages(shadow, 0);
+}
+
+static struct its_shadow_tables *its_get_shadow_tables(struct its_node *its)
+{
+	void *page;
+	struct its_shadow_tables *shadow;
+	int i;
+
+	page = its_alloc_pages_node(its->numa_node, GFP_ATOMIC | __GFP_ZERO, 0);
+	if (!page)
+		return NULL;
+
+	shadow = (void *)page_address(page);
+	page = its_alloc_pages_node(its->numa_node,
+				    GFP_ATOMIC | __GFP_ZERO,
+				    get_order(ITS_CMD_QUEUE_SZ));
+	if (!page)
+		goto err_alloc_shadow;
+
+	shadow->cmd_shadow = page_address(page);
+	shadow->cmdq_len = ITS_CMD_QUEUE_SZ;
+	shadow->cmd_original = its->cmd_base;
+	shadow->cmd_write = its->cmd_write;
+
+	memcpy(shadow->tables, its->tables, sizeof(struct its_baser) * GITS_BASER_NR_REGS);
+
+	for (i = 0; i < GITS_BASER_NR_REGS; i++) {
+		if (!(shadow->tables[i].val & GITS_BASER_VALID))
+			continue;
+
+		if (!(shadow->tables[i].val & GITS_BASER_INDIRECT))
+			continue;
+
+		page = its_alloc_pages_node(its->numa_node,
+					    GFP_ATOMIC | __GFP_ZERO,
+					    shadow->tables[i].order);
+		if (!page)
+			goto err_alloc_shadow;
+
+		shadow->tables[i].shadow = page_address(page);
+
+		memcpy(shadow->tables[i].shadow, shadow->tables[i].base,
+		       PAGE_ORDER_TO_SIZE(shadow->tables[i].order));
+	}
+
+	return shadow;
+
+err_alloc_shadow:
+	its_free_shadow_tables(shadow);
+	return NULL;
+}
+
+void its_start_deprivilege(unsigned long *flags)
+{
+	struct its_node *its;
+
+	if (WARN_ON(!flags))
+		return;
+
+	raw_spin_lock_irqsave(&its_lock, *flags);
+
+	list_for_each_entry(its, &its_nodes, entry)
+		raw_spin_lock(&its->lock);
+}
+EXPORT_SYMBOL_GPL(its_start_deprivilege);
+
+static int its_switch_to_shadow_locked(struct its_node *its, its_init_emulate init_emulate_cb)
+{
+	struct its_shadow_tables *hyp_shadow, shadow;
+	int i, ret;
+	u64 baser_phys;
+
+	hyp_shadow = its_get_shadow_tables(its);
+	if (!hyp_shadow)
+		return -ENOMEM;
+
+	memcpy(&shadow, hyp_shadow, sizeof(shadow));
+	ret = init_emulate_cb(its->phys_base, hyp_shadow);
+	if (ret) {
+		its_free_shadow_tables(hyp_shadow);
+		return ret;
+	}
+
+	/* Switch the driver command queue to use the shadow and save the original */
+	its->cmd_write = (its->cmd_write - its->cmd_base) +
+		(struct its_cmd_block *)shadow.cmd_shadow;
+	its->cmd_base = shadow.cmd_shadow;
+
+	/* Replaces the first level of the indirect tables with shadow tables */
+	for (i = 0; i < GITS_BASER_NR_REGS; i++) {
+		if (!shadow.tables[i].shadow)
+			continue;
+
+		baser_phys = virt_to_phys(shadow.tables[i].shadow);
+		if (IS_ENABLED(CONFIG_ARM64_64K_PAGES) && (baser_phys >> 48))
+			baser_phys = GITS_BASER_PHYS_52_to_48(baser_phys);
+
+		its->tables[i].val &= ~GENMASK(47, 12);
+		its->tables[i].val |= baser_phys;
+		its->tables[i].base = shadow.tables[i].shadow;
+	}
+
+	return 0;
+}
+
+int its_end_deprivilege(int ret_pkvm_finalize, unsigned long *flags, its_init_emulate cb)
+{
+	struct its_node *its;
+	int ret = 0;
+
+	if (WARN_ON(!flags || !cb))
+		ret = -EINVAL;
+
+	list_for_each_entry(its, &its_nodes, entry) {
+		if (!ret_pkvm_finalize && !ret)
+			ret = its_switch_to_shadow_locked(its, cb);
+
+		raw_spin_unlock(&its->lock);
+	}
+
+	raw_spin_unlock_irqrestore(&its_lock, *flags);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(its_end_deprivilege);
 
 static int __init its_probe_one(struct its_node *its)
 {

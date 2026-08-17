@@ -439,8 +439,7 @@ static inline struct mutex *blk_mq_zwp_mutex(struct blk_mq_hw_ctx *hctx)
 	 * zoned writes is disabled or if zone write order restore is supported,
 	 * do not serialize dispatch operations.
 	 */
-	if (!blk_queue_is_zoned(q) || !blk_pipeline_zwr(q) ||
-	    (q->limits.features & BLK_FEAT_ZWOR))
+	if (!blk_queue_is_zoned(q) || !blk_pipeline_zwr(q) || blk_use_zwor(q))
 		return NULL;
 
 	/*

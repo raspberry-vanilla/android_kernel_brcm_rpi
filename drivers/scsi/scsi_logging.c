@@ -63,20 +63,29 @@ void sdev_prefix_printk(const char *level, const struct scsi_device *sdev,
 	if (!sdev)
 		return;
 
-	logbuf = scsi_log_reserve_buffer(&logbuf_len);
-	if (!logbuf)
-		return;
+	if (name) {
+		logbuf = scsi_log_reserve_buffer(&logbuf_len);
+		if (!logbuf)
+			return;
 
-	if (name)
 		off += scnprintf(logbuf + off, logbuf_len - off,
 				 "[%s] ", name);
-	if (!WARN_ON(off >= logbuf_len)) {
+		if (!WARN_ON(off >= logbuf_len)) {
+			va_start(args, fmt);
+			off += vscnprintf(logbuf + off, logbuf_len - off, fmt,
+					  args);
+			va_end(args);
+		}
+		dev_printk(level, &sdev->sdev_gendev, "%s", logbuf);
+		scsi_log_release_buffer(logbuf);
+	} else {
+		u8 level_byte = printk_get_level(level);
 		va_start(args, fmt);
-		off += vscnprintf(logbuf + off, logbuf_len - off, fmt, args);
+		dev_vprintk_emit(level_byte ? level_byte - '0' :
+					      LOGLEVEL_DEFAULT,
+				 &sdev->sdev_gendev, fmt, args);
 		va_end(args);
 	}
-	dev_printk(level, &sdev->sdev_gendev, "%s", logbuf);
-	scsi_log_release_buffer(logbuf);
 }
 EXPORT_SYMBOL(sdev_prefix_printk);
 

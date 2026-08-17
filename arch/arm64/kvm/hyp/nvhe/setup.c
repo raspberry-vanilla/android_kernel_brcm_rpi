@@ -332,11 +332,24 @@ static int unmap_protected_regions(void)
 
 	for (i = 0; i < pkvm_moveable_regs_nr; i++) {
 		reg = &pkvm_moveable_regs[i];
-		if (reg->type != PKVM_MREG_PROTECTED_RANGE)
-			continue;
 
-		ret = host_stage2_set_owner_locked(reg->start, reg->size,
-						   PKVM_ID_PROTECTED);
+		switch (reg->type) {
+		case PKVM_MREG_PROTECTED_RANGE:
+			ret = host_stage2_set_owner_locked(
+				reg->start, reg->size, PKVM_ID_PROTECTED);
+			break;
+		case PKVM_MREG_EMULATE_MMIO:
+			ret = ___pkvm_host_donate_hyp_prot(
+				reg->start >> PAGE_SHIFT,
+				reg->size >> PAGE_SHIFT, true, PAGE_HYP_DEVICE);
+
+			if (reg->cb)
+				reg->cb = kern_hyp_va(reg->cb);
+			break;
+		default:
+			continue;
+		}
+
 		if (ret)
 			return ret;
 	}

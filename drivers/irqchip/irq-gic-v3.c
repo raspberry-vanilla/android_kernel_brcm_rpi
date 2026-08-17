@@ -37,6 +37,9 @@
 #include <asm/exception.h>
 #include <asm/smp_plat.h>
 #include <asm/virt.h>
+#if IS_ENABLED(CONFIG_ARM64)
+#include <asm/kvm_host.h>
+#endif
 
 #include "irq-gic-common.h"
 
@@ -1165,6 +1168,19 @@ static int __gic_update_rdist_properties(struct redist_region *region,
 		gic_data.rdists.has_vlpis = false;
 		gic_data.rdists.has_rvpeid = false;
 	}
+
+	/*
+	 * Disable GIC v4.0 features when protected KVM is used. Currently
+	 * pKVM does not have proper sanitization in place to ensure that
+	 * VLPI could not be exploited to compromise hypervisor and
+	 * pVM security.
+	 */
+#if IS_ENABLED(CONFIG_ARM64)
+	if (kvm_get_mode() == KVM_MODE_PROTECTED) {
+		gic_data.rdists.has_vlpis = false;
+		gic_data.rdists.has_rvpeid = false;
+	}
+#endif
 
 	gic_data.ppi_nr = min(GICR_TYPER_NR_PPIS(typer), gic_data.ppi_nr);
 
@@ -2403,6 +2419,144 @@ out_unmap_dist:
 	iounmap(dist_base);
 	return err;
 }
+
+#if IS_ENABLED(CONFIG_ARM64)
+static phys_addr_t gic_pkvm_early_redists[NR_CPUS];
+static size_t gic_pkvm_early_strides[NR_CPUS];
+static int gic_pkvm_nr_early_redists;
+
+static ssize_t __init gic_probe_pkvm_redist(phys_addr_t phys, u64 dt_stride)
+{
+	void __iomem *ptr;
+	ssize_t stride;
+	u64 typer;
+	u32 reg;
+
+	ptr = early_ioremap(phys, SZ_64K);
+	if (!ptr)
+		return -ENOMEM;
+
+	reg = readl_relaxed(ptr + GICR_PIDR2) & GIC_PIDR2_ARCH_MASK;
+	if (reg != GIC_PIDR2_ARCH_GICv3 && reg != GIC_PIDR2_ARCH_GICv4) {
+		early_iounmap(ptr, SZ_64K);
+		return -ENODEV;
+	}
+
+	typer = gic_read_typer(ptr + GICR_TYPER);
+
+	stride = dt_stride;
+	if (!stride) {
+		stride = SZ_64K * 2;
+		if (FIELD_GET(GICR_TYPER_VLPIS, typer))
+			stride += SZ_64K * 2;
+	}
+
+	if (gic_pkvm_nr_early_redists < NR_CPUS) {
+		gic_pkvm_early_redists[gic_pkvm_nr_early_redists] = phys;
+		gic_pkvm_early_strides[gic_pkvm_nr_early_redists++] = stride;
+	} else {
+		WARN_ONCE(true,
+			  "Too many GIC redistributors in the system (> %d). "
+			  "System might not be secure \n",
+			  NR_CPUS);
+		stride = -E2BIG;
+	}
+
+	early_iounmap(ptr, SZ_64K);
+
+	if (typer & GICR_TYPER_LAST)
+		return 0;
+
+	return stride;
+}
+
+static int __init gic_init_pkvm_data(void)
+{
+	struct device_node *node;
+	struct resource res;
+	u32 nr_redist_regions;
+	u64 dt_stride;
+	int i;
+
+	if (gic_pkvm_nr_early_redists)
+		return 0;
+
+	node = of_find_compatible_node(NULL, NULL, "arm,gic-v3");
+	if (!node)
+		return -ENODEV;
+
+	if (of_property_read_u32(node, "#redistributor-regions", &nr_redist_regions))
+		nr_redist_regions = 1;
+
+	if (of_property_read_u64(node, "redistributor-stride", &dt_stride))
+		dt_stride = 0;
+
+	for (i = 0; i < nr_redist_regions; i++) {
+		phys_addr_t phys, phys_end;
+
+		if (of_address_to_resource(node, 1 + i, &res))
+			continue;
+
+		phys = res.start;
+		phys_end = res.start + resource_size(&res);
+
+		while (phys < phys_end) {
+			ssize_t stride = gic_probe_pkvm_redist(phys, dt_stride);
+
+			if (stride == 0)
+				break;
+			else if (stride < 0) {
+				of_node_put(node);
+				return stride;
+			}
+
+			phys += stride;
+		}
+	}
+
+	of_node_put(node);
+	return 0;
+}
+
+int __init gic_pkvm_iter_early_redists(int (*cb)(phys_addr_t, u64))
+{
+	int i, ret;
+
+	if (!gic_pkvm_nr_early_redists) {
+		ret = gic_init_pkvm_data();
+		if (ret)
+			return ret;
+	}
+
+	for (i = 0; i < gic_pkvm_nr_early_redists; i++) {
+		ret = cb(gic_pkvm_early_redists[i], gic_pkvm_early_strides[i]);
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
+
+int gic_redist_deprivilege(int (*cb)(phys_addr_t))
+{
+	phys_addr_t phys_base;
+	int i, ret = 0;
+
+	if (WARN_ON(!gic_pkvm_nr_early_redists || !cb))
+		return -ENODEV;
+
+	for (i = gic_pkvm_nr_early_redists - 1; i >= 0; i--) {
+		phys_base = gic_pkvm_early_redists[i];
+
+		ret = cb(phys_base);
+
+		if (ret)
+			return ret;
+	}
+
+	return 0;
+}
+#endif
 
 IRQCHIP_DECLARE(gic_v3, "arm,gic-v3", gic_of_init);
 

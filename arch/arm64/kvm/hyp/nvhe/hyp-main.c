@@ -21,6 +21,7 @@
 #include <nvhe/alloc_mgt.h>
 #include <nvhe/ffa.h>
 #include <nvhe/iommu.h>
+#include <nvhe/its_emulate.h>
 #include <nvhe/mem_protect.h>
 #include <nvhe/modules.h>
 #include <nvhe/mm.h>
@@ -1338,6 +1339,32 @@ static void handle___kvm_tlb_flush_vmid(struct kvm_cpu_context *host_ctxt)
 	__kvm_tlb_flush_vmid(kern_hyp_va(mmu));
 }
 
+static void handle___pkvm_init_its_emulation(struct kvm_cpu_context *host_ctxt)
+{
+	DECLARE_REG(phys_addr_t, dev_addr, host_ctxt, 1);
+	DECLARE_REG(void *, priv_its_state, host_ctxt, 2);
+	DECLARE_REG(size_t, priv_num_pages, host_ctxt, 3);
+	DECLARE_REG(struct its_shadow_tables *, shadow, host_ctxt, 4);
+
+	if (!is_protected_kvm_enabled())
+		return;
+
+	cpu_reg(host_ctxt, 1) = pkvm_init_gic_its_emulation(dev_addr, priv_its_state,
+							    priv_num_pages, shadow);
+}
+
+static void handle___pkvm_init_redist_emulation(struct kvm_cpu_context *host_ctxt)
+{
+	DECLARE_REG(phys_addr_t, dev_addr, host_ctxt, 1);
+	DECLARE_REG(void *, redist_state, host_ctxt, 2);
+
+	if (!is_protected_kvm_enabled())
+		return;
+
+	cpu_reg(host_ctxt, 1) =
+		pkvm_init_redist_emulation(dev_addr, redist_state);
+}
+
 static void handle___pkvm_tlb_flush_vmid(struct kvm_cpu_context *host_ctxt)
 {
 	DECLARE_REG(pkvm_handle_t, handle, host_ctxt, 1);
@@ -2099,6 +2126,8 @@ static const hcall_t host_hcall[] = {
 	HANDLE_FUNC(__pkvm_pviommu_attach),
 	HANDLE_FUNC(__pkvm_pviommu_add_vsid),
 	HANDLE_FUNC(__pkvm_host_get_ffa_version),
+	HANDLE_FUNC(__pkvm_init_its_emulation),
+	HANDLE_FUNC(__pkvm_init_redist_emulation),
 };
 
 static void handle_host_hcall(struct kvm_cpu_context *host_ctxt)
