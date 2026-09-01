@@ -45,6 +45,7 @@
   call_rcu
   cancel_delayed_work
   cancel_delayed_work_sync
+  cancel_work
   cancel_work_sync
   capable
   cdev_device_add

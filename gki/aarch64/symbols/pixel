@@ -45,6 +45,13 @@
   backlight_device_set_brightness
   bcmp
   bin2hex
+  __bio_add_page
+  bio_alloc_bioset
+  bio_chain
+  bio_endio
+  bio_end_io_acct_remapped
+  bio_init
+  bio_start_io_acct
   __bitmap_andnot
   __bitmap_clear
   __bitmap_equal
@@ -60,6 +67,8 @@
   bitmap_to_arr32
   __bitmap_weight
   bitmap_zalloc
+  __blk_alloc_disk
+  blk_check_plugged
   blk_execute_rq_nowait
   blk_get_queue
   blk_mq_free_request
@@ -68,6 +77,7 @@
   blk_put_queue
   blk_rq_map_user_io
   blk_rq_unmap_user
+  blk_status_to_errno
   blocking_notifier_call_chain
   blocking_notifier_chain_register
   blocking_notifier_chain_unregister
@@ -177,8 +187,10 @@
   __const_udelay
   consume_skb
   contig_page_data
+  contpte_ptep_get
   _copy_from_iter
   __copy_overflow
+  copy_page
   _copy_to_iter
   cpu_all_bits
   cpu_bit_bitmap
@@ -264,6 +276,7 @@
   debugfs_remove
   default_llseek
   delayed_work_timer_fn
+  del_gendisk
   desc_to_gpio
   destroy_workqueue
   dev_addr_mod
@@ -293,6 +306,7 @@
   dev_get_by_index
   dev_get_by_name
   device_add
+  device_add_disk
   device_add_groups
   device_attach
   device_create
@@ -311,6 +325,7 @@
   device_link_add
   device_link_del
   device_match_fwnode
+  device_match_of_node
   device_property_match_string
   device_property_present
   device_property_read_bool
@@ -546,6 +561,8 @@
   down_write
   dput
   drain_workqueue
+  driver_find_device
+  driver_for_each_device
   driver_register
   driver_unregister
   drm_add_modes_noedid
@@ -822,6 +839,9 @@
   fdget
   fd_install
   fget
+  file_path
+  filp_close
+  filp_open_block
   _find_first_bit
   _find_first_zero_bit
   find_get_pid
@@ -832,11 +852,14 @@
   find_vma_intersection
   finish_wait
   firmware_request_nowarn
+  flush_dcache_page
   flush_delayed_work
   flush_work
   __flush_workqueue
   __folio_lock
   __folio_put
+  folio_unlock
+  folio_wait_writeback
   for_each_thermal_trip
   __fortify_panic
   fput
@@ -857,6 +880,7 @@
   freq_qos_add_request
   freq_qos_remove_request
   freq_qos_update_request
+  fs_bio_set
   fsnotify
   __fsnotify_parent
   full_name_hash
@@ -906,6 +930,8 @@
   __get_random_u32_below
   get_random_u8
   get_sg_io_hdr
+  get_swap_device
+  get_task_mm
   get_unused_fd_flags
   get_user_pages
   get_user_pages_fast
@@ -1003,6 +1029,7 @@
   i3c_device_request_ibi
   i3cdev_to_dev
   i3c_master_do_daa
+  I_BDEV
   ida_alloc_range
   ida_destroy
   ida_free
@@ -1038,6 +1065,8 @@
   init_uts_ns
   init_wait_entry
   __init_waitqueue_head
+  inode_owner_or_capable
+  inode_permission
   input_alloc_absinfo
   input_allocate_device
   input_close_device
@@ -1247,6 +1276,8 @@
   kvm_iommu_share_hyp_sg
   kvm_iommu_unmap_pages
   kvm_iommu_unshare_hyp_sg
+  __kvm_nvhe_kvm_patch_physvirt_offset
+  __kvm_nvhe_kvm_update_va_mask
   kvm_tracing_set_el1_configuration
   led_classdev_register_ext
   led_classdev_unregister
@@ -1263,7 +1294,21 @@
   loops_per_jiffy
   lru_cache_disable
   lru_disable_count
+  LZ4_compress_fast
+  LZ4_compress_fast_continue
+  LZ4_compress_HC
+  LZ4_compress_HC_continue
+  LZ4_decompress_safe
+  LZ4_decompress_safe_continue
+  LZ4_loadDict
+  LZ4_loadDictHC
+  LZ4_resetStreamHC
+  LZ4_setStreamDecode
+  lzo1x_1_compress
+  lzo1x_decompress_safe
+  lzorle1x_1_compress
   mac_pton
+  mas_find
   mbox_chan_received_data
   mbox_controller_register
   mbox_controller_unregister
@@ -1284,6 +1329,7 @@
   memremap
   mem_section
   memset
+  memset64
   memset_io
   memstart_addr
   memunmap
@@ -1310,6 +1356,7 @@
   __mmap_lock_do_trace_released
   __mmap_lock_do_trace_start_locking
   __mmdrop
+  mmput
   mod_delayed_work_on
   mod_node_page_state
   mod_timer
@@ -1360,6 +1407,7 @@
   netlink_unregister_notifier
   net_ns_type_operations
   net_ratelimit
+  next_arg
   nf_register_net_hooks
   nf_unregister_net_hooks
   nla_find
@@ -1374,6 +1422,7 @@
   __nlmsg_put
   nonseekable_open
   noop_llseek
+  nop_mnt_idmap
   nr_cpu_ids
   nr_swap_pages
   nsec_to_clock_t
@@ -1470,6 +1519,8 @@
   __page_frag_alloc_align
   __page_frag_cache_drain
   page_frag_free
+  page_pinner_inited
+  __page_pinner_put_page
   panic
   panic_notifier_list
   param_array_ops
@@ -1546,6 +1597,7 @@
   phy_init
   phy_power_off
   phy_power_on
+  pidfd_get_task
   pid_task
   pinconf_generic_dt_free_map
   pinconf_generic_dt_node_to_map
@@ -1647,8 +1699,10 @@
   pskb_expand_head
   __pskb_pull_tail
   ___pskb_trim
+  __pte_offset_map_lock
   __put_cred
   put_device
+  put_disk
   put_iova_domain
   __put_net
   put_pid
@@ -1677,6 +1731,7 @@
   _raw_spin_lock_bh
   _raw_spin_lock_irq
   _raw_spin_lock_irqsave
+  raw_spin_rq_trylock
   _raw_spin_trylock
   _raw_spin_unlock
   _raw_spin_unlock_bh
@@ -1699,6 +1754,7 @@
   rdev_get_drvdata
   rdev_get_id
   rdev_get_regmap
+  read_comp_algo_dictionary
   reboot_mode
   refcount_dec_and_mutex_lock
   refcount_warn_saturate
@@ -1707,6 +1763,7 @@
   regcache_drop_region
   regcache_mark_dirty
   regcache_sync
+  __register_blkdev
   __register_chrdev
   register_chrdev_region
   register_console
@@ -1854,6 +1911,8 @@
   seq_release
   seq_release_private
   seq_write
+  set_capacity
+  set_capacity_and_notify
   set_cpus_allowed_ptr
   set_freezable
   set_normalized_timespec64
@@ -2040,12 +2099,14 @@
   strsep
   strspn
   strstr
+  submit_bio
   subsys_system_register
   suspend_set_ops
   __sw_hweight16
   __sw_hweight32
   __sw_hweight64
   __sw_hweight8
+  sync_blockdev
   sync_file_create
   sync_file_get_fence
   synchronize_irq
@@ -2131,8 +2192,14 @@
   trace_handle_return
   __traceiter_android_rvh_gup_longterm_locked
   __traceiter_android_rvh_hw_protection_shutdown
+  __traceiter_android_rvh_madvise_pageout_begin
+  __traceiter_android_rvh_madvise_pageout_end
+  __traceiter_android_rvh_mapping_shrinkable
   __traceiter_android_rvh_meminfo_proc_show
   __traceiter_android_rvh_read_swap_cache_async_timeout
+  __traceiter_android_rvh_reclaim_folio_list
+  __traceiter_android_rvh_set_user_nice_locked
+  __traceiter_android_rvh_swap_read_folio_bdev_sync
   __traceiter_android_rvh_task_fits_cpu
   __traceiter_android_rvh_ufs_reprogram_all_keys
   __traceiter_android_rvh_update_load_sum
@@ -2146,8 +2213,10 @@
   __traceiter_android_vh_do_async_mmap_readahead
   __traceiter_android_vh_do_sync_mmap_readahead
   __traceiter_android_vh_ep_create_wakeup_source
+  __traceiter_android_vh_free_one_page_flag_check
   __traceiter_android_vh_free_pages_prepare_init
   __traceiter_android_vh_ipi_stop
+  __traceiter_android_vh_mm_customize_longterm_pinnable
   __traceiter_android_vh_page_cache_ra_order_bypass
   __traceiter_android_vh_page_cache_readahead_start
   __traceiter_android_vh_platform_pci_choose_state
@@ -2156,10 +2225,13 @@
   __traceiter_android_vh_platform_pci_set_power_state
   __traceiter_android_vh_post_alloc_hook
   __traceiter_android_vh_ra_alloc_retry
+  __traceiter_android_vh_rmqueue
   __traceiter_android_vh_rust_binder_restore_priority
   __traceiter_android_vh_rust_binder_set_priority
   __traceiter_android_vh_scheduler_tick
+  __traceiter_android_vh_show_smap
   __traceiter_android_vh_si_meminfo_adjust
+  __traceiter_android_vh_smaps_pte_entry
   __traceiter_android_vh_swap_writepage
   __traceiter_android_vh_sysrq_crash
   __traceiter_android_vh_timerfd_create
@@ -2167,6 +2239,7 @@
   __traceiter_android_vh_ufs_check_int_errors
   __traceiter_android_vh_ufs_compl_command
   __traceiter_android_vh_ufs_fill_prdt
+  __traceiter_android_vh_ufs_mcq_cleanup
   __traceiter_android_vh_ufs_prepare_command
   __traceiter_android_vh_ufs_send_command
   __traceiter_android_vh_ufs_send_tm_command
@@ -2190,8 +2263,14 @@
   trace_output_call
   __tracepoint_android_rvh_gup_longterm_locked
   __tracepoint_android_rvh_hw_protection_shutdown
+  __tracepoint_android_rvh_madvise_pageout_begin
+  __tracepoint_android_rvh_madvise_pageout_end
+  __tracepoint_android_rvh_mapping_shrinkable
   __tracepoint_android_rvh_meminfo_proc_show
   __tracepoint_android_rvh_read_swap_cache_async_timeout
+  __tracepoint_android_rvh_reclaim_folio_list
+  __tracepoint_android_rvh_set_user_nice_locked
+  __tracepoint_android_rvh_swap_read_folio_bdev_sync
   __tracepoint_android_rvh_task_fits_cpu
   __tracepoint_android_rvh_ufs_reprogram_all_keys
   __tracepoint_android_rvh_update_load_sum
@@ -2205,8 +2284,10 @@
   __tracepoint_android_vh_do_async_mmap_readahead
   __tracepoint_android_vh_do_sync_mmap_readahead
   __tracepoint_android_vh_ep_create_wakeup_source
+  __tracepoint_android_vh_free_one_page_flag_check
   __tracepoint_android_vh_free_pages_prepare_init
   __tracepoint_android_vh_ipi_stop
+  __tracepoint_android_vh_mm_customize_longterm_pinnable
   __tracepoint_android_vh_page_cache_ra_order_bypass
   __tracepoint_android_vh_page_cache_readahead_start
   __tracepoint_android_vh_platform_pci_choose_state
@@ -2215,10 +2296,13 @@
   __tracepoint_android_vh_platform_pci_set_power_state
   __tracepoint_android_vh_post_alloc_hook
   __tracepoint_android_vh_ra_alloc_retry
+  __tracepoint_android_vh_rmqueue
   __tracepoint_android_vh_rust_binder_restore_priority
   __tracepoint_android_vh_rust_binder_set_priority
   __tracepoint_android_vh_scheduler_tick
+  __tracepoint_android_vh_show_smap
   __tracepoint_android_vh_si_meminfo_adjust
+  __tracepoint_android_vh_smaps_pte_entry
   __tracepoint_android_vh_swap_writepage
   __tracepoint_android_vh_sysrq_crash
   __tracepoint_android_vh_timerfd_create
@@ -2226,6 +2310,7 @@
   __tracepoint_android_vh_ufs_check_int_errors
   __tracepoint_android_vh_ufs_compl_command
   __tracepoint_android_vh_ufs_fill_prdt
+  __tracepoint_android_vh_ufs_mcq_cleanup
   __tracepoint_android_vh_ufs_prepare_command
   __tracepoint_android_vh_ufs_send_command
   __tracepoint_android_vh_ufs_send_tm_command
@@ -2299,6 +2384,7 @@
   unlock_page
   unmap_mapping_range
   unpin_user_page
+  unregister_blkdev
   __unregister_chrdev
   unregister_chrdev_region
   unregister_inet6addr_notifier
@@ -2448,6 +2534,7 @@
   vmf_insert_pfn_prot
   vm_node_stat
   vm_unmapped_area
+  vm_zone_stat
   vprintk
   vprintk_emit
   vring_del_virtqueue
@@ -2469,6 +2556,7 @@
   wakeup_source_register
   wakeup_source_unregister
   __wake_up_sync
+  walk_page_range
   __warn_printk
   watchdog_init_timeout
   watchdog_register_device
@@ -2508,3 +2596,45 @@
   xhci_sideband_unregister
   xhci_stop_endpoint_sync
   xhci_suspend
+  zlib_deflate
+  zlib_deflateEnd
+  zlib_deflateInit2
+  zlib_deflateReset
+  zlib_deflate_workspacesize
+  zlib_inflate
+  zlib_inflateEnd
+  zlib_inflateInit2
+  zlib_inflateReset
+  zlib_inflate_workspacesize
+  zs_compact
+  zs_create_pool
+  zs_destroy_pool
+  zs_free
+  zs_get_total_pages
+  zs_huge_class_size
+  zs_lookup_class_index
+  zs_malloc
+  zs_obj_read_begin
+  zs_obj_read_end
+  zs_obj_write
+  zs_pool_stats
+  zstd_cctx_workspace_bound
+  zstd_compress_cctx
+  zstd_compress_using_cdict
+  zstd_create_cctx_advanced
+  zstd_create_cdict_byreference
+  zstd_create_dctx_advanced
+  zstd_create_ddict_byreference
+  zstd_dctx_workspace_bound
+  zstd_decompress_dctx
+  zstd_decompress_using_ddict
+  zstd_default_clevel
+  zstd_free_cctx
+  zstd_free_cdict
+  zstd_free_dctx
+  zstd_free_ddict
+  zstd_get_cparams
+  zstd_get_params
+  zstd_init_cctx
+  zstd_init_dctx
+  zstd_is_error
