@@ -2,6 +2,7 @@
   access_process_vm
   activate_task
   add_cpu
+  add_memory_driver_managed
   addrconf_add_linklocal
   addrconf_prefix_rcv_add_addr
   add_taint
@@ -1105,6 +1106,7 @@
   generic_handle_irq_safe
   generic_hwtstamp_get_lower
   generic_hwtstamp_set_lower
+  generic_online_page
   generic_write_checks
   genlmsg_multicast_allns
   genlmsg_put
@@ -1673,6 +1675,7 @@
   memdup_user
   memmove
   memory_cgrp_subsys_on_dfl_key
+  memory_group_register_dynamic
   memory_group_unregister
   memory_read_from_buffer
   memparse

@@ -27,8 +27,6 @@
 
 #define __reverse_ffz(x) __reverse_ffs(~(x))
 
-struct android_sec_entry *android_sec_entries;
-
 static struct kmem_cache *discard_entry_slab;
 static struct kmem_cache *discard_cmd_slab;
 static struct kmem_cache *sit_entry_set_slab;
@@ -1294,7 +1292,7 @@ static int __submit_discard_cmd(struct f2fs_sb_info *sbi,
 	if (dc->state != D_PREP)
 		return 0;
 
-	if (is_sbi_flag_set(sbi, SBI_NEED_FSCK))
+	if (is_sbi_flag_set(sbi, SBI_NEED_FSCK) || f2fs_is_suspending(sbi))
 		return 0;
 
 #ifdef CONFIG_BLK_DEV_ZONED
@@ -1334,6 +1332,9 @@ static int __submit_discard_cmd(struct f2fs_sb_info *sbi,
 		struct bio *bio = NULL;
 		unsigned long flags;
 		bool last = true;
+
+		if (f2fs_is_suspending(sbi))
+			break;
 
 		if (len > max_discard_blocks) {
 			len = max_discard_blocks;
@@ -1624,7 +1625,7 @@ static void __issue_discard_cmd_orderly(struct f2fs_sb_info *sbi,
 		if (dc->state != D_PREP)
 			goto next;
 
-		if (*issued > 0 && unlikely(freezing(current)))
+		if (f2fs_is_suspending(sbi))
 			break;
 
 		if (dpolicy->io_aware && !is_idle(sbi, DISCARD_TIME)) {
@@ -1697,7 +1698,7 @@ retry:
 		list_for_each_entry_safe(dc, tmp, pend_list, list) {
 			f2fs_bug_on(sbi, dc->state != D_PREP);
 
-			if (issued > 0 && unlikely(freezing(current))) {
+			if (f2fs_is_suspending(sbi)) {
 				suspended = true;
 				break;
 			}
@@ -1964,7 +1965,8 @@ static int issue_discard_thread(void *data)
 			continue;
 		if (kthread_should_stop())
 			return 0;
-		if (is_sbi_flag_set(sbi, SBI_NEED_FSCK) ||
+		if (f2fs_is_suspending(sbi) ||
+			is_sbi_flag_set(sbi, SBI_NEED_FSCK) ||
 			!atomic_read(&dcc->discard_cmd_cnt)) {
 			wait_ms = dpolicy.max_interval;
 			continue;

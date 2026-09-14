@@ -1830,9 +1830,9 @@ static int zs_page_migrate(struct page *newpage, struct page *page,
 	 * Since we complete the data copy and set up new zspage structure,
 	 * it's okay to release migration_lock.
 	 */
-	write_unlock(&pool->migrate_lock);
-	spin_unlock(&class->lock);
 	migrate_write_unlock(zspage);
+	spin_unlock(&class->lock);
+	write_unlock(&pool->migrate_lock);
 
 	get_page(newpage);
 	if (page_zone(newpage) != page_zone(page)) {

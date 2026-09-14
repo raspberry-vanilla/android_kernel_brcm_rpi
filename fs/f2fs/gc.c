@@ -22,6 +22,7 @@
 #include "gc.h"
 #include "iostat.h"
 #include <trace/events/f2fs.h>
+#include <trace/hooks/fs.h>
 
 static struct kmem_cache *victim_entry_slab;
 
@@ -71,7 +72,8 @@ static int gc_thread_func(void *data)
 		if (kthread_should_stop())
 			break;
 
-		if (sbi->sb->s_writers.frozen >= SB_FREEZE_WRITE) {
+		if (sbi->sb->s_writers.frozen >= SB_FREEZE_WRITE ||
+			f2fs_is_suspending(sbi)) {
 			increase_sleep_time(gc_th, &wait_ms);
 			stat_other_skip_bggc_count(sbi);
 			continue;
@@ -1068,8 +1070,9 @@ next_step:
 		struct node_info ni;
 		int err;
 
-		/* stop BG_GC if there is not enough free sections. */
-		if (gc_type == BG_GC && has_not_enough_free_secs(sbi, 0, 0))
+		/* stop BG_GC if there is not enough free sections or suspending/freezing. */
+		if (gc_type == BG_GC && (has_not_enough_free_secs(sbi, 0, 0) ||
+					f2fs_is_suspending(sbi)))
 			return submitted;
 
 		if (check_valid_map(sbi, segno, off) == 0)
@@ -1239,6 +1242,11 @@ static int ra_data_block(struct inode *inode, pgoff_t index)
 		.in_list = 0,
 	};
 	int err;
+	bool bypass = false;
+
+	trace_android_rvh_f2fs_ra_data_block_bypass(inode, index, &err, &bypass);
+	if (bypass)
+		return err;
 
 	f2fs_down_read(&F2FS_I(inode)->i_sem);
 	if (f2fs_is_cow_file(inode)) {
@@ -1354,6 +1362,12 @@ static int move_data_block(struct inode *inode, block_t bidx,
 	int type = fio.sbi->am.atgc_enabled && (gc_type == BG_GC) &&
 				(fio.sbi->gc_mode != GC_URGENT_HIGH) ?
 				CURSEG_ALL_DATA_ATGC : CURSEG_COLD_DATA;
+	bool bypass = false;
+
+	trace_android_rvh_f2fs_move_data_block_bypass(inode, bidx, gc_type, segno,
+						      off, &err, &bypass);
+	if (bypass)
+		return err;
 
 	f2fs_down_read(&F2FS_I(inode)->i_sem);
 	if (f2fs_is_cow_file(inode)) {
@@ -1609,7 +1623,8 @@ next_step:
 		 * Or, stop GC if the segment becomes fully valid caused by
 		 * race condition along with SSR block allocation.
 		 */
-		if ((gc_type == BG_GC && has_not_enough_free_secs(sbi, 0, 0)) ||
+		if ((gc_type == BG_GC && (has_not_enough_free_secs(sbi, 0, 0) ||
+					f2fs_is_suspending(sbi))) ||
 			(!force_migrate && get_valid_blocks(sbi, segno, true) ==
 							CAP_BLKS_PER_SEC(sbi)))
 			return submitted;
@@ -1993,7 +2008,7 @@ gc_more:
 		goto stop;
 	}
 retry:
-	if (unlikely(freezing(current))) {
+	if (f2fs_is_suspending(sbi)) {
 		ret = 0;
 		goto stop;
 	}

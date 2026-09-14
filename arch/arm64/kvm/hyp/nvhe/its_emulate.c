@@ -863,6 +863,7 @@ err_with_cmdq:
 err_with_shadow:
 	WARN_ON(__pkvm_hyp_donate_host(hyp_virt_to_pfn(shadow), 1));
 err_with_state:
+	memset(priv_state, 0, priv_num_pages * PAGE_SIZE);
 	WARN_ON(__pkvm_hyp_donate_host(hyp_virt_to_pfn(priv_state), priv_num_pages));
 err_unlock:
 	hyp_spin_unlock(&its_setup_lock);
@@ -1079,6 +1080,9 @@ int pkvm_init_redist_emulation(phys_addr_t redist_base, void *host_priv_states)
 	struct pkvm_moveable_reg *rd_reg, *vlpi_reg = NULL;
 	u64 typer;
 
+	if (!static_branch_unlikely(&kvm_its_hardening))
+		return -EOPNOTSUPP;
+
 	hyp_spin_lock(&redist_lock);
 	/* Find the region with redistributor */
 	rd_reg = get_region(redist_base);
@@ -1116,9 +1120,10 @@ int pkvm_init_redist_emulation(phys_addr_t redist_base, void *host_priv_states)
 
 	list_add_tail(&redist[0].entry, &redist_states);
 err:
-	if (ret)
+	if (ret) {
+		memset(redist, 0, PAGE_SIZE);
 		__pkvm_hyp_donate_host(hyp_virt_to_pfn(redist), 1);
-
+	}
 unlock:
 	hyp_spin_unlock(&redist_lock);
 	return ret;

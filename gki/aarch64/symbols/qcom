@@ -2246,6 +2246,7 @@
   page_pool_put_unrefed_page
   panic
   panic_notifier_list
+  panic_reboot_mode
   panic_timeout
   param_array_ops
   param_get_int

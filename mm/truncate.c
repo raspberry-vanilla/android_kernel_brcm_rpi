@@ -253,8 +253,11 @@ bool truncate_inode_partial_folio(struct folio *folio, loff_t start, loff_t end)
 		folio_invalidate(folio, offset, length);
 	if (!folio_test_large(folio))
 		return true;
-	if (try_folio_split_or_unmap(folio) == 0)
-		return true;
+	if (try_folio_split_or_unmap(folio) == 0) {
+		bool ret = true;
+		trace_android_vh_mm_truncate_try_split_folio(folio, &ret);
+		return ret;
+	}
 	if (folio_test_dirty(folio))
 		return false;
 	truncate_inode_folio(folio->mapping, folio);

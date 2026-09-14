@@ -149,7 +149,6 @@ KVM_NVHE_ALIAS(__hyp_patchable_function_entries_end);
 /* pKVM static key */
 KVM_NVHE_ALIAS(kvm_protected_mode_initialized);
 
-KVM_NVHE_ALIAS(kvm_ffa_unmap_on_lend);
 KVM_NVHE_ALIAS(kvm_its_hardening);
 #endif /* CONFIG_KVM */
 

@@ -3508,6 +3508,11 @@ int split_huge_page_to_list_to_order(struct page *page, struct list_head *list,
 	if (bypass)
 		goto out_unlock;
 
+	trace_android_rvh_mm_folio_split_bypass(folio, new_order, list,
+						&xas, end, &ret, &bypass);
+	if (bypass)
+		goto out_unlock;
+
 	/*
 	 * Racy check if we can split the page, before unmap_folio() will
 	 * split PMDs

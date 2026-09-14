@@ -455,6 +455,7 @@
   __traceiter_android_rvh_sched_fork_init
   __traceiter_android_rvh_uclamp_eff_get
   __traceiter_android_vh_adjust_alloc_flags
+  __traceiter_android_vh_adjust_timer_slack
   __traceiter_android_vh_alloc_pages_slowpath_end
   __traceiter_android_vh_alter_mutex_list_add
   __traceiter_android_vh_alter_rwsem_list_add
@@ -468,6 +469,7 @@
   __traceiter_android_vh_copy_process
   __traceiter_android_vh_cpufreq_acct_update_power
   __traceiter_android_vh_dup_task_struct
+  __traceiter_android_vh_filemap_read_folio_bypass
   __traceiter_android_vh_free_task
   __traceiter_android_vh_mem_cgroup_alloc
   __traceiter_android_vh_mem_cgroup_css_offline
@@ -478,6 +480,7 @@
   __traceiter_android_vh_mutex_wait_start
   __traceiter_android_vh_percpu_rwsem_down_read
   __traceiter_android_vh_percpu_rwsem_up_write
+  __traceiter_android_vh_readahead_bypass
   __traceiter_android_vh_record_pcpu_rwsem_starttime
   __traceiter_android_vh_record_rwsem_reader_owned
   __traceiter_android_vh_record_rwsem_writer_owned
@@ -496,6 +499,7 @@
   __tracepoint_android_rvh_sched_fork_init
   __tracepoint_android_rvh_uclamp_eff_get
   __tracepoint_android_vh_adjust_alloc_flags
+  __tracepoint_android_vh_adjust_timer_slack
   __tracepoint_android_vh_alloc_pages_slowpath_end
   __tracepoint_android_vh_alter_mutex_list_add
   __tracepoint_android_vh_alter_rwsem_list_add
@@ -509,6 +513,7 @@
   __tracepoint_android_vh_copy_process
   __tracepoint_android_vh_cpufreq_acct_update_power
   __tracepoint_android_vh_dup_task_struct
+  __tracepoint_android_vh_filemap_read_folio_bypass
   __tracepoint_android_vh_free_task
   __tracepoint_android_vh_mem_cgroup_alloc
   __tracepoint_android_vh_mem_cgroup_css_offline
@@ -519,6 +524,7 @@
   __tracepoint_android_vh_mutex_wait_start
   __tracepoint_android_vh_percpu_rwsem_down_read
   __tracepoint_android_vh_percpu_rwsem_up_write
+  __tracepoint_android_vh_readahead_bypass
   __tracepoint_android_vh_record_pcpu_rwsem_starttime
   __tracepoint_android_vh_record_rwsem_reader_owned
   __tracepoint_android_vh_record_rwsem_writer_owned

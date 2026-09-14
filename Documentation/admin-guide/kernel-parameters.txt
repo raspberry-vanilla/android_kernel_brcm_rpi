@@ -2763,6 +2763,32 @@
 			(enabled). Disable by KVM if hardware lacks support
 			for NPT.
 
+	kvm-arm.ffa-unmap-on-lend=
+			[KVM,ARM,EARLY] Controls whether host stage-2 memory is
+			unmapped when lent through FF-A in order to mitigate
+			speculative reads from the non-secure world. Note that
+			modifying the host stage-2 page tables is likely to
+			impact performance.
+			Format: [ <bool> | full ]
+			Default: false
+
+			off: (default) Do not unmap host stage-2 memory on FF-A
+			     lend.
+
+			on:  Unmap host stage-2 memory on FF-A lend to protect
+			     against read speculation from the non-secure world
+			     to regions of memory protected by TrustZone. Skips
+			     IOMMU updates and TLB invalidation completion
+			     steps, relying on TrustZone to protect memory.
+
+			full: Unmap host stage-2 memory on FF-A lend and
+			      perform full IOMMU updates and completion steps
+			      when donating and reclaiming memory. This is
+			      slower than "on".
+
+			Specifying "kvm-arm.ffa-unmap-on-lend" without a value
+			enables the parameter in standard "on" mode.
+
 	kvm-arm.hyp_lm_size_mb=
 			[KVM,ARM,EARLY] Maximum amount of contiguous memory mappable in
 			the pKVM hypervisor linear map, in MB. Any attempt to map more

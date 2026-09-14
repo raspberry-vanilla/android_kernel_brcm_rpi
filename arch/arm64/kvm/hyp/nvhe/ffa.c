@@ -111,7 +111,7 @@ static struct kvm_ffa_buffers *ffa_get_buffers(struct pkvm_hyp_vcpu *hyp_vcpu)
 	return &pkvm_hyp_vcpu_to_hyp_vm(hyp_vcpu)->ffa_buf;
 }
 
-DECLARE_STATIC_KEY_FALSE(kvm_ffa_unmap_on_lend);
+int __pkvm_ffa_unmap_on_lend;
 
 static struct ffa_handle *ffa_host_alloc_handle(void)
 {
@@ -715,7 +715,7 @@ static u32 __ffa_host_share_ranges(struct ffa_mem_region_addr_range *ranges,
 		if (!PAGE_ALIGNED(sz | range->address))
 			break;
 
-		if (static_branch_unlikely(&kvm_ffa_unmap_on_lend) && is_lend)
+		if (pkvm_ffa_unmap_on_lend() && is_lend)
 			ret = __pkvm_host_donate_ffa(pfn, sz / PAGE_SIZE);
 		else
 			ret = __pkvm_host_share_ffa(pfn, sz / PAGE_SIZE);
@@ -745,7 +745,7 @@ static u32 __ffa_host_unshare_ranges(struct ffa_mem_region_addr_range *ranges,
 		if (!PAGE_ALIGNED(sz | range->address))
 			break;
 
-		if (static_branch_unlikely(&kvm_ffa_unmap_on_lend) && is_lend)
+		if (pkvm_ffa_unmap_on_lend() && is_lend)
 			ret = __pkvm_host_reclaim_ffa(pfn, sz / PAGE_SIZE);
 		else
 
@@ -901,7 +901,7 @@ static void do_ffa_mem_frag_tx(struct arm_smccc_1_2_regs *res,
 	memcpy(buf, ffa_buf->tx, fraglen);
 	nr_ranges = fraglen / sizeof(*buf);
 
-	if (static_branch_unlikely(&kvm_ffa_unmap_on_lend)) {
+	if (pkvm_ffa_unmap_on_lend()) {
 		entry = ffa_host_get_handle(host_handle);
 		if (!entry) {
 			ffa_to_smccc_error(res, FFA_RET_INVALID_PARAMETERS);
@@ -1092,7 +1092,7 @@ static int __do_ffa_mem_xfer(const u64 func_id,
 	if (ret)
 		goto out_unlock;
 
-	if (!hyp_vcpu && static_branch_unlikely(&kvm_ffa_unmap_on_lend)) {
+	if (!hyp_vcpu && pkvm_ffa_unmap_on_lend()) {
 		handle = ffa_host_alloc_handle();
 		if (!handle) {
 			ret = -ENOMEM;
@@ -1191,7 +1191,7 @@ static void do_ffa_mem_reclaim(struct arm_smccc_1_2_regs *res,
 		/* Prevent the host from replicating a transfer handle used by the guest */
 		WARN_ON(transfer);
 
-		if (static_branch_unlikely(&kvm_ffa_unmap_on_lend)) {
+		if (pkvm_ffa_unmap_on_lend()) {
 			entry = ffa_host_get_handle(handle);
 			if (!entry) {
 				ret = FFA_RET_INVALID_PARAMETERS;
@@ -1268,7 +1268,7 @@ out_reclaim:
 		ffa_guest_unshare_ranges(hyp_vcpu, transfer);
 	else {
 		reg = (void *)buf + offset;
-		if (static_branch_unlikely(&kvm_ffa_unmap_on_lend))
+		if (pkvm_ffa_unmap_on_lend())
 			ffa_host_clear_handle(handle);
 
 		if (offset + CONSTITUENTS_OFFSET(reg->addr_range_cnt) > len) {
@@ -1969,7 +1969,7 @@ int hyp_ffa_init(void *pages)
 	rx = pages;
 	pages += KVM_FFA_MBOX_NR_PAGES * PAGE_SIZE;
 
-	if (static_branch_unlikely(&kvm_ffa_unmap_on_lend)) {
+	if (pkvm_ffa_unmap_on_lend()) {
 		if (num_pages < KVM_FFA_SPM_HANDLE_NR_PAGES)
 			return -ENOMEM;
 

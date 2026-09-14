@@ -1773,16 +1773,29 @@ unlock:
 }
 
 /*
- * Rejects MMIO regions and is unsafe. Use with care!
+ * Rejects MMIO regions and is unsafe (unless "full" mode). Use with care!
  */
 int __pkvm_host_donate_ffa(u64 pfn, u64 nr_pages)
 {
 	u64 size, phys = hyp_pfn_to_phys(pfn), end;
+	enum host_set_page_state_flags flags;
 	int ret;
 
 	if (check_shl_overflow(nr_pages, PAGE_SHIFT, &size) ||
 	    check_add_overflow(phys, size, &end))
 		return -EINVAL;
+
+	switch (__pkvm_ffa_unmap_on_lend) {
+	case PKVM_FFA_UNMAP_ON_LEND_FULL:
+		flags = 0;
+		break;
+	case PKVM_FFA_UNMAP_ON_LEND_ON:
+		/* HOST_SET_NO_COMPLETE to skip pkvm_sme_dvmsync_fw_call() */
+		flags = HOST_SET_NO_IOMMU_UPDATE | HOST_SET_NO_COMPLETE;
+		break;
+	case PKVM_FFA_UNMAP_ON_LEND_OFF:
+		return -EPERM;
+	}
 
 	host_lock_component();
 
@@ -1794,8 +1807,7 @@ int __pkvm_host_donate_ffa(u64 pfn, u64 nr_pages)
 		goto unlock;
 
 	/* HOST_SET_NO_COMPLETE to skip pkvm_sme_dvmsync_fw_call() */
-	WARN_ON(__host_stage2_set_owner_locked(phys, size, PKVM_ID_FFA, 0,
-					       HOST_SET_NO_IOMMU_UPDATE | HOST_SET_NO_COMPLETE));
+	WARN_ON(__host_stage2_set_owner_locked(phys, size, PKVM_ID_FFA, 0, flags));
 
 unlock:
 	host_unlock_component();
@@ -1803,16 +1815,28 @@ unlock:
 }
 
 /*
- * Just like __pkvm_donate_ffa, rejects MMIO regions and does not update the IOMMU.
+ * Just like __pkvm_donate_ffa, rejects MMIO regions.
  */
 int __pkvm_host_reclaim_ffa(u64 pfn, u64 nr_pages)
 {
 	u64 size, phys = hyp_pfn_to_phys(pfn), end;
+	enum host_set_page_state_flags flags;
 	int ret;
 
 	if (check_shl_overflow(nr_pages, PAGE_SHIFT, &size) ||
 	    check_add_overflow(phys, size, &end))
 		return -EINVAL;
+
+	switch (__pkvm_ffa_unmap_on_lend) {
+	case PKVM_FFA_UNMAP_ON_LEND_FULL:
+		flags = 0;
+		break;
+	case PKVM_FFA_UNMAP_ON_LEND_ON:
+		flags = HOST_SET_NO_IOMMU_UPDATE;
+		break;
+	case PKVM_FFA_UNMAP_ON_LEND_OFF:
+		return -EPERM;
+	}
 
 	host_lock_component();
 
@@ -1822,8 +1846,7 @@ int __pkvm_host_reclaim_ffa(u64 pfn, u64 nr_pages)
 	if (ret)
 		goto unlock;
 
-	WARN_ON(__host_stage2_set_owner_locked(phys, size, PKVM_ID_HOST, 0,
-					       HOST_SET_NO_IOMMU_UPDATE));
+	WARN_ON(__host_stage2_set_owner_locked(phys, size, PKVM_ID_HOST, 0, flags));
 
 unlock:
 	host_unlock_component();

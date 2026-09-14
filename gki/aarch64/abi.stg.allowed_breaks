@@ -267,3 +267,36 @@ type 'union bindings::bindings_raw::task_struct__bindgen_ty_2' changed
   member 'struct bindings::bindings_raw::cpumask cpumask_sme_dvmsync[1]' was removed
   member 'u64 __donotuse_b448672457' was added
 
+type 'struct fscrypt_operations' changed
+  member 'u64 __kabi_reserved1' was removed
+  member 'union { unsigned int(* get_devices_new)(struct super_block*, struct block_device**); struct { u64 __kabi_reserved1; }; union { }; }' was added
+
+type 'struct fscrypt_master_key' changed
+  byte size changed from 872 to 360
+  member 'struct fscrypt_prepared_key mk_direct_keys[11]' was removed
+  member 'struct fscrypt_prepared_key mk_iv_ino_lblk_64_keys[11]' was removed
+  member 'struct fscrypt_prepared_key mk_iv_ino_lblk_32_keys[11]' was removed
+  member 'struct list_head mk_mode_keys' was added
+  3 members ('siphash_key_t mk_ino_hash_key' .. 'bool mk_present') changed
+    offset changed by -4096
+
+type 'struct fscrypt_master_key' changed
+  byte size changed from 360 to 368
+  member changed from 'struct key* mk_users' to 'struct list_head mk_users'
+    type changed from 'struct key*' to 'struct list_head'
+  6 members ('struct list_head mk_decrypted_inodes' .. 'bool mk_present') changed
+    offset changed by 64
+
+type 'struct fscrypt_master_key' changed
+  byte size changed from 872 to 368
+  member changed from 'struct key* mk_users' to 'struct list_head mk_users'
+    type changed from 'struct key*' to 'struct list_head'
+  2 members ('struct list_head mk_decrypted_inodes' .. 'spinlock_t mk_decrypted_inodes_lock') changed
+    offset changed by 64
+  member 'struct fscrypt_prepared_key mk_direct_keys[11]' was removed
+  member 'struct fscrypt_prepared_key mk_iv_ino_lblk_64_keys[11]' was removed
+  member 'struct fscrypt_prepared_key mk_iv_ino_lblk_32_keys[11]' was removed
+  member 'struct list_head mk_mode_keys' was added
+  3 members ('siphash_key_t mk_ino_hash_key' .. 'bool mk_present') changed
+    offset changed by -4032
+

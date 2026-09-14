@@ -47,6 +47,7 @@
 
 #include <trace/events/timer.h>
 #include <trace/hooks/syscall_check.h>
+#include <trace/hooks/timer.h>
 
 #include "tick-internal.h"
 
@@ -2139,10 +2140,14 @@ long hrtimer_nanosleep(ktime_t rqtp, const enum hrtimer_mode mode,
 {
 	struct restart_block *restart;
 	struct hrtimer_sleeper t;
+	ktime_t expires = rqtp;
+	u64 delta_ns = current->timer_slack_ns;
 	int ret = 0;
 
+	trace_android_vh_adjust_timer_slack(current, &expires, &delta_ns,
+					    ANDROID_TIMER_SLACK_NANOSLEEP);
 	hrtimer_init_sleeper_on_stack(&t, clockid, mode);
-	hrtimer_set_expires_range_ns(&t.timer, rqtp, current->timer_slack_ns);
+	hrtimer_set_expires_range_ns(&t.timer, expires, delta_ns);
 	ret = do_nanosleep(&t, mode);
 	if (ret != -ERESTART_RESTARTBLOCK)
 		goto out;
@@ -2327,6 +2332,8 @@ schedule_hrtimeout_range_clock(ktime_t *expires, u64 delta,
 			       const enum hrtimer_mode mode, clockid_t clock_id)
 {
 	struct hrtimer_sleeper t;
+	ktime_t timer_expires;
+	u64 delta_ns;
 
 	/*
 	 * Optimize when a zero timeout value is given. It does not
@@ -2345,8 +2352,12 @@ schedule_hrtimeout_range_clock(ktime_t *expires, u64 delta,
 		return -EINTR;
 	}
 
+	timer_expires = *expires;
+	delta_ns = delta;
+	trace_android_vh_adjust_timer_slack(current, &timer_expires, &delta_ns,
+					    ANDROID_TIMER_SLACK_SCHED_HRTIMEOUT);
 	hrtimer_init_sleeper_on_stack(&t, clock_id, mode);
-	hrtimer_set_expires_range_ns(&t.timer, *expires, delta);
+	hrtimer_set_expires_range_ns(&t.timer, timer_expires, delta_ns);
 	hrtimer_sleeper_start_expires(&t, mode);
 
 	if (likely(t.task))
