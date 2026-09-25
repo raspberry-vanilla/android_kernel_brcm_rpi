@@ -26,6 +26,7 @@
 #include <linux/netdevice.h>
 
 #include <trace/events/page_pool.h>
+#include <trace/hooks/net.h>
 
 #include "dev.h"
 #include "mp_dmabuf_devmem.h"
@@ -283,12 +284,16 @@ static int page_pool_init(struct page_pool *pool,
 	}
 
 	if (pool->mp_ops) {
+		bool mp_ops_validated = false;
+
 		if (!pool->dma_map || !pool->dma_sync) {
 			err = -EOPNOTSUPP;
 			goto free_ptr_ring;
 		}
 
-		if (WARN_ON(!is_kernel_rodata((unsigned long)pool->mp_ops))) {
+		trace_android_vh_page_pool_validate_mp_ops(pool, &mp_ops_validated);
+		if (!mp_ops_validated &&
+		    WARN_ON(!is_kernel_rodata((unsigned long)pool->mp_ops))) {
 			err = -EFAULT;
 			goto free_ptr_ring;
 		}
@@ -323,6 +328,11 @@ static void page_pool_uninit(struct page_pool *pool)
 	if (!pool->system)
 		free_percpu(pool->recycle_stats);
 #endif
+
+	if (pool->mp_ops) {
+		pool->mp_ops->destroy(pool);
+		static_branch_dec(&page_pool_mem_providers);
+	}
 }
 
 /**
@@ -1121,11 +1131,6 @@ static void __page_pool_destroy(struct page_pool *pool)
 
 	page_pool_unlist(pool);
 	page_pool_uninit(pool);
-
-	if (pool->mp_ops) {
-		pool->mp_ops->destroy(pool);
-		static_branch_dec(&page_pool_mem_providers);
-	}
 
 	kfree(pool);
 }

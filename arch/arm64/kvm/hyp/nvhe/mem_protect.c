@@ -586,7 +586,7 @@ int __pkvm_guest_relinquish_to_host(struct pkvm_hyp_vcpu *vcpu,
 	}
 
 	if (pkvm_ipa_range_has_pvmfw(vm, ipa, ipa + PAGE_SIZE))
-		vm->kvm.arch.pkvm.pvmfw_load_addr = PVMFW_INVALID_LOAD_ADDR;
+		vm->pvmfw_relinquished = true;
 end:
 	guest_unlock_component(vm);
 	host_unlock_component();
@@ -750,6 +750,14 @@ bool addr_is_memory(phys_addr_t phys)
 	struct kvm_mem_range range;
 
 	return !!find_mem_range(phys, &range);
+}
+
+bool addr_is_hyp_text(phys_addr_t phys)
+{
+	phys_addr_t start = ALIGN_DOWN(__hyp_pa(__hyp_text_start), PAGE_SIZE);
+	phys_addr_t end = PAGE_ALIGN(__hyp_pa(__hyp_text_end));
+
+	return phys >= start && phys < end;
 }
 
 static bool is_in_mem_range(u64 addr, struct kvm_mem_range *range)
@@ -975,6 +983,14 @@ int host_stage2_set_owner_locked(phys_addr_t addr, u64 size, u8 owner_id)
 					      addr_is_memory(addr) ? 0 : HOST_SET_IS_MMIO);
 }
 
+bool host_stage2_pte_is_hyp_owned(kvm_pte_t pte)
+{
+	if (kvm_pte_valid(pte))
+		return false;
+
+	return FIELD_GET(KVM_INVALID_PTE_OWNER_MASK, pte) == PKVM_ID_HYP;
+}
+
 static bool host_stage2_force_pte(u64 addr, u64 end, enum kvm_pgtable_prot prot)
 {
 	if (range_has_reclaimable_host_s2(addr, end))
@@ -1041,7 +1057,12 @@ static void (*illegal_abt_notifier)(struct user_pt_regs *regs);
 
 int __pkvm_register_illegal_abt_notifier(void (*cb)(struct user_pt_regs *))
 {
-	return cmpxchg(&illegal_abt_notifier, NULL, cb) ? -EBUSY : 0;
+	/*
+	 * Paired with smp_load_acquire(&illegal_abt_notifier) in
+	 * host_inject_abort(). Ensure the module's stores before registration
+	 * are observed before the callback runs.
+	 */
+	return cmpxchg_release(&illegal_abt_notifier, NULL, cb) ? -EBUSY : 0;
 }
 
 static void host_inject_abort(struct kvm_cpu_context *host_ctxt)
@@ -1050,7 +1071,8 @@ static void host_inject_abort(struct kvm_cpu_context *host_ctxt)
 	u64 esr = read_sysreg_el2(SYS_ESR);
 	u64 ventry, ec;
 
-	if (READ_ONCE(illegal_abt_notifier))
+	/* Acquire the callback published by __pkvm_register_illegal_abt_notifier(). */
+	if (smp_load_acquire(&illegal_abt_notifier))
 		illegal_abt_notifier(&host_ctxt->regs);
 
 	/* Repaint the ESR to report a same-level fault if taken from EL1 */
@@ -1551,11 +1573,9 @@ int __pkvm_guest_share_hyp_page(struct pkvm_hyp_vcpu *vcpu, u64 ipa, u64 *hyp_va
 	phys = kvm_pte_to_phys(pte);
 
 	virt = __hyp_va(phys);
-	if (IS_ENABLED(CONFIG_NVHE_EL2_DEBUG)) {
-		ret = __hyp_check_page_state_range(phys, PAGE_SIZE, PKVM_NOPAGE);
-		if (ret)
-			goto unlock;
-	}
+	ret = __hyp_check_page_state_range(phys, PAGE_SIZE, PKVM_NOPAGE);
+	if (ret)
+		goto unlock;
 
 	__hyp_set_page_state_range(phys, PAGE_SIZE, PKVM_PAGE_SHARED_BORROWED);
 	prot = pkvm_mkstate(PAGE_HYP, PKVM_PAGE_SHARED_BORROWED);
@@ -2072,6 +2092,38 @@ unlock:
 	return ret;
 }
 
+int module_set_host_page_owned(u64 pfn, u64 nr_pages, bool owned)
+{
+	u64 size, phys;
+	int ret;
+
+	if (!pfn_range_is_valid(pfn, nr_pages))
+		return -EINVAL;
+
+	phys = hyp_pfn_to_phys(pfn);
+	size = nr_pages * PAGE_SIZE;
+
+	host_lock_component();
+
+	ret = ___host_check_page_state_range(phys, size,
+					     owned ? PKVM_PAGE_OWNED : PKVM_MODULE_OWNED_PAGE,
+					     HOST_CHECK_IS_MEMORY | HOST_CHECK_NULL_REFCNT);
+	if (ret)
+		goto unlock;
+
+	if (owned) {
+		for_each_hyp_page(page, phys, size)
+			set_host_state(page, PKVM_MODULE_OWNED_PAGE);
+	} else {
+		for_each_hyp_page(page, phys, size)
+			set_host_state(page, PKVM_PAGE_OWNED);
+	}
+
+unlock:
+	host_unlock_component();
+	return ret;
+}
+
 int hyp_pin_shared_mem(void *from, void *to)
 {
 	u64 cur, start = ALIGN_DOWN((u64)from, PAGE_SIZE);
@@ -2094,11 +2146,14 @@ int hyp_pin_shared_mem(void *from, void *to)
 
 	for (cur = start; cur < end; cur += PAGE_SIZE) {
 		p = hyp_virt_to_page(cur);
-		hyp_page_ref_inc(p);
-		if (p->refcount == 1)
+		if (p->refcount == 0) {
 			ret = pkvm_create_mappings_locked((void *)cur,
 							  (void *)cur + PAGE_SIZE,
 							  PAGE_HYP);
+			if (ret)
+				break;
+		}
+		hyp_page_ref_inc(p);
 	}
 
 	if (ret) {
@@ -2454,6 +2509,13 @@ static int ___pkvm_check_module_share_guest(struct pkvm_hyp_vm *vm, u64 phys, u6
 	ret = ___host_check_page_state_range(phys, size,
 					     PKVM_NOPAGE | PKVM_MODULE_OWNED_PAGE,
 					     HOST_CHECK_IS_MEMORY);
+	/*
+	 * module_set_host_page_owned() sets PKVM_MODULE_OWNED_PAGE without
+	 * PKVM_NOPAGE.
+	 */
+	if (ret == -EPERM)
+		ret = ___host_check_page_state_range(phys, size, PKVM_MODULE_OWNED_PAGE,
+						     HOST_CHECK_IS_MEMORY);
 	if (ret)
 		return ret;
 
@@ -3169,7 +3231,7 @@ int host_stage2_get_leaf(phys_addr_t phys, kvm_pte_t *ptep, s8 *level)
 	return ret;
 }
 
-#ifdef CONFIG_NVHE_EL2_DEBUG
+#ifdef CONFIG_PKVM_SELFTESTS
 struct pkvm_expected_state {
 	enum pkvm_page_state host;
 	enum pkvm_page_state hyp;
@@ -3210,7 +3272,7 @@ static void init_selftest_vm(void *virt)
 	for (i = 0; i < pkvm_selftest_pages(); i++) {
 		if (p[i].refcount)
 			continue;
-		p[i].refcount = 1;
+		hyp_set_page_refcounted(&p[i]);
 		hyp_put_page(&selftest_vm.pool, hyp_page_to_virt(&p[i]));
 	}
 }
@@ -3258,10 +3320,13 @@ void pkvm_ownership_selftest(void *base)
 	struct pkvm_hyp_vcpu *vcpu = &selftest_vcpu;
 	struct pkvm_hyp_vm *vm = &selftest_vm;
 	u64 phys, size, pfn, gfn;
+	struct hyp_page old;
 
 	WARN_ON(!virt);
 	selftest_page = hyp_virt_to_page(virt);
+	old = *selftest_page;
 	selftest_page->refcount = 0;
+	selftest_page->tag = 0;
 	init_selftest_vm(base);
 
 	size = PAGE_SIZE << selftest_page->order;
@@ -3364,7 +3429,7 @@ void pkvm_ownership_selftest(void *base)
 	selftest_state.hyp = PKVM_PAGE_OWNED;
 	assert_transition_res(0,	__pkvm_host_donate_hyp, pfn, 1);
 
-	selftest_page->refcount = 1;
+	*selftest_page = old;
 	hyp_put_page(&host_s2_pool, virt);
 }
 #endif

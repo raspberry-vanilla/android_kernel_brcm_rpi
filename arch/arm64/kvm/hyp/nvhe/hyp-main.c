@@ -51,7 +51,12 @@ static void (*mask_serror)(void);
 
 int __pkvm_register_default_trap_handler(bool (*cb)(struct user_pt_regs *))
 {
-	return cmpxchg(&default_trap_handler, NULL, cb) ? -EBUSY : 0;
+	/*
+	 * Paired with smp_load_acquire(&default_trap_handler) in
+	 * handle_trap(). Ensure the module's stores before registration are
+	 * observed before the handler runs.
+	 */
+	return cmpxchg_release(&default_trap_handler, NULL, cb) ? -EBUSY : 0;
 }
 
 void __pkvm_unmask_serror(void)
@@ -213,7 +218,7 @@ static void handle_pvm_entry_sys64(struct pkvm_hyp_vcpu *hyp_vcpu)
 	/* Exceptions have priority on anything else */
 	if (vcpu_get_flag(host_vcpu, PENDING_EXCEPTION)) {
 		/* Exceptions caused by this should be undef exceptions. */
-		u32 esr = (ESR_ELx_EC_UNKNOWN << ESR_ELx_EC_SHIFT);
+		u32 esr = (ESR_ELx_EC_UNKNOWN << ESR_ELx_EC_SHIFT) | ESR_ELx_IL;
 
 		__vcpu_assign_sys_reg(&hyp_vcpu->vcpu, ESR_EL1, esr);
 		kvm_pend_exception(&hyp_vcpu->vcpu, EXCEPT_AA64_EL1_SYNC);
@@ -2214,7 +2219,9 @@ void handle_trap(struct kvm_cpu_context *host_ctxt)
 		handle_host_mem_abort(host_ctxt);
 		break;
 	default:
-		BUG_ON(!READ_ONCE(default_trap_handler) || !default_trap_handler(&host_ctxt->regs));
+		/* Acquire the handler published by __pkvm_register_default_trap_handler(). */
+		BUG_ON(!smp_load_acquire(&default_trap_handler) ||
+		       !default_trap_handler(&host_ctxt->regs));
 	}
 
 	__hyp_exit();

@@ -237,6 +237,7 @@ struct pkvm_device_ops {
  * @arm_smccc_1_2_smc:		Make an SMCCC v1.2 call to EL3, including processing
  *				hypervisor exit and entry actions.
  * @request_hyp_alloc:		Request an alloc request based on current IOMMU context.
+ * @host_stage2_set_owned:	Set the host page ownership state for a range of pages.
  */
 struct pkvm_module_ops {
 	int (*create_private_mapping)(phys_addr_t phys, size_t size,
@@ -316,7 +317,7 @@ struct pkvm_module_ops {
 	void (*arm_smccc_1_2_smc)(struct arm_smccc_1_2_regs *args,
 				  struct arm_smccc_1_2_regs *regs);
 	int (*request_hyp_alloc)(void);
-	ANDROID_KABI_RESERVE(1);
+	ANDROID_KABI_USE(1, int (*host_stage2_set_owned)(u64 pfn, u64 nr_pages, bool owned));
 	ANDROID_KABI_RESERVE(2);
 	ANDROID_KABI_RESERVE(3);
 	ANDROID_KABI_RESERVE(4);

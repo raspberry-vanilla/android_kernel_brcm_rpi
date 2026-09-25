@@ -339,7 +339,10 @@ static void smmu_attach_stage_2(struct arm_smmu_ste *ste)
 	sl = pgt_cfg->arm_lpae_s2_cfg.vtcr.sl;
 	ts = pgt_cfg->arm_lpae_s2_cfg.vtcr.tsz;
 
+	ste->data[1] &= ~(STRTAB_STE_1_SHCFG |STRTAB_STE_1_EATS |
+			  STRTAB_STE_1_S2FWB | STRTAB_STE_1_STRW);
 	ste->data[1] |= FIELD_PREP(STRTAB_STE_1_SHCFG, STRTAB_STE_1_SHCFG_INCOMING);
+
 	/* The host shouldn't write dwords 2 and 3, overwrite them. */
 	ste->data[2] = FIELD_PREP(STRTAB_STE_2_VTCR,
 				  FIELD_PREP(STRTAB_STE_2_VTCR_S2PS, ps) |
@@ -849,7 +852,7 @@ static bool smmu_dabt_device(struct hyp_arm_smmu_v3_nested_device *nested_smmu,
 	switch (off) {
 	case ARM_SMMU_IDR0:
 		/* Clear stage-2 support, hide MSI to avoid write back to cmdq */
-		mask = read_only & ~(IDR0_S2P | IDR0_VMID16 | IDR0_MSI | IDR0_HYP);
+		mask = read_only & ~(IDR0_S2P | IDR0_VMID16 | IDR0_MSI | IDR0_HYP | IDR0_ATS);
 		WARN_ON(len != sizeof(u32));
 		break;
 	case ARM_SMMU_CMDQ_BASE:

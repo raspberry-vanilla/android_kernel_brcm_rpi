@@ -5018,6 +5018,7 @@ retry:
 			wait_event_interruptible(binder_user_error_wait,
 						 binder_stop_on_user_error < 2);
 		}
+		trace_android_vh_binder_before_restore_priority(NULL);
 		binder_restore_priority(thread, &proc->default_priority);
 	}
 

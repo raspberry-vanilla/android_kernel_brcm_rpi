@@ -5641,6 +5641,10 @@ static int alloc_and_link_pwqs(struct workqueue_struct *wq)
 		ret = apply_workqueue_attrs_locked(wq, unbound_std_wq_attrs[highpri]);
 	}
 
+	if (ret)
+		goto enomem;
+	return 0;
+
 oem_skip:
 	return ret;
 

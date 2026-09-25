@@ -209,6 +209,7 @@
   bt_info
   bt_to_errno
   bt_warn
+  bt_warn_ratelimited
   buffer_migrate_folio
   BUG_func
   build_skb
@@ -3063,6 +3064,7 @@
   syscon_node_to_regmap
   sysctl_fb_tunnels_only_for_init_net
   sysctl_vals
+  sysfs_add_file_to_group
   sysfs_bin_attr_simple_read
   sysfs_create_bin_file
   sysfs_create_file_ns

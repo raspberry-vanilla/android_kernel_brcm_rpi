@@ -415,11 +415,30 @@ static void f2fs_write_end_bio(struct bio *bio)
 	bio_put(bio);
 }
 
-static void f2fs_write_end_io(struct bio *bio)
+static void f2fs_write_end_io_work(struct work_struct *work)
 {
-	iostat_update_and_unbind_ctx(bio);
+	struct bio *bio = &container_of(work, struct f2fs_bio, work)->bio;
 
 	f2fs_write_end_bio(bio);
+}
+
+static void f2fs_write_end_io(struct bio *bio)
+{
+	struct f2fs_sb_info *sbi;
+
+	iostat_update_and_unbind_ctx(bio);
+
+	sbi = bio->bi_private;
+
+	if (in_atomic() && bio->bi_iter.bi_size > sbi->max_atc_write_bio_size) {
+		struct work_struct *w;
+
+		w = &container_of(bio, struct f2fs_bio, bio)->work;
+		INIT_WORK(w, f2fs_write_end_io_work);
+		queue_work(sbi->wq, w);
+	} else {
+		f2fs_write_end_bio(bio);
+	}
 }
 
 #ifdef CONFIG_BLK_DEV_ZONED
@@ -1261,7 +1280,7 @@ int f2fs_reserve_new_blocks(struct dnode_of_data *dn, blkcnt_t count)
 
 	if (unlikely(is_inode_flag_set(dn->inode, FI_NO_ALLOC)))
 		return -EPERM;
-	err = inc_valid_block_count(sbi, dn->inode, &count, true);
+	err = inc_valid_block_count(sbi, dn->inode, &count, true, false);
 	if (unlikely(err))
 		return err;
 
@@ -1534,7 +1553,7 @@ static int __allocate_data_block(struct dnode_of_data *dn, int seg_type)
 
 	dn->data_blkaddr = f2fs_data_blkaddr(dn);
 	if (dn->data_blkaddr == NULL_ADDR) {
-		err = inc_valid_block_count(sbi, dn->inode, &count, true);
+		err = inc_valid_block_count(sbi, dn->inode, &count, true, false);
 		if (unlikely(err))
 			return err;
 	}
@@ -1543,8 +1562,11 @@ static int __allocate_data_block(struct dnode_of_data *dn, int seg_type)
 	old_blkaddr = dn->data_blkaddr;
 	err = f2fs_allocate_data_block(sbi, NULL, old_blkaddr,
 				&dn->data_blkaddr, &sum, seg_type, NULL);
-	if (err)
+	if (err) {
+		if (old_blkaddr == NULL_ADDR)
+			dec_valid_block_count(sbi, dn->inode, count);
 		return err;
+	}
 
 	if (GET_SEGNO(sbi, old_blkaddr) != NULL_SEGNO)
 		f2fs_invalidate_internal_cache(sbi, old_blkaddr, 1);
@@ -4012,7 +4034,7 @@ repeat:
 	 * Will wait that below with our IO control.
 	 */
 	folio = f2fs_filemap_get_folio(mapping, index,
-				FGP_LOCK | FGP_WRITE | FGP_CREAT | FGP_NOFS,
+				FGP_LOCK | FGP_WRITE | FGP_CREAT,
 				mapping_gfp_mask(mapping));
 	if (IS_ERR(folio)) {
 		err = PTR_ERR(folio);
@@ -4572,13 +4594,24 @@ int f2fs_init_wq(struct f2fs_sb_info *sbi)
 {
 	sbi->wq = alloc_workqueue("f2fs_wq", WQ_UNBOUND | WQ_HIGHPRI,
 				  num_online_cpus());
-	return sbi->wq ? 0 : -ENOMEM;
+	if (!sbi->wq)
+		return -ENOMEM;
+
+	sbi->evict_wq = alloc_workqueue("f2fs_evict_wq",
+			WQ_UNBOUND | WQ_HIGHPRI, num_online_cpus());
+	if (!sbi->evict_wq) {
+		destroy_workqueue(sbi->wq);
+		return -ENOMEM;
+	}
+	return 0;
 }
 
 void f2fs_destroy_wq(struct f2fs_sb_info *sbi)
 {
 	if (sbi->wq)
 		destroy_workqueue(sbi->wq);
+	if (sbi->evict_wq)
+		destroy_workqueue(sbi->evict_wq);
 }
 
 int __init f2fs_init_bio_entry_cache(void)

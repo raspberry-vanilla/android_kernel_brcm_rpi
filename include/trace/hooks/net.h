@@ -128,6 +128,10 @@ struct inet_frag_queue;
 DECLARE_HOOK(android_vh_reasm_timer_adjust,
 	TP_PROTO(struct inet_frag_queue *q, struct sk_buff *skb),
 	TP_ARGS(q, skb));
+struct page_pool;
+DECLARE_HOOK(android_vh_page_pool_validate_mp_ops,
+	TP_PROTO(struct page_pool *pool, bool *validated),
+	TP_ARGS(pool, validated));
 
 /* macro versions of hooks are no longer required */
 

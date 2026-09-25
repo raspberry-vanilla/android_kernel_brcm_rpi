@@ -780,6 +780,12 @@ static int smmu_set_identity(pkvm_handle_t iommu, pkvm_handle_t sid,
 	struct arm_smmu_ste *dst;
 	struct arm_smmu_ste ste = {};
 	int ret, i;
+	struct arm_smmu_cmdq_ent cmd = {
+		.opcode = CMDQ_OP_TLBI_S12_VMALL,
+		.tlbi = {
+			.vmid = 0,
+		},
+	};
 
 	if (!smmu)
 		return -ENODEV;
@@ -831,8 +837,11 @@ static int smmu_set_identity(pkvm_handle_t iommu, pkvm_handle_t sid,
 		smmu->idmap_ref--;
 	}
 
-	ret = smmu_sync_ste(smmu, dst->data, sid);
-	WARN_ON(ret);
+	WARN_ON(smmu_sync_ste(smmu, dst->data, sid));
+	/* If last SMMU make sure TLBs are empty. */
+	if (!smmu->idmap_ref)
+		WARN_ON(smmu_send_cmd(smmu, &cmd));
+
 out_unlock:
 	kvm_smmu_unlock(&smmu->common);
 	return ret;
@@ -842,7 +851,7 @@ out_unlock:
 static int smmu_dev_block_dma(pkvm_handle_t iommu, u32 sid, bool is_host2guest)
 {
 	struct hyp_arm_smmu_v3_device_pv *smmu = smmu_id_to_ptr(iommu);
-	static struct arm_smmu_ste *dst;
+	struct arm_smmu_ste *dst;
 	int ret = 0;
 
 

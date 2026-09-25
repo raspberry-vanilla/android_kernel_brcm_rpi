@@ -2138,16 +2138,34 @@ static void blk_mq_commit_rqs(struct blk_mq_hw_ctx *hctx, int queued,
 	}
 }
 
-static void blk_mq_reinsert_list(struct list_head *list)
+static void blk_mq_reinsert_list(struct blk_mq_hw_ctx *hctx,
+				 struct list_head *list)
 {
-	struct request *rq;
+	struct request *rq, *next;
+	LIST_HEAD(ordered_list);
 
-	while (!list_empty(list)) {
-		rq = list_last_entry(list, struct request, queuelist);
+	if (!blk_mq_preserve_order_for_list(hctx->queue, list)) {
+		spin_lock(&hctx->lock);
+		list_splice_tail_init(list, &hctx->dispatch);
+		spin_unlock(&hctx->lock);
+		return;
+	}
+
+	list_for_each_entry_safe(rq, next, list, queuelist) {
+		if (blk_mq_preserve_order(rq))
+			list_move_tail(&rq->queuelist, &ordered_list);
+	}
+
+	if (!list_empty(list)) {
+		spin_lock(&hctx->lock);
+		list_splice_tail_init(list, &hctx->dispatch);
+		spin_unlock(&hctx->lock);
+	}
+
+	while (!list_empty(&ordered_list)) {
+		rq = list_last_entry(&ordered_list, struct request, queuelist);
 		list_del_init(&rq->queuelist);
-		blk_mq_insert_request(rq, blk_mq_preserve_order(rq) ?
-				      BLK_MQ_INSERT_ORDERED :
-				      BLK_MQ_INSERT_AT_HEAD);
+		blk_mq_insert_request(rq, BLK_MQ_INSERT_ORDERED);
 	}
 }
 
@@ -2226,7 +2244,7 @@ out:
 		if (!get_budget)
 			blk_mq_release_budgets(q, list);
 
-		blk_mq_reinsert_list(list);
+		blk_mq_reinsert_list(hctx, list);
 
 		/*
 		 * Order adding requests to hctx->dispatch and checking
@@ -3898,7 +3916,7 @@ static int blk_mq_hctx_notify_dead(unsigned int cpu, struct hlist_node *node)
 	if (list_empty(&tmp))
 		return 0;
 
-	blk_mq_reinsert_list(&tmp);
+	blk_mq_reinsert_list(hctx, &tmp);
 
 	blk_mq_run_hw_queue(hctx, true);
 	return 0;

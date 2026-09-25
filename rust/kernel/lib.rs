@@ -86,6 +86,7 @@ pub mod device;
 pub mod device_id;
 pub mod devres;
 pub mod dma;
+pub mod dma_buf;
 pub mod driver;
 #[cfg(CONFIG_DRM = "y")]
 pub mod drm;
@@ -96,6 +97,8 @@ pub mod firmware;
 pub mod fmt;
 pub mod fs;
 pub mod id_pool;
+#[doc(hidden)]
+pub mod impl_flags;
 pub mod init;
 pub mod io;
 pub mod ioctl;

@@ -1081,7 +1081,7 @@ static int __do_ffa_mem_xfer(const u64 func_id,
 	}
 
 	if (check_add_overflow(offset, sizeof(struct ffa_composite_mem_region), &checked_offset)) {
-		ret = FFA_RET_INVALID_PARAMETERS;
+		ffa_to_smccc_error(res, FFA_RET_INVALID_PARAMETERS);
 		goto out_unlock;
 	}
 

@@ -91,8 +91,7 @@ static inline bool kvm_pkvm_ioctl_allowed(struct kvm *kvm, unsigned int ioctl, v
 	int r;
 
 	r = kvm_get_cap_for_kvm_ioctl(ioctl, &ext);
-
-	if (WARN_ON_ONCE(r < 0))
+	if (r < 0)
 		return false;
 
 	if (kvm_pkvm_ext_allowed(kvm, ext))
@@ -243,7 +242,7 @@ static inline unsigned long host_s2_mmio_pgtable_pages(void)
 	return __hyp_pgtable_max_pages(SZ_1G >> PAGE_SHIFT);
 }
 
-#ifdef CONFIG_NVHE_EL2_DEBUG
+#ifdef CONFIG_PKVM_SELFTESTS
 static inline unsigned long pkvm_selftest_pages(void) { return 32; }
 #else
 static inline unsigned long pkvm_selftest_pages(void) { return 0; }

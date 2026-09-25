@@ -85,6 +85,11 @@ _ARM64_GKI_MODULES_LIST = [
     # keep sorted
     "arch/arm64/geniezone/gzvm.ko",
     "drivers/char/hw_random/cctrng.ko",
+    "drivers/hwtracing/coresight/coresight.ko",
+    "drivers/hwtracing/coresight/coresight-etm4x.ko",
+    "drivers/hwtracing/coresight/coresight-funnel.ko",
+    "drivers/hwtracing/coresight/coresight-replicator.ko",
+    "drivers/hwtracing/coresight/coresight-trbe.ko",
     "drivers/perf/dwc_pcie_pmu.ko",
 ]
 

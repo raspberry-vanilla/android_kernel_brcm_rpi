@@ -194,38 +194,51 @@ static void __host_stage2_free(void *virt, void *arg, unsigned long order) { WAR
 static void __init pkvm_host_stage2_drain(void) { }
 #endif
 
+static int __init add_hyp_memblock_region(const struct memblock_region *reg)
+{
+	if (*hyp_memblock_nr_ptr >= HYP_MEMBLOCK_REGIONS)
+		return -ENOMEM;
+
+	hyp_memory[*hyp_memblock_nr_ptr] = *reg;
+	(*hyp_memblock_nr_ptr)++;
+
+	return 0;
+}
+
 static int __init register_memblock_regions(void)
 {
+	struct memblock_region pvmfw_reg = {
+		.base	= pvmfw_base,
+		.size	= pvmfw_size,
+		.flags	= MEMBLOCK_NOMAP,
+	};
 	struct memblock_region *reg;
-	bool pvmfw_in_mem = false;
+	bool pvmfw_registered = !pvmfw_size;
+	int ret;
 
 	for_each_mem_region(reg) {
-		if (*hyp_memblock_nr_ptr >= HYP_MEMBLOCK_REGIONS)
-			return -ENOMEM;
+		/* EL2 binary-searches hyp_memory, so insert pvmfw in address order. */
+		if (!pvmfw_registered && pvmfw_base < reg->base + reg->size) {
+			if (memblock_addrs_overlap(reg->base, reg->size, pvmfw_base, pvmfw_size)) {
+				/* If the pvmfw region overlaps a memblock, it must be a subset */
+				if (pvmfw_base < reg->base ||
+				    (pvmfw_base + pvmfw_size) > (reg->base + reg->size))
+					return -EINVAL;
+			} else {
+				ret = add_hyp_memblock_region(&pvmfw_reg);
+				if (ret)
+					return ret;
+			}
+			pvmfw_registered = true;
+		}
 
-		hyp_memory[*hyp_memblock_nr_ptr] = *reg;
-		(*hyp_memblock_nr_ptr)++;
-
-		if (!pvmfw_size || pvmfw_in_mem ||
-			!memblock_addrs_overlap(reg->base, reg->size, pvmfw_base, pvmfw_size))
-			continue;
-		/* If the pvmfw region overlaps a memblock, it must be a subset */
-		if (pvmfw_base < reg->base || (pvmfw_base + pvmfw_size) > (reg->base + reg->size))
-			return -EINVAL;
-		pvmfw_in_mem = true;
+		ret = add_hyp_memblock_region(reg);
+		if (ret)
+			return ret;
 	}
 
-	if (pvmfw_size && !pvmfw_in_mem) {
-		if (*hyp_memblock_nr_ptr >= HYP_MEMBLOCK_REGIONS)
-			return -ENOMEM;
-
-		hyp_memory[*hyp_memblock_nr_ptr] = (struct memblock_region) {
-			.base   = pvmfw_base,
-			.size   = pvmfw_size,
-			.flags  = MEMBLOCK_NOMAP,
-		};
-		(*hyp_memblock_nr_ptr)++;
-	}
+	if (!pvmfw_registered)
+		return add_hyp_memblock_region(&pvmfw_reg);
 
 	return 0;
 }

@@ -364,7 +364,7 @@ impl Node {
     ) -> Option<DLArc<Node>> {
         let inner = self.inner.access_mut(owner_inner);
         if inner.active_inc_refs == 0 {
-            pr_err!("inc_ref_done called when no active inc_refs");
+            binder_debug!(UserError, "inc_ref_done called when no active inc_refs");
             return None;
         }
 
@@ -557,7 +557,7 @@ impl Node {
             inner.oneway_todo.push_back(transaction);
         } else {
             inner.has_oneway_transaction = true;
-            guard.push_work(transaction)?;
+            guard.push_work(&self.owner, transaction)?;
         }
         Ok(())
     }
@@ -589,7 +589,7 @@ impl Node {
         let transaction = inner.oneway_todo.pop_front();
         inner.has_oneway_transaction = transaction.is_some();
         if let Some(transaction) = transaction {
-            match guard.push_work(transaction) {
+            match guard.push_work(&self.owner, transaction) {
                 Ok(()) => {}
                 Err((_err, work)) => {
                     // Process is dead.
@@ -840,6 +840,7 @@ impl NodeRef {
 
     pub(crate) fn clone(&self, strong: bool) -> Result<NodeRef> {
         if strong && self.strong_count == 0 {
+            binder_debug!(UserError, "tried to use weak ref as strong ref");
             return Err(EINVAL);
         }
         Ok(self
@@ -880,9 +881,10 @@ impl NodeRef {
             *count += 1;
         } else {
             if *count == 0 {
-                pr_warn!(
-                    "pid {} performed invalid decrement on ref\n",
-                    kernel::current!().pid()
+                binder_debug!(
+                    UserError,
+                    "performed invalid {} decrement on ref",
+                    if strong { "strong" } else { "weak" }
                 );
                 return false;
             }
@@ -1124,6 +1126,11 @@ impl DeliverToRead for NodeDeath {
             // We're still holding the inner lock, so it cannot be aborted while we insert it into
             // the delivered list.
             process_inner.death_delivered(self.clone());
+            binder_debug!(
+                DeathNotification,
+                "sending death notification, cookie {:016x}",
+                cookie
+            );
             BR_DEAD_BINDER
         };
 
@@ -1134,7 +1141,14 @@ impl DeliverToRead for NodeDeath {
         Ok(cmd != BR_DEAD_BINDER)
     }
 
-    fn cancel(self: DArc<Self>) {}
+    fn cancel(self: DArc<Self>) {
+        binder_debug!(
+            pid = self.process.task.pid(),
+            DeadTransaction,
+            "undelivered death notification, {:016x}",
+            self.cookie
+        );
+    }
 
     fn should_sync_wakeup(&self) -> bool {
         false

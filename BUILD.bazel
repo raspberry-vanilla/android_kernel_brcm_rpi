@@ -170,6 +170,7 @@ filegroup(
 
             # ABI and symbol list files
             "gki/**",
+            "microdroid/**",
         ],
     ),
     visibility = ["//visibility:public"],
@@ -484,7 +485,9 @@ kernel_build(
         "vmlinux.symvers",
     ],
     arch = "arm64",
+    collect_unstripped_modules = True,
     defconfig = "arch/arm64/configs/microdroid_defconfig",
+    kmi_symbol_list = "microdroid/aarch64/symbols/base",
     make_goals = [
         "Image",
         "modules",
@@ -494,6 +497,25 @@ kernel_build(
         "drivers/dma-buf/heaps/system_heap.ko",
         "drivers/iommu/pkvm-pviommu.ko",
     ],
+    protected_module_names_list = ":microdroid_aarch64_protected_module_names",
+    trim_nonlisted_kmi = True,
+)
+
+write_file(
+    name = "microdroid_aarch64_protected_module_names",
+    out = "microdroid/aarch64/protected_module_names",
+    content = [
+        "drivers/dma-buf/heaps/system_heap",
+        "drivers/iommu/pkvm-pviommu",
+        "",  # Ensure new line at the end.
+    ],
+)
+
+kernel_abi(
+    name = "kernel_aarch64_microdroid_abi",
+    abi_definition_stg = "microdroid/aarch64/abi.stg",
+    define_abi_targets = True,
+    kernel_build = "kernel_aarch64_microdroid",
 )
 
 kernel_modules_install(

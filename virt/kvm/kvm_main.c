@@ -3029,7 +3029,7 @@ retry:
 			goto retry;
 		if (r < 0) {
 			pfn = KVM_PFN_ERR_FAULT;
-		} else if (kfp->backing_file && vma->vm_file) {
+		} else if (!is_error_pfn(pfn) && kfp->backing_file && vma->vm_file) {
 			get_file(vma->vm_file);
 			*kfp->backing_file = vma->vm_file;
 		}
@@ -3081,6 +3081,8 @@ kvm_pfn_t ___kvm_faultin_pfn(const struct kvm_memory_slot *slot, gfn_t gfn,
 
 	*writable = false;
 	*refcounted_page = NULL;
+	if (backing_file)
+		*backing_file = NULL;
 
 	return kvm_follow_pfn(&kfp);
 }

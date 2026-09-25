@@ -1905,6 +1905,7 @@
   xa_store
 
 # required by gpu.ko
+  copy_highpage
   crypto_acomp_compress
   crypto_acomp_decompress
   crypto_alloc_acomp
@@ -1941,6 +1942,7 @@
   int_sqrt
   kobject_get_unless_zero
   kthread_stop_put
+  mark_page_accessed
   mas_find
   mempool_alloc_noprof
   mempool_exit
@@ -1959,7 +1961,10 @@
   __rb_insert_augmented
   rb_next_postorder
   request_firmware_into_buf
+  set_page_dirty
   sg_init_one
+  shmem_file_setup
+  shmem_read_mapping_page_gfp
   __show_mem
   soc_device_match
   __traceiter_gpu_mem_total

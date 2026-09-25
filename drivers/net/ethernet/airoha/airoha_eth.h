@@ -47,14 +47,9 @@
 #define QDMA_METER_IDX(_n)		((_n) & 0xff)
 #define QDMA_METER_GROUP(_n)		(((_n) >> 8) & 0x3)
 
-#define PPE_NUM				2
-#define PPE1_SRAM_NUM_ENTRIES		(8 * 1024)
-#define PPE_SRAM_NUM_ENTRIES		(PPE_NUM * PPE1_SRAM_NUM_ENTRIES)
-#define PPE1_STATS_NUM_ENTRIES		(4 * 1024)
-#define PPE_STATS_NUM_ENTRIES		(PPE_NUM * PPE1_STATS_NUM_ENTRIES)
+#define PPE_SRAM_NUM_ENTRIES		(8 * 1024)
+#define PPE_STATS_NUM_ENTRIES		(4 * 1024)
 #define PPE_DRAM_NUM_ENTRIES		(16 * 1024)
-#define PPE_NUM_ENTRIES			(PPE_SRAM_NUM_ENTRIES + PPE_DRAM_NUM_ENTRIES)
-#define PPE_HASH_MASK			(PPE_NUM_ENTRIES - 1)
 #define PPE_ENTRY_SIZE			80
 #define PPE_RAM_NUM_ENTRIES_SHIFT(_n)	(__ffs((_n) >> 10))
 
@@ -72,10 +67,16 @@ enum {
 };
 
 enum {
-	HSGMII_LAN_PCIE0_SRCPORT = 0x16,
-	HSGMII_LAN_PCIE1_SRCPORT,
-	HSGMII_LAN_ETH_SRCPORT,
-	HSGMII_LAN_USB_SRCPORT,
+	HSGMII_LAN_7581_PCIE0_SRCPORT	= 0x16,
+	HSGMII_LAN_7581_PCIE1_SRCPORT,
+	HSGMII_LAN_7581_ETH_SRCPORT,
+	HSGMII_LAN_7581_USB_SRCPORT,
+};
+
+enum {
+	HSGMII_LAN_7583_ETH_SRCPORT	= 0x16,
+	HSGMII_LAN_7583_PCIE_SRCPORT	= 0x18,
+	HSGMII_LAN_7583_USB_SRCPORT,
 };
 
 enum {
@@ -102,6 +103,13 @@ enum {
 	CRSN_22 = 0x16, /* hit bind and force route to CPU */
 	CRSN_24 = 0x18,
 	CRSN_25 = 0x19,
+};
+
+enum airoha_gdm_index {
+	AIROHA_GDM1_IDX = 1,
+	AIROHA_GDM2_IDX = 2,
+	AIROHA_GDM3_IDX = 3,
+	AIROHA_GDM4_IDX = 4,
 };
 
 enum {
@@ -161,7 +169,10 @@ enum trtcm_param {
 struct airoha_queue_entry {
 	union {
 		void *buf;
-		struct sk_buff *skb;
+		struct {
+			struct list_head list;
+			struct sk_buff *skb;
+		};
 	};
 	dma_addr_t dma_addr;
 	u16 dma_len;
@@ -181,10 +192,13 @@ struct airoha_queue {
 	int ndesc;
 	int free_thr;
 	int buf_size;
+	bool txq_stopped;
 
 	struct napi_struct napi;
 	struct page_pool *page_pool;
 	struct sk_buff *skb;
+
+	struct list_head tx_list;
 };
 
 struct airoha_tx_irq_queue {
@@ -522,6 +536,7 @@ struct airoha_gdm_port {
 	struct airoha_qdma *qdma;
 	struct net_device *dev;
 	int id;
+	int nbq;
 
 	struct airoha_hw_stats stats;
 
@@ -547,7 +562,7 @@ struct airoha_ppe {
 	struct rhashtable l2_flows;
 
 	struct hlist_head *foe_flow;
-	u16 foe_check_time[PPE_NUM_ENTRIES];
+	u16 *foe_check_time;
 
 	struct airoha_foe_stats *foe_stats;
 	dma_addr_t foe_stats_dma;
@@ -560,6 +575,10 @@ struct airoha_eth_soc_data {
 	const char * const *xsi_rsts_names;
 	int num_xsi_rsts;
 	int num_ppe;
+	struct {
+		int (*get_src_port_id)(struct airoha_gdm_port *port, int nbq);
+		u32 (*get_vip_port)(struct airoha_gdm_port *port, int nbq);
+	} ops;
 };
 
 struct airoha_eth {
@@ -610,7 +629,12 @@ u32 airoha_rmw(void __iomem *base, u32 offset, u32 mask, u32 val);
 #define airoha_qdma_clear(qdma, offset, val)			\
 	airoha_rmw((qdma)->regs, (offset), (val), 0)
 
-static inline bool airhoa_is_lan_gdm_port(struct airoha_gdm_port *port)
+static inline u16 airoha_qdma_get_txq(struct airoha_qdma *qdma, u16 qid)
+{
+	return qid % ARRAY_SIZE(qdma->q_tx);
+}
+
+static inline bool airoha_is_lan_gdm_port(struct airoha_gdm_port *port)
 {
 	/* GDM1 port on EN7581 SoC is connected to the lan dsa switch.
 	 * GDM{2,3,4} can be used as wan port connected to an external
@@ -624,6 +648,11 @@ static inline bool airoha_is_7581(struct airoha_eth *eth)
 	return eth->soc->version == 0x7581;
 }
 
+static inline bool airoha_is_7583(struct airoha_eth *eth)
+{
+	return eth->soc->version == 0x7583;
+}
+
 bool airoha_is_valid_gdm_port(struct airoha_eth *eth,
 			      struct airoha_gdm_port *port);
 
@@ -634,6 +663,7 @@ int airoha_ppe_setup_tc_block_cb(struct airoha_ppe_dev *dev, void *type_data);
 int airoha_ppe_init(struct airoha_eth *eth);
 void airoha_ppe_deinit(struct airoha_eth *eth);
 void airoha_ppe_init_upd_mem(struct airoha_gdm_port *port);
+u32 airoha_ppe_get_total_num_entries(struct airoha_ppe *ppe);
 struct airoha_foe_entry *airoha_ppe_foe_get_entry(struct airoha_ppe *ppe,
 						  u32 hash);
 void airoha_ppe_foe_entry_get_stats(struct airoha_ppe *ppe, u32 hash,
