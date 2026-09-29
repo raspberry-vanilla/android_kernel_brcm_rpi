@@ -238,7 +238,7 @@ static int gunyah_vcpu_run(struct gunyah_vcpu *vcpu)
 	u64 deadline_ticks;
 	ktime_t expires;
 	int ret = 0;
-	u32 vcpu_id;
+	u32 vcpu_id = vcpu->ticket.label;
 
 	if (!vcpu->f)
 		return -ENODEV;
@@ -251,7 +251,6 @@ static int gunyah_vcpu_run(struct gunyah_vcpu *vcpu)
 		goto out;
 	}
 
-	vcpu_id = vcpu->ticket.label;
 	switch (vcpu->state) {
 	case GUNYAH_VCPU_RUN_STATE_UNKNOWN:
 		if (vcpu->ghvm->vm_status != GUNYAH_RM_VM_STATUS_RUNNING) {
@@ -413,6 +412,7 @@ static int gunyah_vcpu_run(struct gunyah_vcpu *vcpu)
 	}
 
 out:
+	trace_android_rvh_gh_vcpu_run_return(vcpu->ghvm->vmid, vcpu_id, ret);
 	mutex_unlock(&vcpu->run_lock);
 
 	if (signal_pending(current))
