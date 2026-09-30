@@ -233,8 +233,8 @@ Params:
         drm_fb2_vc4             Assign /dev/fb2 to the vc4 outputs
 
         eee                     Enable Energy Efficient Ethernet support for
-                                compatible devices (default "on"). See also
-                                "tx_lpi_timer". Pi3B+, Pi4, CM4, Pi5 and CM5.
+                                compatible devices (default "on").
+                                Pi3B+, Pi4, CM4, Pi5 and CM5.
 
         enable_eeprom           Set to "on" to enable the onboard bootloader
                                 EEPROM by driving GPIO 57 low
@@ -454,10 +454,6 @@ Params:
 
         suspend                 Make the power button trigger a suspend rather
                                 than a power-off (2712 only, default "off")
-
-        tx_lpi_timer            Set the delay in microseconds between going idle
-                                and entering the low power state (default 600).
-                                Requires EEE to be enabled - see "eee".
 
         uart0                   Set to "off" to disable uart0 (default "on")
 
@@ -949,6 +945,7 @@ Params: cam0-arducam-64mp       Select Arducam64MP for camera on port 0
         cam1-sync-sink          Set camera on port 1 as vsync sink
 
         cam0                    Connect the mux to CAM0 port (default is CAM1)
+        gpio-sel                Set the GPIO used to control the mux
 
 
 Name:   camera-mux-4port
@@ -1018,6 +1015,9 @@ Params: cam0-arducam-64mp       Select Arducam64MP for camera on port 0
         cam3-sync-sink          Set camera on port 3 as vsync sink
 
         cam0                    Connect the mux to CAM0 port (default is CAM1)
+        gpio-sel                Set the GPIO used to control the mux select line
+        gpio-en1                Set the GPIO used to control the mux en1 line
+        gpio-en2                Set the GPIO used to control the mux en2 line
 
 
 Name:   cap1106
@@ -5967,7 +5967,9 @@ Info:   Enable the Waveshare DSI-TOUCH series screen
         Requires vc4-kms-v3d to be loaded.
 Load:   dtoverlay=vc4-kms-dsi-waveshare-panel-v2,<param>
 Params: 3_4_inch_c              3.4" 800x800 2lane
+        4_0_inch_a              4.0" 480x800 2lane
         4_0_inch_c              4.0" 720x720 2lane
+        4_3_inch_a              4.3" 480x800 2lane
         5_0_inch_a              5.0" 720x1280 2lane
         5_5_inch_a              5.5" 720x1280 2lane
         7_0_inch_a              7.0" A 720x1280 2lane

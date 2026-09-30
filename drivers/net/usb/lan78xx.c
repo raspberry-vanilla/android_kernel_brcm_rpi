@@ -1818,34 +1818,15 @@ exit_pm_put:
 static int lan78xx_get_eee(struct net_device *net, struct ethtool_keee *edata)
 {
 	struct lan78xx_net *dev = netdev_priv(net);
-	u32 buf;
-	int ret;
 
-	ret = phylink_ethtool_get_eee(dev->phylink, edata);
-	if (ret < 0)
-		return ret;
-
-	ret = lan78xx_read_reg(dev, EEE_TX_LPI_REQ_DLY, &buf);
-	if (ret >= 0)
-		edata->tx_lpi_timer = buf;
-	else
-		edata->tx_lpi_timer = 0;
-
-	return 0;
+	return phylink_ethtool_get_eee(dev->phylink, edata);
 }
 
 static int lan78xx_set_eee(struct net_device *net, struct ethtool_keee *edata)
 {
 	struct lan78xx_net *dev = netdev_priv(net);
-	u32 buf;
-	int ret;
 
-	ret = phylink_ethtool_set_eee(dev->phylink, edata);
-	if (ret < 0)
-		return ret;
-
-	buf = (u32)edata->tx_lpi_timer;
-	return lan78xx_write_reg(dev, EEE_TX_LPI_REQ_DLY, buf);
+	return phylink_ethtool_set_eee(dev->phylink, edata);
 }
 
 static void lan78xx_get_drvinfo(struct net_device *net,
@@ -1960,7 +1941,6 @@ static const struct ethtool_ops lan78xx_ethtool_ops = {
 	.set_link_ksettings = lan78xx_set_link_ksettings,
 	.get_regs_len	= lan78xx_get_regs_len,
 	.get_regs	= lan78xx_get_regs,
-	.get_ts_info    = ethtool_op_get_ts_info,
 };
 
 static int lan78xx_init_mac_address(struct lan78xx_net *dev)
@@ -2915,29 +2895,6 @@ static int lan78xx_phy_init(struct lan78xx_net *dev)
 		netdev_err(dev->net, "can't attach PHY to %s, error %pe\n",
 			   dev->mdiobus->id, ERR_PTR(ret));
 		goto phylink_uninit;
-	}
-
-	if (of_property_read_bool(phydev->mdio.dev.of_node,
-				  "microchip,eee-enabled")) {
-		struct ethtool_keee edata;
-		memset(&edata, 0, sizeof(edata));
-
-		linkmode_set_bit(ETHTOOL_LINK_MODE_1000baseT_Full_BIT,
-			edata.advertised);
-		linkmode_set_bit(ETHTOOL_LINK_MODE_100baseT_Full_BIT,
-			edata.advertised);
-
-		edata.eee_enabled = true;
-		edata.tx_lpi_enabled = true;
-		if (of_property_read_u32(phydev->mdio.dev.of_node,
-					 "microchip,tx-lpi-timer",
-					 &edata.tx_lpi_timer))
-			edata.tx_lpi_timer = 600; /* non-aggressive */
-		rtnl_lock();
-		(void)lan78xx_set_eee(dev->net, &edata);
-		rtnl_unlock();
-
-		phy_support_eee(phydev);
 	}
 
 	ret = lan78xx_configure_leds_from_dt(dev, phydev);
