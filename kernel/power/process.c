@@ -94,6 +94,9 @@ static int try_to_freeze_tasks(bool user_only)
 		       elapsed_msecs / 1000, elapsed_msecs % 1000,
 		       todo - wq_busy, wq_busy);
 
+		if (wakeup)
+			trace_android_vh_try_to_freeze_abort(elapsed_msecs);
+
 		if (wq_busy)
 			show_freezable_workqueues();
 

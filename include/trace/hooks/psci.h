@@ -18,6 +18,10 @@ DECLARE_RESTRICTED_HOOK(android_rvh_psci_cpu_suspend,
 	TP_PROTO(u32 state, bool *deny),
 	TP_ARGS(state, deny), 1);
 
+DECLARE_RESTRICTED_HOOK(android_rvh_psci_system_reset2,
+	TP_PROTO(u32 *reset_type, u64 *cookie),
+	TP_ARGS(reset_type, cookie), 1);
+
 /* macro versions of hooks are no longer required */
 
 #endif /* _TRACE_HOOK_PSCI_H */

@@ -49,6 +49,8 @@ extern struct page *__cma_alloc(struct cma *cma, unsigned long count, unsigned i
 				gfp_t gfp_mask);
 extern struct page *cma_alloc(struct cma *cma, unsigned long count, unsigned int align,
 			      bool no_warn);
+extern struct page *cma_alloc_at(struct cma *cma, unsigned long offset,
+				 unsigned long count, bool no_warn);
 extern bool cma_pages_valid(struct cma *cma, const struct page *pages, unsigned long count);
 extern bool cma_release(struct cma *cma, const struct page *pages, unsigned long count);
 

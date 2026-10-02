@@ -778,6 +778,7 @@
   __mmap_lock_do_trace_released
   __mmap_lock_do_trace_start_locking
   mmc_of_parse
+  mmc_of_parse_clk_phase
   mmc_send_tuning
   __mmdrop
   mod_delayed_work_on

@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-2.0
 /*
- * Copyright (c) 2018, NVIDIA CORPORATION.  All rights reserved.
+ * SPDX-FileCopyrightText: Copyright (c) 2018-2025, NVIDIA CORPORATION & AFFILIATES. All rights reserved.
  */
 
 #include <linux/console.h>
+#include <linux/io.h>
 #include <linux/mailbox_client.h>
 #include <linux/module.h>
 #include <linux/of.h>
@@ -18,6 +19,71 @@
 #define TCU_MBOX_BYTE_V(x, i)			(((x) >> (i * 8)) & 0xff)
 #define TCU_MBOX_NUM_BYTES(x)			((x) << 24)
 #define TCU_MBOX_NUM_BYTES_V(x)			(((x) >> 24) & 0x3)
+#define TCU_MBOX_NUM_BYTES_MASK			TCU_MBOX_NUM_BYTES(0x3)
+#define TCU_MBOX_INTR_TRIG_BIT			BIT(31)
+
+static u32 tegra_tcu_early_update_mbox(u8 __iomem *addr, u32 mbox_val, char c)
+{
+	unsigned int bytes = TCU_MBOX_NUM_BYTES_V(mbox_val);
+	unsigned char uc = (unsigned char)c;
+
+	mbox_val |= TCU_MBOX_INTR_TRIG_BIT;
+	mbox_val |= TCU_MBOX_BYTE(bytes, uc);
+	bytes++;
+	mbox_val = (mbox_val & ~TCU_MBOX_NUM_BYTES_MASK) |
+		TCU_MBOX_NUM_BYTES(bytes);
+
+	if (bytes == 3) {
+		/* Send current packet to tcu driver*/
+		while (readl(addr) & TCU_MBOX_INTR_TRIG_BIT)
+			cpu_relax();
+		writel(mbox_val, addr);
+		mbox_val = TCU_MBOX_INTR_TRIG_BIT;
+	}
+
+	return mbox_val;
+}
+
+/*
+ * This function splits the string to be printed (const char *s) into multiple
+ * packets. Each packet contains a max of 3 characters. Packets are sent to the
+ * combined UART server for printing. Communication with TCU is done
+ * through mailbox registers which can generate interrupts for TCU.
+ */
+static void __init tegra_tcu_early_write(struct console *console,
+			const char *s, unsigned int count)
+{
+	struct earlycon_device *device = console->data;
+	u8 __iomem *addr = device->port.membase;
+	u32 mbox_val = TCU_MBOX_INTR_TRIG_BIT;
+	unsigned int i;
+
+	/* Loop for processing each 3 char packet */
+	for (i = 0; i < count; i++) {
+		if (s[i] == '\n')
+			mbox_val = tegra_tcu_early_update_mbox(addr, mbox_val, '\r');
+		mbox_val = tegra_tcu_early_update_mbox(addr, mbox_val, s[i]);
+	}
+
+	if (TCU_MBOX_NUM_BYTES_V(mbox_val)) {
+		while (readl(addr) & TCU_MBOX_INTR_TRIG_BIT)
+			cpu_relax();
+		writel(mbox_val, addr);
+	}
+}
+
+static int __init tegra_tcu_early_setup(struct earlycon_device *device,
+						const char *options)
+{
+	if (!(device->port.membase))
+		return -ENODEV;
+
+	device->con->write = tegra_tcu_early_write;
+
+	return 0;
+}
+
+EARLYCON_DECLARE(tegra_tcu, tegra_tcu_early_setup);
 
 struct tegra_tcu {
 	struct uart_driver driver;

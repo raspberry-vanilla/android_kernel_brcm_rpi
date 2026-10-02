@@ -439,7 +439,7 @@ static void request_wait_answer(struct fuse_req *req)
 
 	if (!fc->no_interrupt) {
 		/* Any signal may interrupt this */
-		err = wait_event_interruptible(req->waitq,
+		err = wait_event_freezable(req->waitq,
 					test_bit(FR_FINISHED, &req->flags));
 		if (!err)
 			return;
@@ -453,8 +453,9 @@ static void request_wait_answer(struct fuse_req *req)
 
 	if (!test_bit(FR_FORCE, &req->flags)) {
 		/* Only fatal signals may interrupt this */
-		err = wait_event_killable(req->waitq,
-					test_bit(FR_FINISHED, &req->flags));
+		err = wait_event_state(req->waitq,
+					test_bit(FR_FINISHED, &req->flags),
+					TASK_KILLABLE | TASK_FREEZABLE);
 		if (!err)
 			return;
 
@@ -472,9 +473,13 @@ static void request_wait_answer(struct fuse_req *req)
 
 	/*
 	 * Either request is already in userspace, or it was forced.
-	 * Wait it out.
+	 * Wait it out using an uninterruptible freezable sleep so system suspend
+	 * does not deadlock if FuseDaemon is already frozen, while ignoring
+	 * non-fatal signals.
 	 */
-	wait_event(req->waitq, test_bit(FR_FINISHED, &req->flags));
+	wait_event_state(req->waitq,
+			 test_bit(FR_FINISHED, &req->flags),
+			 TASK_UNINTERRUPTIBLE | TASK_FREEZABLE);
 }
 
 static void __fuse_request_send(struct fuse_req *req)
@@ -1661,6 +1666,10 @@ static int fuse_notify_store(struct fuse_conn *fc, unsigned int size,
 	inode = fuse_ilookup(fc, nodeid,  NULL);
 	if (!inode)
 		goto out_up_killsb;
+	if (!S_ISREG(inode->i_mode)) {
+		err = -EINVAL;
+		goto out_iput;
+	}
 
 	mapping = inode->i_mapping;
 	index = outarg.offset >> PAGE_SHIFT;
@@ -1832,7 +1841,10 @@ static int fuse_notify_retrieve(struct fuse_conn *fc, unsigned int size,
 
 	inode = fuse_ilookup(fc, nodeid, &fm);
 	if (inode) {
-		err = fuse_retrieve(fm, inode, &outarg);
+		if (!S_ISREG(inode->i_mode))
+			err = -EINVAL;
+		else
+			err = fuse_retrieve(fm, inode, &outarg);
 		iput(inode);
 	}
 	up_read(&fc->killsb);

@@ -512,3 +512,13 @@ size_t kvm_iommu_map_sg(pkvm_handle_t domain_id, struct kvm_iommu_sg *sg,
 	return total_mapped;
 }
 EXPORT_SYMBOL(kvm_iommu_map_sg);
+
+int kvm_get_iommu_endpoint(struct of_phandle_args *iommu_spec,
+			   u64 *out_endpoint)
+{
+	if (iommu_driver && iommu_driver->get_iommu_endpoint)
+		return iommu_driver->get_iommu_endpoint(iommu_spec,
+							out_endpoint);
+
+	return -ENODEV;
+}

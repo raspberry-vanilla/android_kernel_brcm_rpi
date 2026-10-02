@@ -3414,6 +3414,7 @@
   __traceiter_android_rvh_migrate_queued_task
   __traceiter_android_rvh_new_task_stats
   __traceiter_android_rvh_prepare_prio_fork
+  __traceiter_android_rvh_psci_system_reset2
   __traceiter_android_rvh_replace_next_task_fair
   __traceiter_android_rvh_rtmutex_prepare_setprio
   __traceiter_android_rvh_rto_next_cpu
@@ -3564,6 +3565,7 @@
   __tracepoint_android_rvh_migrate_queued_task
   __tracepoint_android_rvh_new_task_stats
   __tracepoint_android_rvh_prepare_prio_fork
+  __tracepoint_android_rvh_psci_system_reset2
   __tracepoint_android_rvh_replace_next_task_fair
   __tracepoint_android_rvh_rtmutex_prepare_setprio
   __tracepoint_android_rvh_rto_next_cpu
@@ -4178,6 +4180,8 @@
   xsk_tx_peek_desc
   xsk_tx_release
   xsk_uses_need_wakeup
+  xt_register_targets
+  xt_unregister_targets
   zap_page_range_single
   zap_vma_ptes
   zlib_deflate

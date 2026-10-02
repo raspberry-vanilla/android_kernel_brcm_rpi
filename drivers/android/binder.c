@@ -7615,6 +7615,24 @@ static const struct kernel_param_ops binder_impl_param_ops = {
 
 module_param_cb(impl, &binder_impl_param_ops, NULL, 0644);
 
+static int binder_active_impl_param_get(char *buffer, const struct kernel_param *kp)
+{
+	bool use_rust;
+
+	mutex_lock(&binder_use_rust_lock);
+	use_rust = binder_loaded && binder_use_rust;
+	mutex_unlock(&binder_use_rust_lock);
+
+	/* The buffer is 4k bytes, so this will not overflow. */
+	return sprintf(buffer, "%s\n", use_rust ? "rust" : "c");
+}
+
+static const struct kernel_param_ops binder_active_impl_param_ops = {
+	.get = binder_active_impl_param_get,
+};
+
+module_param_cb(active_impl, &binder_active_impl_param_ops, NULL, 0444);
+
 #define CREATE_TRACE_POINTS
 #include "binder_trace.h"
 EXPORT_TRACEPOINT_SYMBOL_GPL(binder_transaction_received);

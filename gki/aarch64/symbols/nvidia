@@ -1,5 +1,6 @@
 [abi_symbol_list]
   add_device_randomness
+  add_memory_driver_managed
   addrconf_add_linklocal
   addrconf_prefix_rcv_add_addr
   add_swap_extent
@@ -37,11 +38,13 @@
   __arch_copy_from_user
   __arch_copy_to_user
   arch_invalidate_pmem
+  arch_wb_cache_pmem
   arch_timer_read_counter
   arm64_use_ng_mappings
   arm_smccc_1_2_hvc
   __arm_smccc_hvc
   __arm_smccc_smc
+  arp_send
   arp_tbl
   asn1_ber_decoder
   async_schedule_node
@@ -59,6 +62,15 @@
   auxiliary_device_init
   __auxiliary_driver_register
   auxiliary_driver_unregister
+  azx_bus_init
+  azx_codec_configure
+  azx_free_streams
+  azx_init_chip
+  azx_init_streams
+  azx_interrupt
+  azx_probe_codecs
+  azx_stop_all_streams
+  azx_stop_chip
   backlight_device_register
   backlight_device_unregister
   balance_dirty_pages_ratelimited
@@ -253,6 +265,8 @@
   clk_set_rate
   clk_unprepare
   clocks_calc_mult_shift
+  cma_alloc_at
+  cma_release
   close_fd
   compat_ptr_ioctl
   complete
@@ -453,10 +467,12 @@
   devfreq_monitor_start
   devfreq_monitor_stop
   devfreq_monitor_suspend
+  devfreq_register_notifier
   devfreq_remove_device
   devfreq_remove_governor
   devfreq_resume_device
   devfreq_suspend_device
+  devfreq_unregister_notifier
   devfreq_update_interval
   __dev_fwnode
   __dev_fwnode_const
@@ -665,6 +681,7 @@
   dev_pm_domain_attach_by_id
   dev_pm_domain_attach_by_name
   dev_pm_domain_detach
+  dev_pm_domain_set
   dev_pm_genpd_resume
   dev_pm_genpd_set_performance_state
   dev_pm_genpd_suspend
@@ -774,9 +791,12 @@
   dma_free_pages
   dma_get_any_slave_channel
   dma_get_sgtable_attrs
+  dma_heap_add
   dma_heap_buffer_alloc
   dma_heap_buffer_free
   dma_heap_find
+  dma_heap_get_drvdata
+  dma_heap_get_name
   dma_heap_put
   d_make_root
   dmam_alloc_attrs
@@ -898,6 +918,7 @@
   drm_bridge_remove
   drm_bus_flags_from_videomode
   drm_compat_ioctl
+  drm_connector_attach_broadcast_rgb_property
   drm_connector_attach_encoder
   drm_connector_cleanup
   drm_connector_helper_get_modes_fixed
@@ -953,6 +974,7 @@
   drm_encoder_cleanup
   drm_encoder_init
   __drm_err
+  drm_file_get_master
   drm_fb_blit
   drm_fb_build_fourcc_list
   drm_fb_clip_offset
@@ -1012,6 +1034,7 @@
   drm_timeout_abs_to_jiffies
   __drmm_add_action_or_reset
   drm_match_cea_mode
+  drm_master_put
   drmm_connector_hdmi_init
   drmm_connector_init
   drmm_encoder_init
@@ -1028,6 +1051,7 @@
   drm_mode_config_reset
   drm_mode_copy
   drm_mode_create
+  drm_mode_create_dvi_i_properties
   drm_mode_crtc_set_gamma_size
   drm_mode_duplicate
   drm_mode_init
@@ -1081,6 +1105,8 @@
   drm_syncobj_replace_fence
   drm_universal_plane_init
   drm_vblank_init
+  drm_vma_node_is_allowed
+  drm_vma_offset_lookup_locked
   drop_nlink
   drop_reasons_register_subsys
   drop_reasons_unregister_subsys
@@ -1380,6 +1406,7 @@
   gnet_stats_copy_basic
   gnet_stats_copy_queue
   gpiochip_add_data_with_key
+  gpiochip_add_pingroup_range
   gpiochip_disable_irq
   gpiochip_enable_irq
   gpiochip_get_data
@@ -1463,6 +1490,7 @@
   hvc_poll
   hvc_remove
   __hvc_resize
+  host1x_context_device_bus_type
   __hw_addr_init
   __hw_addr_sync
   __hw_addr_sync_dev
@@ -1729,6 +1757,7 @@
   jiffies
   jiffies_to_clock_t
   jiffies_to_msecs
+  jiffies_to_timespec64
   jiffies_to_usecs
   kasan_flag_enabled
   kasprintf
@@ -2108,6 +2137,7 @@
   netif_carrier_on
   netif_device_attach
   netif_device_detach
+  netif_get_num_default_rss_queues
   netif_inherit_tso_max
   netif_napi_add_weight
   __netif_napi_del
@@ -2258,6 +2288,7 @@
   of_phy_register_fixed_link
   of_phy_simple_xlate
   of_platform_depopulate
+  of_platform_default_populate
   of_platform_device_create
   of_platform_populate
   of_property_count_elems_of_size
@@ -2343,6 +2374,9 @@
   pci_disable_msix
   pci_disable_sriov
   pci_epc_deinit_notify
+  pci_find_dvsec_capability
+  pci_get_class
+  pci_rebar_get_possible_sizes
   pcie_capability_clear_and_set_word_locked
   pcie_capability_clear_and_set_word_unlocked
   pcie_capability_read_word
@@ -2350,6 +2384,7 @@
   pcie_get_mps
   pcie_get_readrq
   pcie_link_speed
+  pcie_reset_flr
   pci_enable_atomic_ops_to_root
   pci_enable_ats
   pci_enable_device
@@ -2370,6 +2405,7 @@
   pci_get_device
   pci_get_domain_bus_and_slot
   pci_get_slot
+  pci_ignore_hotplug
   pci_iomap
   pci_iomap_range
   pci_ioremap_bar
@@ -2552,6 +2588,7 @@
   pin_user_pages
   pin_user_pages_fast
   pin_user_pages_remote
+  pin_user_pages_unlocked
   pipe_lock
   pipe_unlock
   platform_bus
@@ -3041,8 +3078,11 @@
   set_capacity
   set_capacity_and_notify
   set_cpus_allowed_ptr
+  set_direct_map_default_noflush
+  set_direct_map_invalid_noflush
   set_disk_ro
   set_freezable
+  set_memory_encrypted
   set_nlink
   set_normalized_timespec64
   set_page_dirty
@@ -3136,6 +3176,7 @@
   skb_set_owner_w
   skb_splice_bits
   skb_to_sgvec
+  skb_to_sgvec_nomark
   skb_trim
   skb_try_coalesce
   skb_tstamp_tx
@@ -3211,12 +3252,21 @@
   snd_dma_free_pages
   snd_dmaengine_pcm_unregister
   snd_hwparams_to_dma_slave_config
+  snd_hda_set_power_save
+  snd_hdac_aligned_read
+  snd_hdac_aligned_write
+  snd_hdac_bus_alloc_stream_pages
+  snd_hdac_bus_enter_link_reset
+  snd_hdac_bus_exit
+  snd_hdac_bus_free_stream_pages
   snd_info_create_card_entry
   snd_info_free_entry
   snd_info_get_line
   snd_jack_new
   snd_jack_report
   snd_jack_set_key
+  snd_lookup_minor_data
+  snd_major
   snd_pcm_add_chmap_ctls
   snd_pcm_alt_chmaps
   snd_pcm_create_iec958_consumer_default
@@ -3233,6 +3283,7 @@
   snd_pcm_lib_free_pages
   snd_pcm_lib_ioctl
   snd_pcm_lib_malloc_pages
+  snd_pcm_mmap_data
   snd_pcm_new
   snd_pcm_period_elapsed
   snd_pcm_rate_bit_to_rate
@@ -3544,11 +3595,13 @@
   tegra_fuse_readl
   tegra_io_pad_power_disable
   tegra_io_pad_power_enable
+  tegra_ivc_align
   tegra_ivc_init
   tegra_ivc_notified
   tegra_ivc_read_advance
   tegra_ivc_read_get_next_frame
   tegra_ivc_reset
+  tegra_ivc_total_queue_size
   tegra_ivc_write_advance
   tegra_ivc_write_get_next_frame
   tegra_mc_get_carveout_info
@@ -3557,6 +3610,10 @@
   tegra_powergate_power_off
   tegra_powergate_sequence_power_up
   tegra_sku_info
+  tegra_vpr_enable
+  tegra_vpr_get_cma
+  tegra_vpr_register
+  tegra_vpr_unregister
   tegra_xusb_padctl_legacy_probe
   thermal_zone_device_enable
   thermal_zone_device_priv
@@ -3799,6 +3856,8 @@
   usb_deregister_device_driver
   usb_device_match_id
   usb_disable_autosuspend
+  usb_disable_lpm
+  usb_disable_ltm
   usb_disabled
   usb_driver_claim_interface
   usb_driver_release_interface
@@ -4142,6 +4201,7 @@
   wait_for_completion_killable
   wait_for_completion_killable_timeout
   wait_for_completion_timeout
+  wait_for_random_bytes
   wait_on_page_writeback
   wait_woken
   __wake_up

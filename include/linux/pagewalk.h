@@ -16,6 +16,9 @@ enum page_walk_lock {
 	PGWALK_WRLOCK_VERIFY = 2,
 };
 
+/* vma is expected to be already read-locked during the walk */
+#define PGWALK_VMA_RDLOCK_VERIFY ((enum page_walk_lock)3)
+
 /**
  * struct mm_walk_ops - callbacks for walk_page_range
  * @pgd_entry:		if set, called for each non-empty PGD (top-level) entry

@@ -274,4 +274,4 @@
   blkcg_activate_policy
   blkcg_deactivate_policy
   netlink_ack
-
+  wake_up_var

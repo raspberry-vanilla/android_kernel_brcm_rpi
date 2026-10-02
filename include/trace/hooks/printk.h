@@ -9,6 +9,8 @@
 
 #include <trace/hooks/vendor_hooks.h>
 
+struct console;
+
 DECLARE_HOOK(android_vh_printk_hotplug,
 	TP_PROTO(int *flag),
 	TP_ARGS(flag));
@@ -25,6 +27,9 @@ DECLARE_HOOK(android_vh_printk_ext_header,
 DECLARE_HOOK(android_vh_printk_save_irq,
 	TP_PROTO(u32 *caller_id, unsigned long irqflags),
 	TP_ARGS(caller_id, irqflags));
+DECLARE_HOOK(android_vh_printk_console_emit_next_record,
+	TP_PROTO(struct console *con, bool *may_suppress),
+	TP_ARGS(con, may_suppress));
 
 #endif /* _TRACE_HOOK_PRINTK_H */
 /* This part must be outside protection */

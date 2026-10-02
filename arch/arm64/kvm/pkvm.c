@@ -314,6 +314,13 @@ static int __init early_hyp_lm_size_mb_cfg(char *arg)
 }
 early_param("kvm-arm.hyp_lm_size_mb", early_hyp_lm_size_mb_cfg);
 
+static int __init early_ffa_max_nr_constituents(char *arg)
+{
+	return kstrtoul(arg, 10, &kvm_nvhe_sym(ffa_max_nr_constituents));
+}
+
+early_param("kvm-arm.ffa_max_nr_constituents", early_ffa_max_nr_constituents);
+
 void __init kvm_hyp_reserve(void)
 {
 	u64 hyp_mem_pages = 0;
@@ -670,21 +677,28 @@ static int pkvm_register_device(struct of_phandle_args *args,
 	while (!of_parse_phandle_with_args(np, "iommus",
 					   "#iommu-cells",
 					   j, &iommu_spec)) {
-		if (iommu_spec.args_count != 1) {
-			kvm_err("[Devices] Unsupported binding for %s, expected <&iommu id>",
-				np->full_name);
-			return -EINVAL;
-		}
+		u64 endpoint;
 
 		if (j >= PKVM_DEVICE_MAX_RESOURCE) {
 			of_node_put(iommu_spec.np);
 			return -E2BIG;
 		}
 
+		if (iommu_spec.args_count != 1) {
+			/* Unknown binding, check if the driver knows it. */
+			if (kvm_get_iommu_endpoint(&iommu_spec, &endpoint)) {
+				kvm_err("[Devices] Unsupported binding for %s, expected <&iommu id>",
+					np->full_name);
+				return -EINVAL;
+			}
+		} else {
+			endpoint = iommu_spec.args[0];
+		}
+
 		iommu_id = kvm_get_iommu_id_by_of(iommu_spec.np);
 
 		dev->iommus[j].id = iommu_id;
-		dev->iommus[j].endpoint = iommu_spec.args[0];
+		dev->iommus[j].endpoint = endpoint;
 		of_node_put(iommu_spec.np);
 		j++;
 	}
@@ -2047,19 +2061,36 @@ int pkvm_pgtable_stage2_split(struct kvm_pgtable *pgt, u64 addr, u64 size, void 
 	return -EINVAL;
 }
 
-static int early_ffa_unmap_on_lend_cfg(char *arg)
+static int __init early_ffa_unmap_on_lend_cfg(char *arg)
 {
+	char *token;
 	bool enable;
 
-	if (!arg)
+	if (!arg) {
 		kvm_nvhe_sym(__pkvm_ffa_unmap_on_lend) = PKVM_FFA_UNMAP_ON_LEND_ON;
-	else if (!strcmp(arg, "full"))
-		kvm_nvhe_sym(__pkvm_ffa_unmap_on_lend) = PKVM_FFA_UNMAP_ON_LEND_FULL;
-	else {
-		if (!kstrtobool(arg, &enable)) {
+		return 0;
+	}
+
+	while ((token = strsep(&arg, ","))) {
+		u64 val;
+
+		if (!*token)
+			continue;
+
+		if (!strcmp(token, "full")) {
+			kvm_nvhe_sym(__pkvm_ffa_unmap_on_lend) = PKVM_FFA_UNMAP_ON_LEND_FULL;
+		} else if (!strncmp(token, "nr_handles=", 11)) {
+			if (kstrtoull(token + 11, 10, &val) || !val) {
+				kvm_err("kvm-arm.ffa-unmap-on-lend: Invalid nr_handles '%s'\n",
+					token + 11);
+				return -EINVAL;
+			}
+			kvm_nvhe_sym(kvm_ffa_spm_nr_pages) =
+				DIV_ROUND_UP(val * KVM_FFA_SPM_HANDLE_SIZE, PAGE_SIZE);
+		} else if (!kstrtobool(token, &enable)) {
 			kvm_nvhe_sym(__pkvm_ffa_unmap_on_lend) = enable;
 		} else {
-			kvm_err("kvm-arm.ffa-unmap-on-lend: Unknown argument '%s'\n", arg);
+			kvm_err("kvm-arm.ffa-unmap-on-lend: Unknown argument '%s'\n", token);
 			return -EINVAL;
 		}
 	}

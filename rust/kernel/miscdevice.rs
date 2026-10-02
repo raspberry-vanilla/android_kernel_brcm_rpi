@@ -13,6 +13,7 @@ use crate::{
     device::Device,
     error::{to_result, Error, Result, VTABLE_DEFAULT_ERROR},
     ffi::{c_int, c_long, c_uint, c_ulong, c_void},
+    fs::file::Offset,
     fs::{File, LocalFile},
     mm::virt::VmaNew,
     prelude::*,
@@ -21,10 +22,6 @@ use crate::{
     types::{AsBytes, ForeignOwnable, Opaque},
 };
 use core::{marker::PhantomData, mem::MaybeUninit, pin::Pin, ptr::NonNull};
-
-/// The kernel `loff_t` type.
-#[allow(non_camel_case_types)]
-pub type loff_t = bindings::loff_t;
 
 /// Options for creating a misc device.
 #[derive(Copy, Clone)]
@@ -150,9 +147,9 @@ pub trait MiscDevice: Sized {
     fn llseek(
         _device: <Self::Ptr as ForeignOwnable>::Borrowed<'_>,
         _file: &LocalFile,
-        _offset: loff_t,
+        _offset: Offset,
         _whence: c_int,
-    ) -> Result<loff_t> {
+    ) -> Result<Offset> {
         kernel::build_error(VTABLE_DEFAULT_ERROR)
     }
 
@@ -225,13 +222,13 @@ impl<'a, T: ForeignOwnable> Kiocb<'a, T> {
     }
 
     /// Gets the current value of `ki_pos`.
-    pub fn ki_pos(&self) -> loff_t {
+    pub fn ki_pos(&self) -> Offset {
         // SAFETY: The `kiocb` can access `ki_pos`.
         unsafe { (*self.inner.as_ptr()).ki_pos }
     }
 
     /// Gets a mutable reference to the `ki_pos` field.
-    pub fn ki_pos_mut(&mut self) -> &mut loff_t {
+    pub fn ki_pos_mut(&mut self) -> &mut Offset {
         // SAFETY: The `kiocb` can access `ki_pos`.
         unsafe { &mut (*self.inner.as_ptr()).ki_pos }
     }
@@ -371,9 +368,9 @@ impl<T: MiscDevice> MiscdeviceVTable<T> {
     /// `file` must be a valid file that is associated with a `MiscDeviceRegistration<T>`.
     unsafe extern "C" fn llseek(
         file: *mut bindings::file,
-        offset: loff_t,
+        offset: Offset,
         whence: c_int,
-    ) -> loff_t {
+    ) -> Offset {
         // SAFETY: The release call of a file owns the private data.
         let private = unsafe { (*file).private_data };
         // SAFETY: Ioctl calls can borrow the private data of the file.
@@ -385,8 +382,8 @@ impl<T: MiscDevice> MiscdeviceVTable<T> {
         let file = unsafe { LocalFile::from_raw_file(file) };
 
         match T::llseek(device, file, offset, whence) {
-            Ok(res) => res as loff_t,
-            Err(err) => err.to_errno() as loff_t,
+            Ok(res) => res,
+            Err(err) => err.to_errno() as Offset,
         }
     }
 

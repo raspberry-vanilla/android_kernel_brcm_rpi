@@ -1971,7 +1971,7 @@ static bool module_handle_guest_trng(struct kvm_vcpu *vcpu)
 }
 
 
-static bool is_standard_secure_service_call(u64 func_id)
+static bool is_standard_secure_service_call(u32 func_id)
 {
 	return (func_id >= PSCI_0_2_FN_BASE && func_id <= ARM_CCA_FUNC_END) ||
 	       (func_id >= PSCI_0_2_FN64_BASE && func_id <= ARM_CCA_64BIT_FUNC_END);

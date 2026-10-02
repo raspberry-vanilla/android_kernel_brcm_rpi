@@ -12,3 +12,11 @@ config DMABUF_HEAPS_CMA
 	  Choose this option to enable dma-buf CMA heap. This heap is backed
 	  by the Contiguous Memory Allocator (CMA). If your system has these
 	  regions, you should say Y here.
+
+config DMABUF_HEAPS_TEGRA_VPR_INIT
+	bool "NVIDIA Tegra VPR reserved-memory initialization"
+	depends on DMABUF_HEAPS && DMA_CMA
+	help
+	  Initialize the reserved-memory region used by the NVIDIA Tegra Video
+	  Protection Region (VPR). This must be built into the kernel so a
+	  vendor module can provide the VPR DMA-BUF heap after early boot.

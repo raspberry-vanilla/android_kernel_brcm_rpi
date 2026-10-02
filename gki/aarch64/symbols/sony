@@ -1,0 +1,6 @@
+[abi_symbol_list]
+  __traceiter_android_vh_printk_console_emit_next_record
+  __tracepoint_android_vh_printk_console_emit_next_record
+  tracepoint_probe_register
+  tracepoint_probe_unregister
+  strcmp

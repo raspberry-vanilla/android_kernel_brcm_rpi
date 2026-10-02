@@ -471,13 +471,15 @@ static int tegra_hsp_mailbox_send_data(struct mbox_chan *chan, void *data)
 
 	mb->ops->send(&mb->channel, data);
 
-	/* enable EMPTY interrupt for the shared mailbox */
-	spin_lock_irqsave(&hsp->lock, flags);
+	/* enable EMPTY interrupt for the shared mailbox (if IRQs available) */
+	if (hsp->shared_irqs) {
+		spin_lock_irqsave(&hsp->lock, flags);
 
-	hsp->mask |= BIT(HSP_INT_EMPTY_SHIFT + mb->index);
-	tegra_hsp_writel(hsp, hsp->mask, HSP_INT_IE(hsp->shared_irq));
+		hsp->mask |= BIT(HSP_INT_EMPTY_SHIFT + mb->index);
+		tegra_hsp_writel(hsp, hsp->mask, HSP_INT_IE(hsp->shared_irq));
 
-	spin_unlock_irqrestore(&hsp->lock, flags);
+		spin_unlock_irqrestore(&hsp->lock, flags);
+	}
 
 	return 0;
 }
@@ -497,7 +499,7 @@ static int tegra_hsp_mailbox_flush(struct mbox_chan *chan,
 			mbox_chan_txdone(chan, 0);
 
 			/* Wait until channel is empty */
-			if (chan->active_req != NULL)
+			if (chan->active_req != MBOX_NO_MSG)
 				continue;
 
 			return 0;
@@ -527,18 +529,22 @@ static int tegra_hsp_mailbox_startup(struct mbox_chan *chan)
 	 * EMPTY interrupts are level-triggered, so keeping EMPTY interrupts
 	 * enabled all the time would cause an interrupt storm while mailboxes
 	 * are idle.
+	 *
+	 * TX channels without shared_irqs use polling, skip IRQ setup.
 	 */
 
-	spin_lock_irqsave(&hsp->lock, flags);
+	if (hsp->shared_irqs) {
+		spin_lock_irqsave(&hsp->lock, flags);
 
-	if (mb->producer)
-		hsp->mask &= ~BIT(HSP_INT_EMPTY_SHIFT + mb->index);
-	else
-		hsp->mask |= BIT(HSP_INT_FULL_SHIFT + mb->index);
+		if (mb->producer)
+			hsp->mask &= ~BIT(HSP_INT_EMPTY_SHIFT + mb->index);
+		else
+			hsp->mask |= BIT(HSP_INT_FULL_SHIFT + mb->index);
 
-	tegra_hsp_writel(hsp, hsp->mask, HSP_INT_IE(hsp->shared_irq));
+		tegra_hsp_writel(hsp, hsp->mask, HSP_INT_IE(hsp->shared_irq));
 
-	spin_unlock_irqrestore(&hsp->lock, flags);
+		spin_unlock_irqrestore(&hsp->lock, flags);
+	}
 
 	if (hsp->soc->has_per_mb_ie) {
 		if (mb->producer)
@@ -568,16 +574,19 @@ static void tegra_hsp_mailbox_shutdown(struct mbox_chan *chan)
 						 HSP_SM_SHRD_MBOX_FULL_INT_IE);
 	}
 
-	spin_lock_irqsave(&hsp->lock, flags);
+	/* TX channels without shared_irqs use polling, skip IRQ setup */
+	if (hsp->shared_irqs) {
+		spin_lock_irqsave(&hsp->lock, flags);
 
-	if (mb->producer)
-		hsp->mask &= ~BIT(HSP_INT_EMPTY_SHIFT + mb->index);
-	else
-		hsp->mask &= ~BIT(HSP_INT_FULL_SHIFT + mb->index);
+		if (mb->producer)
+			hsp->mask &= ~BIT(HSP_INT_EMPTY_SHIFT + mb->index);
+		else
+			hsp->mask &= ~BIT(HSP_INT_FULL_SHIFT + mb->index);
 
-	tegra_hsp_writel(hsp, hsp->mask, HSP_INT_IE(hsp->shared_irq));
+		tegra_hsp_writel(hsp, hsp->mask, HSP_INT_IE(hsp->shared_irq));
 
-	spin_unlock_irqrestore(&hsp->lock, flags);
+		spin_unlock_irqrestore(&hsp->lock, flags);
+	}
 }
 
 static const struct mbox_chan_ops tegra_hsp_sm_ops = {
@@ -636,7 +645,14 @@ static struct mbox_chan *tegra_hsp_sm_xlate(struct mbox_controller *mbox,
 	index = args->args[1] & TEGRA_HSP_SM_MASK;
 
 	if ((type & HSP_MBOX_TYPE_MASK) != TEGRA_HSP_MBOX_TYPE_SM ||
-	    !hsp->shared_irqs || index >= hsp->num_sm)
+	    index >= hsp->num_sm)
+		return ERR_PTR(-ENODEV);
+
+	/*
+	 * For RX channels, shared_irqs is required to receive interrupts.
+	 * For TX channels, polling is used so shared_irqs is not required.
+	 */
+	if (!hsp->shared_irqs && !(args->args[1] & TEGRA_HSP_SM_FLAG_TX))
 		return ERR_PTR(-ENODEV);
 
 	mb = &hsp->mailboxes[index];
@@ -836,13 +852,11 @@ static int tegra_hsp_probe(struct platform_device *pdev)
 	if (!hsp->mbox_sm.chans)
 		return -ENOMEM;
 
-	if (hsp->shared_irqs) {
-		err = tegra_hsp_add_mailboxes(hsp, &pdev->dev);
-		if (err < 0) {
-			dev_err(&pdev->dev, "failed to add mailboxes: %d\n",
-			        err);
-			return err;
-		}
+	/* Always allocate mailboxes - TX channels can work without shared_irqs */
+	err = tegra_hsp_add_mailboxes(hsp, &pdev->dev);
+	if (err < 0) {
+		dev_err(&pdev->dev, "failed to add mailboxes: %d\n", err);
+		return err;
 	}
 
 	err = devm_mbox_controller_register(&pdev->dev, &hsp->mbox_sm);

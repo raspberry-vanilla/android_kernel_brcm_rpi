@@ -585,6 +585,22 @@ static int cmd_show_service_indicators(int argc, char *argv[])
 }
 
 /* ---------------------------------------------------------------------------
+ *			    test_zeroization command
+ * ---------------------------------------------------------------------------*/
+
+static int cmd_test_zeroization(int argc, char *argv[])
+{
+	int ret = fips140_ioctl(FIPS140_IOCTL_TEST_ZEROIZATION, NULL);
+
+	if (ret < 0)
+		die_errno("FIPS140_IOCTL_TEST_ZEROIZATION unexpectedly failed");
+	if (ret != 1)
+		die("Zeroization test failed!  See dmesg for details.");
+	printf("All zeroization tests passed.  See dmesg for details.\n");
+	return 0;
+}
+
+/* ---------------------------------------------------------------------------
  *				     main()
  * ---------------------------------------------------------------------------*/
 
@@ -596,6 +612,7 @@ static const struct command {
 	{ "show_invalid_inputs", cmd_show_invalid_inputs },
 	{ "show_module_version", cmd_show_module_version },
 	{ "show_service_indicators", cmd_show_service_indicators },
+	{ "test_zeroization", cmd_test_zeroization },
 };
 
 static void usage(void)
@@ -606,6 +623,7 @@ static void usage(void)
 "       fips140_lab_util show_invalid_inputs\n"
 "       fips140_lab_util show_module_version\n"
 "       fips140_lab_util show_service_indicators [SERVICE]...\n"
+"       fips140_lab_util test_zeroization\n"
 "\n"
 "Options for dump_jitterentropy:\n"
 "  --amount=AMOUNT      Amount to dump in bytes per iteration (default 128)\n"

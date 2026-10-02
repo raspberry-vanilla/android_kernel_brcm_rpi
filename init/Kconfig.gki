@@ -3,6 +3,7 @@ config GKI_HIDDEN_DRM_CONFIGS
 	select DRM_KMS_HELPER if (HAS_IOMEM && DRM)
 	select DRM_GEM_SHMEM_HELPER if (DRM)
 	select DRM_MIPI_DSI
+	select TEGRA_HOST1X_CONTEXT_BUS
 	select DRM_TTM if (HAS_IOMEM && DRM)
 	select DRM_BRIDGE_CONNECTOR
 	select DRM_DISPLAY_DP_HELPER
@@ -45,6 +46,7 @@ config GKI_HIDDEN_CRYPTO_CONFIGS
 
 config GKI_HIDDEN_SND_CONFIGS
 	bool "Hidden SND configs needed for GKI"
+	select SND_HDA_ALIGNED_MMIO
 	select SND_COMPRESS_ACCEL
 	select SND_VMASTER
 	select SND_PCM_ELD

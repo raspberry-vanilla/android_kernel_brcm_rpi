@@ -104,7 +104,7 @@ static void dm_bufio_alloc_callback(struct dm_buffer *buf)
  */
 static sector_t verity_map_sector(struct dm_verity *v, sector_t bi_sector)
 {
-	return v->data_start + dm_target_offset(v->ti, bi_sector);
+	return dm_target_offset(v->ti, bi_sector);
 }
 
 /*
@@ -356,11 +356,11 @@ static int verity_verify_level(struct dm_verity *v, struct dm_verity_io *io,
 
 	if (static_branch_unlikely(&use_bh_wq_enabled) && io->in_bh) {
 		data = dm_bufio_get(v->bufio, hash_block, &buf);
-		if (data == NULL) {
+		if (IS_ERR_OR_NULL(data)) {
 			/*
-			 * In tasklet and the hash was not in the bufio cache.
-			 * Return early and resume execution from a work-queue
-			 * to read the hash from disk.
+			 * In softirq and the hash was not in the bufio cache.
+			 * Return early and resume execution from a kworker to
+			 * read the hash from disk.
 			 */
 			return -EAGAIN;
 		}
@@ -369,8 +369,24 @@ static int verity_verify_level(struct dm_verity *v, struct dm_verity_io *io,
 						&buf, bio_prio(bio));
 	}
 
-	if (IS_ERR(data))
-		return PTR_ERR(data);
+	if (IS_ERR(data)) {
+		if (skip_unverified)
+			return 1;
+		r = PTR_ERR(data);
+		data = dm_bufio_new(v->bufio, hash_block, &buf);
+		if (IS_ERR(data))
+			return r;
+		if (verity_fec_decode(v, io, DM_VERITY_BLOCK_TYPE_METADATA,
+				      want_digest, hash_block, data) == 0) {
+			aux = dm_bufio_get_aux_data(buf);
+			aux->hash_verified = 1;
+			goto release_ok;
+		} else {
+			dm_bufio_release(buf);
+			dm_bufio_forget(v->bufio, hash_block);
+			return r;
+		}
+	}
 
 	aux = dm_bufio_get_aux_data(buf);
 
@@ -391,17 +407,30 @@ static int verity_verify_level(struct dm_verity *v, struct dm_verity_io *io,
 		else if (static_branch_unlikely(&use_bh_wq_enabled) && io->in_bh) {
 			/*
 			 * Error handling code (FEC included) cannot be run in a
-			 * tasklet since it may sleep, so fallback to work-queue.
+			 * softirq since it may sleep, so fallback to a kworker.
 			 */
 			r = -EAGAIN;
 			goto release_ret_r;
-		} else if (verity_fec_decode(v, io, DM_VERITY_BLOCK_TYPE_METADATA,
-					     want_digest, hash_block, data) == 0) {
-			trace_android_vh_handle_add_fec_mismatch_blks(hash_block, v->data_dev->name);
-			aux->hash_verified = 1;
 		} else {
-			trace_android_vh_handle_metadata_error(v,
-				hash_block, io, want_digest);
+			trace_android_vh_handle_metadata_error(
+				v->data_dev->name, hash_block,
+				data, 1U << v->hash_dev_block_bits,
+				want_digest, io->tmp_digest, v->digest_size,
+				v->salt, v->salt_size,
+				DMV_ERROR_EVENT_PRE_FEC);
+			if (verity_fec_decode(v, io, DM_VERITY_BLOCK_TYPE_METADATA,
+					      want_digest, hash_block, data) == 0) {
+				trace_android_vh_handle_add_fec_mismatch_blks(
+					hash_block, v->data_dev->name);
+				aux->hash_verified = 1;
+				goto metadata_recovered;
+			}
+			trace_android_vh_handle_metadata_error(
+				v->data_dev->name, hash_block,
+				data, 1U << v->hash_dev_block_bits,
+				want_digest, io->tmp_digest, v->digest_size,
+				v->salt, v->salt_size,
+				DMV_ERROR_EVENT_FEC_FAILED);
 			if (verity_handle_err(v,
 					DM_VERITY_BLOCK_TYPE_METADATA,
 					hash_block)) {
@@ -415,8 +444,11 @@ static int verity_verify_level(struct dm_verity *v, struct dm_verity_io *io,
 				goto release_ret_r;
 			}
 		}
+metadata_recovered:
+		;
 	}
 
+release_ok:
 	data += offset;
 	memcpy(want_digest, data, v->digest_size);
 	r = 0;
@@ -518,8 +550,8 @@ static int verity_handle_data_hash_mismatch(struct dm_verity *v,
 
 	if (static_branch_unlikely(&use_bh_wq_enabled) && io->in_bh) {
 		/*
-		 * Error handling code (FEC included) cannot be run in the
-		 * BH workqueue, so fallback to a standard workqueue.
+		 * Error handling code (FEC included) cannot be run in a
+		 * softirq since it may sleep, so fallback to a kworker.
 		 */
 		return -EAGAIN;
 	}
@@ -528,16 +560,25 @@ static int verity_handle_data_hash_mismatch(struct dm_verity *v,
 			set_bit(blkno, v->validated_blocks);
 		return 0;
 	}
-#if defined(CONFIG_DM_VERITY_FEC)
+	trace_android_vh_handle_data_error(
+		v->data_dev->name, blkno,
+		data, 1U << v->data_dev_block_bits,
+		want_digest, block->real_digest, v->digest_size,
+		v->salt, v->salt_size,
+		DMV_ERROR_EVENT_PRE_FEC);
 	if (verity_fec_decode(v, io, DM_VERITY_BLOCK_TYPE_DATA, want_digest,
 			      blkno, data) == 0) {
 		trace_android_vh_handle_add_fec_mismatch_blks(blkno, v->data_dev->name);
 		return 0;
 	}
-#endif
 	if (bio->bi_status)
 		return -EIO; /* Error correction failed; Just return error */
-	trace_android_vh_handle_data_error(v, blkno, io, data, want_digest);
+	trace_android_vh_handle_data_error(
+		v->data_dev->name, blkno,
+		data, 1U << v->data_dev_block_bits,
+		want_digest, io->tmp_digest, v->digest_size,
+		v->salt, v->salt_size,
+		DMV_ERROR_EVENT_FEC_FAILED);
 	if (verity_handle_err(v, DM_VERITY_BLOCK_TYPE_DATA, blkno)) {
 		io->had_mismatch = true;
 		dm_audit_log_bio(DM_MSG_PREFIX, "verify-data", bio, blkno, 0);
@@ -610,8 +651,8 @@ static int verity_verify_io(struct dm_verity_io *io)
 
 	if (static_branch_unlikely(&use_bh_wq_enabled) && io->in_bh) {
 		/*
-		 * Copy the iterator in case we need to restart
-		 * verification in a work-queue.
+		 * Copy the iterator in case we need to restart verification in
+		 * a kworker.
 		 */
 		iter_copy = io->iter;
 		iter = &iter_copy;
@@ -619,7 +660,7 @@ static int verity_verify_io(struct dm_verity_io *io)
 		iter = &io->iter;
 
 	for (b = 0; b < io->n_blocks;
-	     b++, bio_advance_iter(bio, iter, block_size)) {
+	     b++, bio_advance_iter_single(bio, iter, block_size)) {
 		sector_t blkno = io->block + b;
 		struct pending_block *block;
 		bool is_zero;
@@ -710,8 +751,7 @@ static void verity_finish_io(struct dm_verity_io *io, blk_status_t status)
 	bio->bi_end_io = io->orig_bi_end_io;
 	bio->bi_status = status;
 
-	if (!static_branch_unlikely(&use_bh_wq_enabled) || !io->in_bh)
-		verity_fec_finish_io(io);
+	verity_fec_finish_io(io);
 
 	if (unlikely(status != BLK_STS_OK) &&
 	    unlikely(!(bio->bi_opf & REQ_RAHEAD)) &&
@@ -745,13 +785,13 @@ static void verity_work(struct work_struct *w)
 
 static void verity_bh_work(struct work_struct *w)
 {
-	struct dm_verity_io *io = container_of(w, struct dm_verity_io, bh_work);
+	struct dm_verity_io *io = container_of(w, struct dm_verity_io, work);
 	int err;
 
 	io->in_bh = true;
 	err = verity_verify_io(io);
 	if (err == -EAGAIN || err == -ENOMEM) {
-		/* fallback to retrying with work-queue */
+		/* fallback to retrying in a kworker */
 		INIT_WORK(&io->work, verity_work);
 		queue_work(io->v->verify_wq, &io->work);
 		return;
@@ -784,10 +824,10 @@ static void verity_end_io(struct bio *bio)
 	if (static_branch_unlikely(&use_bh_wq_enabled) && io->v->use_bh_wq &&
 		verity_use_bh(bytes, ioprio)) {
 		if (in_hardirq() || irqs_disabled()) {
-			INIT_WORK(&io->bh_work, verity_bh_work);
-			queue_work(system_bh_wq, &io->bh_work);
+			INIT_WORK(&io->work, verity_bh_work);
+			queue_work(system_bh_wq, &io->work);
 		} else {
-			verity_bh_work(&io->bh_work);
+			verity_bh_work(&io->work);
 		}
 	} else {
 		INIT_WORK(&io->work, verity_work);
@@ -942,7 +982,7 @@ static void verity_status(struct dm_target *ti, status_type_t type,
 	case STATUSTYPE_INFO:
 		DMEMIT("%c", v->hash_failed ? 'C' : 'V');
 		if (verity_fec_is_enabled(v))
-			DMEMIT(" %lld", atomic64_read(verity_fec_corrected(v)));
+			DMEMIT(" %lld", atomic64_read(&v->fec->corrected));
 		else
 			DMEMIT(" -");
 		break;
@@ -1087,7 +1127,7 @@ static int verity_prepare_ioctl(struct dm_target *ti, struct block_device **bdev
 
 	*bdev = v->data_dev->bdev;
 
-	if (v->data_start || ti->len != bdev_nr_sectors(v->data_dev->bdev))
+	if (ti->len != bdev_nr_sectors(v->data_dev->bdev))
 		return 1;
 	return 0;
 }
@@ -1097,7 +1137,7 @@ static int verity_iterate_devices(struct dm_target *ti,
 {
 	struct dm_verity *v = ti->private;
 
-	return fn(ti, v->data_dev, v->data_start, ti->len, data);
+	return fn(ti, v->data_dev, 0, ti->len, data);
 }
 
 static void verity_io_hints(struct dm_target *ti, struct queue_limits *limits)
@@ -1762,7 +1802,7 @@ static int verity_ctr(struct dm_target *ti, unsigned int argc, char **argv)
 	 * reducing wait times when reading from a dm-verity device.
 	 *
 	 * Also as required for the "try_verify_in_tasklet" feature: WQ_HIGHPRI
-	 * allows verify_wq to preempt softirq since verification in BH workqueue
+	 * allows verify_wq to preempt softirq since verification in softirq
 	 * will fall-back to using it for error handling (or if the bufio cache
 	 * doesn't have required hashes).
 	 */
@@ -1909,7 +1949,7 @@ static struct target_type verity_target = {
 	.name		= "verity",
 /* Note: the LSMs depend on the singleton and immutable features */
 	.features	= DM_TARGET_SINGLETON | DM_TARGET_IMMUTABLE,
-	.version	= {1, 10, 0},
+	.version	= {1, 11, 0},
 	.module		= THIS_MODULE,
 	.ctr		= verity_ctr,
 	.dtr		= verity_dtr,

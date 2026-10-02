@@ -2263,6 +2263,7 @@
   _raw_spin_lock_irq
   _raw_spin_lock_irqsave
   raw_spin_rq_lock_nested
+  raw_spin_rq_trylock
   raw_spin_rq_unlock
   _raw_spin_trylock
   _raw_spin_trylock_bh

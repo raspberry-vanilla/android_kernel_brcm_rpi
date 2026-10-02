@@ -192,13 +192,17 @@ static int kvm_vfio_assign_file(struct file *file)
 {
 	struct device *dev;
 	struct iommu_group *group;
+	int ret;
 
 	dev = kvm_vfio_file_get_device(file);
 	if (dev)
 		return kvm_arch_assign_device(dev);
 	group = kvm_vfio_file_iommu_group(file);
-	if (group)
-		return kvm_arch_assign_group(group);
+	if (group) {
+		ret = kvm_arch_assign_group(group);
+		iommu_group_put(group);
+		return ret;
+	}
 
 	return -ENODEV;
 }
@@ -214,8 +218,10 @@ static void kvm_vfio_reclaim_file(struct file *file)
 		return;
 	}
 	group = kvm_vfio_file_iommu_group(file);
-	if (group)
+	if (group) {
 		kvm_arch_reclaim_group(group);
+		iommu_group_put(group);
+	}
 }
 
 static int kvm_vfio_file_add(struct kvm_device *dev, unsigned int fd)
@@ -251,8 +257,10 @@ static int kvm_vfio_file_add(struct kvm_device *dev, unsigned int fd)
 	}
 
 	ret = kvm_vfio_assign_file(filp);
-	if (ret)
+	if (ret) {
+		kfree(kvf);
 		goto out_unlock;
+	}
 
 	kvf->file = get_file(filp);
 	list_add_tail(&kvf->node, &kv->file_list);

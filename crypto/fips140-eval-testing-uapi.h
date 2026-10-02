@@ -27,4 +27,10 @@
  */
 #define FIPS140_IOCTL_MODULE_VERSION		_IOR('F', 1, char[256])
 
+/*
+ * Test zeroization.  The results are printed to the kernel log.  The return
+ * value is 1 if all tests passed, or 0 if any test failed.
+ */
+#define FIPS140_IOCTL_TEST_ZEROIZATION		_IO('F', 2)
+
 #endif /* _CRYPTO_FIPS140_EVAL_TESTING_H */

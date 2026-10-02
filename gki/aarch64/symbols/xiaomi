@@ -675,3 +675,7 @@ __tracepoint_android_vh_folio_end_writeback
 __traceiter_android_vh_folio_end_writeback
 __tracepoint_android_vh_folio_start_writeback
 __traceiter_android_vh_folio_start_writeback
+
+# required by mi-power.ko
+__traceiter_android_vh_try_to_freeze_abort
+__tracepoint_android_vh_try_to_freeze_abort

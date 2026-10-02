@@ -8,8 +8,8 @@ use kernel::{
     bindings,
     error::{from_err_ptr, to_result, Result},
     ffi::{c_int, c_ulong},
-    fs::file::{File, LocalFile},
-    miscdevice::{loff_t, IovIter},
+    fs::file::{File, LocalFile, Offset},
+    miscdevice::IovIter,
     mm::virt::{vm_flags_t, VmaNew},
     prelude::*,
     str::CStr,
@@ -24,7 +24,7 @@ use core::{
 /// # Safety
 ///
 /// Caller must ensure that access to the file position is properly synchronized.
-pub(crate) unsafe fn file_get_fpos(file: &LocalFile) -> loff_t {
+pub(crate) unsafe fn file_get_fpos(file: &LocalFile) -> Offset {
     // SAFETY: Caller ensures that this is okay.
     unsafe { (*file.as_ptr()).f_pos }
 }
@@ -32,7 +32,7 @@ pub(crate) unsafe fn file_get_fpos(file: &LocalFile) -> loff_t {
 /// # Safety
 ///
 /// Caller must ensure that access to the file position is properly synchronized.
-pub(crate) unsafe fn file_set_fpos(file: &LocalFile, pos: loff_t) {
+pub(crate) unsafe fn file_set_fpos(file: &LocalFile, pos: Offset) {
     // SAFETY: Caller ensures that this is okay.
     unsafe { (*file.as_ptr()).f_pos = pos };
 }
@@ -86,7 +86,7 @@ impl ShmemFile {
         &self.inner
     }
 
-    pub(crate) fn vfs_llseek(&self, offset: loff_t, whence: c_int) -> Result<loff_t> {
+    pub(crate) fn vfs_llseek(&self, offset: Offset, whence: c_int) -> Result<Offset> {
         // SAFETY: Just an FFI call. The file is valid.
         let ret = unsafe { bindings::vfs_llseek(self.inner.as_ptr(), offset, whence) };
 
@@ -97,14 +97,14 @@ impl ShmemFile {
         }
     }
 
-    pub(crate) fn vfs_iter_read(&self, iov: &mut IovIter, pos: &mut loff_t) -> Result<loff_t> {
+    pub(crate) fn vfs_iter_read(&self, iov: &mut IovIter, pos: &mut Offset) -> Result<Offset> {
         // SAFETY: Just an FFI call. The file and iov is valid.
         let ret = unsafe { bindings::vfs_iter_read(self.inner.as_ptr(), iov.as_raw(), pos, 0) };
 
         if ret < 0 {
             Err(Error::from_errno(ret as i32))
         } else {
-            Ok(ret as loff_t)
+            Ok(ret as Offset)
         }
     }
 

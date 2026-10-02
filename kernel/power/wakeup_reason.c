@@ -27,6 +27,7 @@
 #include <linux/notifier.h>
 #include <linux/suspend.h>
 #include <linux/slab.h>
+#include <linux/string.h>
 
 /*
  * struct wakeup_irq_node - stores data and relationships for IRQs logged as
@@ -274,27 +275,53 @@ static void print_wakeup_sources(void)
 {
 	struct wakeup_irq_node *n;
 	unsigned long flags;
+	int reason;
+	char non_irq_buf[MAX_SUSPEND_ABORT_LEN];
+	struct {
+		int irq;
+		char irq_name[MAX_WAKEUP_REASON_IRQ_NAME_LEN];
+	} irqs[8];
+	int count = 0;
+	bool truncated = false;
+	int i;
 
 	spin_lock_irqsave(&wakeup_reason_lock, flags);
 
 	capture_reasons = false;
+	reason = wakeup_reason;
 
-	if (wakeup_reason == RESUME_ABORT) {
-		pr_info("Abort: %s\n", non_irq_wake_reason);
-		spin_unlock_irqrestore(&wakeup_reason_lock, flags);
-		return;
+	if (reason == RESUME_ABORT || reason == RESUME_ABNORMAL) {
+		strscpy(non_irq_buf, non_irq_wake_reason, sizeof(non_irq_buf));
+	} else if (reason == RESUME_IRQ) {
+		list_for_each_entry(n, &leaf_irqs, siblings) {
+			if (count < ARRAY_SIZE(irqs)) {
+				irqs[count].irq = n->irq;
+				strscpy(irqs[count].irq_name, n->irq_name,
+					sizeof(irqs[count].irq_name));
+				count++;
+			} else {
+				truncated = true;
+			}
+		}
 	}
 
-	if (wakeup_reason == RESUME_IRQ && !list_empty(&leaf_irqs))
-		list_for_each_entry(n, &leaf_irqs, siblings)
-			pr_info("Resume caused by IRQ %d, %s\n", n->irq,
-				n->irq_name);
-	else if (wakeup_reason == RESUME_ABNORMAL)
-		pr_info("Resume caused by %s\n", non_irq_wake_reason);
-	else
-		pr_info("Resume cause unknown\n");
-
 	spin_unlock_irqrestore(&wakeup_reason_lock, flags);
+
+	if (truncated)
+		pr_warn_once("Truncated wakeup IRQ list (exceeded %zu)\n",
+			     ARRAY_SIZE(irqs));
+
+	if (reason == RESUME_ABORT) {
+		pr_info("Abort: %s\n", non_irq_buf);
+	} else if (reason == RESUME_IRQ && count > 0) {
+		for (i = 0; i < count; i++)
+			pr_info("Resume caused by IRQ %d, %s\n", irqs[i].irq,
+				irqs[i].irq_name);
+	} else if (reason == RESUME_ABNORMAL) {
+		pr_info("Resume caused by %s\n", non_irq_buf);
+	} else {
+		pr_info("Resume cause unknown\n");
+	}
 }
 
 static ssize_t last_resume_reason_show(struct kobject *kobj,
@@ -350,11 +377,17 @@ static ssize_t last_suspend_time_show(struct kobject *kobj,
 	/* sleep_time = total_time - suspend_resume_time */
 	sleep_time = timespec64_sub(total_time, suspend_resume_time);
 
+	/* Prevent negative durations caused by mismatched clock interval races. */
+	if (suspend_resume_time.tv_sec < 0)
+		suspend_resume_time = ns_to_timespec64(0);
+	if (sleep_time.tv_sec < 0)
+		sleep_time = ns_to_timespec64(0);
+
 	/* Export suspend_resume_time and sleep_time in pair here. */
-	return sprintf(buf, "%llu.%09lu %llu.%09lu\n",
-		       (unsigned long long)suspend_resume_time.tv_sec,
+	return sprintf(buf, "%lld.%09ld %lld.%09ld\n",
+		       (long long)suspend_resume_time.tv_sec,
 		       suspend_resume_time.tv_nsec,
-		       (unsigned long long)sleep_time.tv_sec,
+		       (long long)sleep_time.tv_sec,
 		       sleep_time.tv_nsec);
 }
 

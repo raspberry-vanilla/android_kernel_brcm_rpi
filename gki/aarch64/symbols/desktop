@@ -2554,6 +2554,7 @@
   wake_up_var
   __warn_printk
   watchdog_init_timeout
+  watchdog_notify_pretimeout
   watchdog_set_restart_priority
   widget_in_list
   wireless_nlevent_flush

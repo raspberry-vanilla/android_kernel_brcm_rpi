@@ -42,6 +42,7 @@ _COMMON_GKI_MODULES_LIST = [
     "drivers/virtio/virtio_pci.ko",
     "drivers/virtio/virtio_pci_legacy_dev.ko",
     "drivers/virtio/virtio_pci_modern_dev.ko",
+    "drivers/watchdog/pretimeout_dump.ko",
     "kernel/kheaders.ko",
     "lib/crypto/libarc4.ko",
     "net/6lowpan/6lowpan.ko",

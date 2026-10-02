@@ -2769,7 +2769,7 @@
 			speculative reads from the non-secure world. Note that
 			modifying the host stage-2 page tables is likely to
 			impact performance.
-			Format: [ <bool> | full ]
+			Format: [ <bool> | full ][,nr_handles=<size>]
 			Default: false
 
 			off: (default) Do not unmap host stage-2 memory on FF-A
@@ -2786,8 +2786,19 @@
 			      when donating and reclaiming memory. This is
 			      slower than "on".
 
+			nr_handles=<size>: Number of FF-A SPM handles to reserve
+			      memory for when "on" or "full" mode is active. Each
+			      handle tracks one memory region lent through FF-A
+			      that needs unmapping/remapping. Raise this if the
+			      handle pool is exhausted under heavy secure-world
+			      usage (e.g. secure video playback).
+			      Default: 1024.
+
 			Specifying "kvm-arm.ffa-unmap-on-lend" without a value
 			enables the parameter in standard "on" mode.
+
+			Options may be combined in a comma separated list, e.g.
+			"kvm-arm.ffa-unmap-on-lend=on,nr_handles=2048".
 
 	kvm-arm.hyp_lm_size_mb=
 			[KVM,ARM,EARLY] Maximum amount of contiguous memory mappable in

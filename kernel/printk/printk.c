@@ -3099,10 +3099,13 @@ static bool console_emit_next_record(struct console *con, bool *handover, int co
 		.pbufs = &printk_shared_pbufs,
 	};
 	unsigned long flags;
+	bool may_suppress = true;
 
 	*handover = false;
 
-	if (!printk_get_next_message(&pmsg, con->seq, is_extended, true))
+	trace_android_vh_printk_console_emit_next_record(con, &may_suppress);
+
+	if (!printk_get_next_message(&pmsg, con->seq, is_extended, may_suppress))
 		return false;
 
 	con->dropped += pmsg.dropped;

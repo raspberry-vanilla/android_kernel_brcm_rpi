@@ -1545,6 +1545,12 @@ static inline struct fuse_backing *fuse_backing_get(struct fuse_backing *fb)
 static inline void fuse_backing_put(struct fuse_backing *fb)
 {
 }
+
+static inline int fuse_passthrough_fadvise(struct fuse_file *ff, loff_t offset,
+					   loff_t len, int advice)
+{
+	return -EOPNOTSUPP;
+}
 #endif
 
 void fuse_backing_files_init(struct fuse_conn *fc);
@@ -1575,6 +1581,7 @@ ssize_t fuse_passthrough_splice_write(struct pipe_inode_info *pipe,
 				      struct file *out, loff_t *ppos,
 				      size_t len, unsigned int flags);
 ssize_t fuse_passthrough_mmap(struct file *file, struct vm_area_struct *vma);
+int fuse_passthrough_fadvise(struct fuse_file *ff, loff_t offset, loff_t len, int advice);
 
 /* backing.c */
 

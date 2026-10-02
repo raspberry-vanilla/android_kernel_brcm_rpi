@@ -287,6 +287,49 @@ type 'struct fscrypt_master_key' changed
   6 members ('struct list_head mk_decrypted_inodes' .. 'bool mk_present') changed
     offset changed by 64
 
+function symbol changed from 'int __traceiter_android_vh_handle_data_error(void*, struct dm_verity*, sector_t, struct dm_verity_io*, const u8*, const u8*)' to 'int __traceiter_android_vh_handle_data_error(void*, const char*, sector_t, const u8*, unsigned int, const u8*, const u8*, unsigned int, const u8*, unsigned int, unsigned int)'
+  CRC changed from 0x7d7436fe to 0x8dd9151b
+  type changed from 'int(void*, struct dm_verity*, sector_t, struct dm_verity_io*, const u8*, const u8*)' to 'int(void*, const char*, sector_t, const u8*, unsigned int, const u8*, const u8*, unsigned int, const u8*, unsigned int, unsigned int)'
+    parameter 2 type changed from 'struct dm_verity*' to 'const char*'
+      pointed-to type changed from 'struct dm_verity' to 'const char'
+        qualifier const added
+        underlying type changed from 'struct dm_verity' to 'char'
+    parameter 4 type changed from 'struct dm_verity_io*' to 'const u8*'
+      pointed-to type changed from 'struct dm_verity_io' to 'const u8'
+        qualifier const added
+        underlying type changed from 'struct dm_verity_io' to 'u8' = '__u8' = 'unsigned char'
+          resolved type changed from 'struct dm_verity_io' to 'unsigned char'
+    parameter 5 type changed from 'const u8*' to 'unsigned int'
+    parameter 7 of type 'const u8*' was added
+    parameter 8 of type 'unsigned int' was added
+    parameter 9 of type 'const u8*' was added
+    parameter 10 of type 'unsigned int' was added
+    parameter 11 of type 'unsigned int' was added
+
+function symbol changed from 'int __traceiter_android_vh_handle_metadata_error(void*, struct dm_verity*, sector_t, struct dm_verity_io*, const u8*)' to 'int __traceiter_android_vh_handle_metadata_error(void*, const char*, sector_t, const u8*, unsigned int, const u8*, const u8*, unsigned int, const u8*, unsigned int, unsigned int)'
+  CRC changed from 0xec6001f1 to 0x8dd9151b
+  type changed from 'int(void*, struct dm_verity*, sector_t, struct dm_verity_io*, const u8*)' to 'int(void*, const char*, sector_t, const u8*, unsigned int, const u8*, const u8*, unsigned int, const u8*, unsigned int, unsigned int)'
+    parameter 2 type changed from 'struct dm_verity*' to 'const char*'
+      pointed-to type changed from 'struct dm_verity' to 'const char'
+        qualifier const added
+        underlying type changed from 'struct dm_verity' to 'char'
+    parameter 4 type changed from 'struct dm_verity_io*' to 'const u8*'
+      pointed-to type changed from 'struct dm_verity_io' to 'const u8'
+        qualifier const added
+        underlying type changed from 'struct dm_verity_io' to 'u8' = '__u8' = 'unsigned char'
+          resolved type changed from 'struct dm_verity_io' to 'unsigned char'
+    parameter 5 type changed from 'const u8*' to 'unsigned int'
+    parameter 6 of type 'const u8*' was added
+    parameter 7 of type 'const u8*' was added
+    parameter 8 of type 'unsigned int' was added
+    parameter 9 of type 'const u8*' was added
+    parameter 10 of type 'unsigned int' was added
+    parameter 11 of type 'unsigned int' was added
+
+type 'struct kvm_iommu_driver' changed
+  member 'u64 __kabi_reserved1' was removed
+  member 'union { int(* get_iommu_endpoint)(struct of_phandle_args*, u64*); struct { u64 __kabi_reserved1; }; union { }; }' was added
+
 type 'struct fscrypt_master_key' changed
   byte size changed from 872 to 368
   member changed from 'struct key* mk_users' to 'struct list_head mk_users'

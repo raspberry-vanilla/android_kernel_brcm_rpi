@@ -432,12 +432,14 @@ static void cma_debug_show_areas(struct cma *cma)
 	spin_unlock_irq(&cma->lock);
 }
 
-struct page *__cma_alloc(struct cma *cma, unsigned long count,
-				unsigned int align, gfp_t gfp)
+static struct page *__cma_alloc_range(struct cma *cma, unsigned long count,
+				      unsigned int align, gfp_t gfp,
+				      unsigned long range_start,
+				      unsigned long range_end, bool fixed)
 {
 	unsigned long mask, offset;
 	unsigned long pfn = -1;
-	unsigned long start = 0;
+	unsigned long start = range_start;
 	unsigned long bitmap_maxno, bitmap_no, bitmap_count;
 	unsigned long i;
 	struct page *page = NULL;
@@ -452,8 +454,10 @@ struct page *__cma_alloc(struct cma *cma, unsigned long count,
 		(gfp & ~(GFP_KERNEL|__GFP_NOWARN|__GFP_NORETRY)) != 0))
 		return page;
 
-	trace_android_vh_cma_alloc_bypass(cma, count, align, gfp,
-				&page, &bypass);
+	/* A fixed-offset allocation must not be redirected by a vendor hook. */
+	if (!fixed)
+		trace_android_vh_cma_alloc_bypass(cma, count, align, gfp,
+					&page, &bypass);
 	trace_android_vh_cma_alloc_start(cma);
 
 	if (bypass)
@@ -464,18 +468,20 @@ struct page *__cma_alloc(struct cma *cma, unsigned long count,
 	if (!cma || !cma->count || !cma->bitmap)
 		return page;
 
-	pr_debug("%s(cma %p, name: %s, count %lu, align %d)\n", __func__,
-		(void *)cma, cma->name, count, align);
+	pr_debug("%s(cma %p, name: %s, count %lu, align %d, start %lu, end %lu)\n",
+		 __func__, (void *)cma, cma->name, count, align,
+		 range_start, range_end);
 
 	if (!count)
 		return page;
 
 	mask = cma_bitmap_aligned_mask(cma, align);
 	offset = cma_bitmap_aligned_offset(cma, align);
-	bitmap_maxno = cma_bitmap_maxno(cma);
+	bitmap_maxno = range_end ? range_end : cma_bitmap_maxno(cma);
 	bitmap_count = cma_bitmap_pages_to_bits(cma, count);
 
-	if (bitmap_count > bitmap_maxno)
+	if (range_start > bitmap_maxno ||
+	    bitmap_count > bitmap_maxno - range_start)
 		return page;
 
 	trace_android_vh_cma_alloc_retry(cma->name, &max_retries);
@@ -486,12 +492,15 @@ struct page *__cma_alloc(struct cma *cma, unsigned long count,
 				bitmap_maxno, start, bitmap_count, mask,
 				offset);
 #ifdef CONFIG_ANDROID_VENDOR_OEM_DATA
-		trace_android_rvh_bitmap_find_best_next_area(cma->bitmap,
-				bitmap_maxno, start, bitmap_count, mask,
-				offset, &bitmap_no, cma->android_vendor_data1);
+		if (!fixed)
+			trace_android_rvh_bitmap_find_best_next_area(cma->bitmap,
+					bitmap_maxno, start, bitmap_count, mask,
+					offset, &bitmap_no,
+					cma->android_vendor_data1);
 #endif
 		if (bitmap_no >= bitmap_maxno) {
-			if ((num_attempts < max_retries) && (ret == -EBUSY)) {
+			if (!fixed && (num_attempts < max_retries) &&
+			    (ret == -EBUSY)) {
 				spin_unlock_irq(&cma->lock);
 
 				if (fatal_signal_pending(current) ||
@@ -505,7 +514,7 @@ struct page *__cma_alloc(struct cma *cma, unsigned long count,
 				 * fork and so cannot be freed there. Sleep
 				 * for 100ms and retry the allocation.
 				 */
-				start = 0;
+				start = range_start;
 				ret = -ENOMEM;
 				schedule_timeout_killable(msecs_to_jiffies(100));
 				num_attempts++;
@@ -583,6 +592,12 @@ struct page *__cma_alloc(struct cma *cma, unsigned long count,
 
 	return page;
 }
+
+struct page *__cma_alloc(struct cma *cma, unsigned long count,
+			 unsigned int align, gfp_t gfp)
+{
+	return __cma_alloc_range(cma, count, align, gfp, 0, 0, false);
+}
 EXPORT_SYMBOL_GPL(__cma_alloc);
 
 /**
@@ -601,6 +616,42 @@ struct page *cma_alloc(struct cma *cma, unsigned long count,
 	return __cma_alloc(cma, count, align, GFP_KERNEL | (no_warn ? __GFP_NOWARN : 0));
 }
 EXPORT_SYMBOL_GPL(cma_alloc);
+
+/**
+ * cma_alloc_at() - allocate pages from a contiguous area at a fixed offset
+ * @cma: Contiguous memory region for which the allocation is performed.
+ * @offset: Offset of the first page from the start of the CMA region.
+ * @count: Requested number of pages.
+ * @no_warn: Avoid printing a message about a failed allocation.
+ *
+ * Return the first page of the requested range, or %NULL if that exact range
+ * cannot be allocated.
+ */
+struct page *cma_alloc_at(struct cma *cma, unsigned long offset,
+			  unsigned long count, bool no_warn)
+{
+	unsigned long bitmap_count, bitmap_start, bitmap_end;
+	unsigned long pages_per_bit;
+	gfp_t gfp = GFP_KERNEL | (no_warn ? __GFP_NOWARN : 0);
+
+	if (!cma || !cma->count || !cma->bitmap || !count)
+		return NULL;
+
+	pages_per_bit = 1UL << cma->order_per_bit;
+	if (offset & (pages_per_bit - 1))
+		return NULL;
+
+	if (offset >= cma->count || count > cma->count - offset)
+		return NULL;
+
+	bitmap_start = offset >> cma->order_per_bit;
+	bitmap_count = cma_bitmap_pages_to_bits(cma, count);
+	bitmap_end = bitmap_start + bitmap_count;
+
+	return __cma_alloc_range(cma, count, 0, gfp, bitmap_start,
+				 bitmap_end, true);
+}
+EXPORT_SYMBOL_GPL(cma_alloc_at);
 
 struct folio *cma_alloc_folio(struct cma *cma, int order, gfp_t gfp)
 {

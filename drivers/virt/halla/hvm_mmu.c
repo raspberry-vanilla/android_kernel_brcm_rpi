@@ -61,7 +61,7 @@ static int pin_one_page(struct hvm *vm, unsigned long hva, u64 gpa,
 		return -ENOMEM;
 
 	mmap_read_lock(mm);
-	ret = pin_user_pages(hva, 1, flags, &page);
+	ret = pin_user_pages_remote(mm, hva, 1, flags, &page, NULL);
 	mmap_read_unlock(mm);
 
 	if (ret != 1 || !page) {

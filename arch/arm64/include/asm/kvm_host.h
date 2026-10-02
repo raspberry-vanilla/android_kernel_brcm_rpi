@@ -1735,7 +1735,9 @@ struct kvm_iommu_driver {
 				   pkvm_handle_t *out_iommu, u32 *out_sid);
 	void *(*guest_alloc)(void *flags, unsigned long order);
 	void (*guest_free)(void *addr, void *flags, unsigned long order);
-	ANDROID_KABI_RESERVE(1);
+	ANDROID_KABI_USE(
+		1, int (*get_iommu_endpoint)(struct of_phandle_args *iommu_spec,
+					     u64 *out_endpoint));
 	ANDROID_KABI_RESERVE(2);
 	ANDROID_KABI_RESERVE(3);
 	ANDROID_KABI_RESERVE(4);
@@ -1752,6 +1754,7 @@ int kvm_iommu_init_hyp(struct kvm_iommu_ops *hyp_ops,
 int kvm_iommu_init_driver(void);
 void kvm_iommu_remove_driver(void);
 pkvm_handle_t kvm_get_iommu_id_by_of(struct device_node *np);
+int kvm_get_iommu_endpoint(struct of_phandle_args *iommu_spec, u64 *out_endpoint);
 
 struct page *kvm_iommu_cma_alloc(void);
 bool kvm_iommu_cma_release(struct page *p);

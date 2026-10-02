@@ -136,6 +136,7 @@
   arm_smccc_1_2_smc
   arm_smccc_get_version
   bus_register_notifier
+  bus_unregister_notifier
   __cpu_present_mask
   irq_dispose_mapping
   of_find_compatible_node
@@ -200,6 +201,9 @@
   set_user_nice
   wait_for_completion_timeout
 
+# required by trusty-ffa.ko
+  device_find_child_by_name
+
 # required by trusty-ipc.ko
   alloc_chrdev_region
   __arch_copy_from_user
@@ -216,9 +220,9 @@
   dma_buf_attach
   dma_buf_detach
   dma_buf_get
-  dma_buf_map_attachment
+  dma_buf_map_attachment_unlocked
   dma_buf_put
-  dma_buf_unmap_attachment
+  dma_buf_unmap_attachment_unlocked
   fget
   finish_wait
   fput
@@ -285,3 +289,7 @@
   hrtimer_init
   hrtimer_start_range_ns
   param_ops_ulong
+
+# preserved by --additions-only
+  dma_buf_map_attachment
+  dma_buf_unmap_attachment
