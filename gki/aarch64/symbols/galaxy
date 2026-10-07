@@ -21,6 +21,7 @@
   fixed_size_llseek
   flush_dcache_page
   free_hpage
+  free_hpage_order
   generic_file_read_iter
   generic_mii_ioctl
   generic_perform_write
@@ -53,6 +54,7 @@
   platform_get_ethdev_address
   prep_compound_page
   prep_new_hpage
+  prep_new_hpage_order
   proc_set_size
   proc_symlink
   pstore_register

@@ -1764,6 +1764,15 @@ static void handle___pkvm_iommu_register_ops(struct kvm_cpu_context *host_ctxt)
 	cpu_reg(host_ctxt, 2) = drv_id;
 }
 
+static void handle___pkvm_iommu_init_atomic_pool(struct kvm_cpu_context *host_ctxt)
+{
+	DECLARE_REG(unsigned long, mc_head, host_ctxt, 1);
+	DECLARE_REG(unsigned long, nr_pages, host_ctxt, 2);
+	struct kvm_hyp_memcache mc = {.head = mc_head, .nr_pages = nr_pages};
+
+	cpu_reg(host_ctxt, 1) = kvm_iommu_init_atomic_pool(&mc);
+}
+
 static void handle___pkvm_devices_init(struct kvm_cpu_context *host_ctxt)
 {
 	/*
@@ -2020,10 +2029,10 @@ static void handle___pkvm_pviommu_attach(struct kvm_cpu_context *host_ctxt)
 static void handle___pkvm_pviommu_add_vsid(struct kvm_cpu_context *host_ctxt)
 {
 	DECLARE_REG(struct kvm *, host_kvm, host_ctxt, 1);
-	DECLARE_REG(pkvm_handle_t, pviommu, host_ctxt, 2);
+	DECLARE_REG(int, pviommu, host_ctxt, 2);
 	DECLARE_REG(pkvm_handle_t, iommu, host_ctxt, 3);
-	DECLARE_REG(pkvm_handle_t, sid, host_ctxt, 4);
-	DECLARE_REG(pkvm_handle_t, vsid, host_ctxt, 5);
+	DECLARE_REG(u32, sid, host_ctxt, 4);
+	DECLARE_REG(u32, vsid, host_ctxt, 5);
 
 	cpu_reg(host_ctxt, 1) = pkvm_pviommu_add_vsid(host_kvm, pviommu, iommu, sid, vsid);
 }
@@ -2052,6 +2061,7 @@ static const hcall_t host_hcall[] = {
 	HANDLE_FUNC(__pkvm_init_module),
 	HANDLE_FUNC(__pkvm_register_hcall),
 	HANDLE_FUNC(__pkvm_iommu_register_ops),
+	HANDLE_FUNC(__pkvm_iommu_init_atomic_pool),
 	HANDLE_FUNC(__pkvm_devices_init),
 	HANDLE_FUNC(__pkvm_late_cpus_finalize),
 	HANDLE_FUNC(__pkvm_prot_finalize),

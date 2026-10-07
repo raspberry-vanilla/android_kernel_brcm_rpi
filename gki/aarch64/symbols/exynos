@@ -109,6 +109,8 @@
   cpufreq_unregister_notifier
   __cpuhp_remove_state
   __cpuhp_setup_state
+  __cpuhp_state_add_instance
+  __cpuhp_state_remove_instance
   cpuidle_get_cpu_driver
   __cpu_online_mask
   cpu_pm_register_notifier
@@ -217,6 +219,7 @@
   _dev_warn
   disable_irq
   disable_irq_nosync
+  disable_percpu_irq
   dma_alloc_attrs
   dma_buf_attach
   dma_buf_begin_cpu_access
@@ -318,6 +321,7 @@
   dump_stack
   __dynamic_pr_debug
   enable_irq
+  enable_percpu_irq
   eth_type_trans
   fd_install
   _find_first_bit
@@ -339,6 +343,7 @@
   __free_pages
   free_pages
   free_percpu
+  free_percpu_irq
   free_reserved_page
   freq_qos_add_request
   freq_qos_update_request
@@ -490,6 +495,7 @@
   kthread_create_worker_on_node
   kthread_delayed_work_timer_fn
   kthread_destroy_worker
+  kthread_flush_worker
   __kthread_init_worker
   kthread_mod_delayed_work
   kthread_park
@@ -557,7 +563,6 @@
   netif_receive_skb
   netif_rx
   netif_tx_wake_queue
-  net_ratelimit
   nla_memcpy
   nla_put
   nla_put_64bit
@@ -645,6 +650,8 @@
   pci_write_config_dword
   pcpu_alloc_noprof
   __per_cpu_offset
+  perf_aux_output_begin
+  perf_aux_output_end
   perf_aux_output_flag
   perf_get_aux
   perf_trace_buf_alloc
@@ -766,6 +773,7 @@
   request_firmware
   request_firmware_direct
   request_firmware_nowait
+  __request_percpu_irq
   __request_region
   request_threaded_irq
   return_address
@@ -1071,6 +1079,7 @@
   wakeup_source_register
   wakeup_source_unregister
   __warn_printk
+  work_busy
   __xa_alloc
   xa_destroy
   xa_erase
@@ -1111,6 +1120,7 @@
   netlink_unicast
   netlink_unregister_notifier
   net_ns_type_operations
+  net_ratelimit
   nla_find
   __nla_parse
   __nla_validate
@@ -1179,6 +1189,15 @@
   memremap
   of_reserved_mem_region_to_resource_byname
 
+# required by coresight-trbe.ko
+  irq_check_status_bit
+  irq_work_run
+  kvm_disable_trbe
+  kvm_enable_trbe
+  perf_aux_output_skip
+  platform_get_irq_affinity
+  this_cpu_has_cap
+
 # required by coresight.ko
   amba_bustype
   configfs_register_group
@@ -1198,8 +1217,6 @@
   of_graph_get_remote_endpoint
   of_graph_is_present
   of_graph_parse_endpoint
-  perf_aux_output_begin
-  perf_aux_output_end
   perf_pmu_register
   perf_pmu_unregister
   perf_report_aux_output_id
@@ -1612,6 +1629,7 @@
   component_unbind_all
   console_trylock
   debugfs_create_u64
+  devm_device_add_group
   devm_drm_panel_bridge_add_typed
   dma_fence_chain_ops
   dma_fence_chain_walk
@@ -1884,13 +1902,9 @@
   arm_smccc_1_2_smc
   arm_smccc_get_version
   bus_register_notifier
-  disable_percpu_irq
-  enable_percpu_irq
   free_pages_exact
-  free_percpu_irq
   irq_create_of_mapping
   irq_dispose_mapping
-  __request_percpu_irq
   sg_nents
   uuid_parse
 
@@ -1928,6 +1942,7 @@
   dma_fence_wait_any_timeout
   dma_resv_add_fence
   dma_resv_reserve_fences
+  down_write
   drm_dev_unplug
   drm_syncobj_add_point
   drm_syncobj_create
@@ -1977,6 +1992,7 @@
   __tracepoint_mmap_lock_start_locking
   unmap_mapping_range
   unpin_user_pages
+  up_write
   vmf_insert_pfn
   ww_mutex_lock
   ww_mutex_lock_interruptible
@@ -2073,10 +2089,8 @@
   __devm_release_region
   down_interruptible
   i3c_device_do_priv_xfers
-  kthread_flush_worker
   of_alias_get_highest_id
   of_find_node_by_phandle
-  of_get_next_child_with_prefix
   phy_configure
   phy_reset
   pinctrl_pm_select_default_state
@@ -2244,10 +2258,10 @@
 
 # required by scaler.ko
   dma_fence_default_wait
+  set_user_nice
   sg_nents_for_len
   v4l2_ctrl_handler_setup
   v4l2_m2m_try_schedule
-  work_busy
 
 # required by scsc_bt.ko
   crc_ccitt
@@ -2287,8 +2301,6 @@
   pci_unregister_driver
 
 # required by scsc_wlan.ko
-  __cpuhp_state_add_instance
-  __cpuhp_state_remove_instance
   dev_activate
   dev_alloc_name
   dev_change_flags
@@ -2554,5 +2566,7 @@
   mipi_dsi_create_packet
   mipi_dsi_dcs_write_buffer
   mipi_dsi_picture_parameter_set
+  of_get_next_child_with_prefix
   _raw_write_trylock
   regulator_get_optional
+  __trace_puts

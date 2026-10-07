@@ -2145,3 +2145,22 @@
   wireless_send_event
   xa_find
   xa_find_after
+  __traceiter_android_rvh_schedule_bug
+  __traceiter_android_rvh_irqs_disable
+  __traceiter_android_rvh_irqs_enable
+  __traceiter_android_rvh_preempt_disable
+  __traceiter_android_rvh_preempt_enable
+  __traceiter_android_rvh_cpuset_fork
+  __tracepoint_android_rvh_schedule_bug
+  __tracepoint_android_rvh_irqs_disable
+  __tracepoint_android_rvh_irqs_enable
+  __tracepoint_android_rvh_preempt_disable
+  __tracepoint_android_rvh_preempt_enable
+  __tracepoint_android_rvh_cpuset_fork
+  smpboot_unregister_percpu_thread
+  fs_kobj
+  snd_usb_find_suppported_substream
+  snd_usb_rediscover_devices
+  kthread_unuse_mm
+  snd_ctl_remove
+  snd_ctl_free_one

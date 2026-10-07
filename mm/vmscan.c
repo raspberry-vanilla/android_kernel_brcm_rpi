@@ -378,6 +378,13 @@ static inline bool can_reclaim_anon_pages(struct mem_cgroup *memcg,
 					  int nid,
 					  struct scan_control *sc)
 {
+	if (sc) {
+		bool skip = false;
+		trace_android_vh_can_reclaim_anon_pages(memcg, nid, sc->gfp_mask, &skip);
+		if (skip)
+			goto can_demote;
+	}
+
 	if (memcg == NULL) {
 		/*
 		 * For non-memcg reclaim, is there
@@ -396,6 +403,7 @@ static inline bool can_reclaim_anon_pages(struct mem_cgroup *memcg,
 	 *
 	 * Can it be reclaimed from this node via demotion?
 	 */
+can_demote:
 	return can_demote(nid, sc, memcg);
 }
 
@@ -5981,6 +5989,7 @@ static void shrink_lruvec(struct lruvec *lruvec, struct scan_control *sc)
 	struct blk_plug plug;
 	bool bypass = false;
 	bool shrink_bypass = false;
+	bool reclaim_target_exit = false;
 
 	if (lru_gen_enabled() && !root_reclaim(sc)) {
 		lru_gen_shrink_lruvec(lruvec, sc);
@@ -6033,6 +6042,12 @@ static void shrink_lruvec(struct lruvec *lruvec, struct scan_control *sc)
 		}
 
 		cond_resched();
+
+		trace_android_vh_reclaim_target_lruvec_exit(cgroup_reclaim(sc),
+					sc->nr_reclaimed, nr_reclaimed,
+					sc->nr_to_reclaim, &reclaim_target_exit);
+		if (reclaim_target_exit)
+			break;
 
 		if (nr_reclaimed < nr_to_reclaim || proportional_reclaim)
 			continue;
@@ -6202,6 +6217,7 @@ static void shrink_node_memcgs(pg_data_t *pgdat, struct scan_control *sc)
 		unsigned long scanned;
 		bool skip = false;
 		bool bypass = false;
+		bool skip_current_prio = false;
 
 		/*
 		 * This loop can become CPU-bound when target memcgs
@@ -6240,7 +6256,11 @@ static void shrink_node_memcgs(pg_data_t *pgdat, struct scan_control *sc)
 		reclaimed = sc->nr_reclaimed;
 		scanned = sc->nr_scanned;
 
-		shrink_lruvec(lruvec, sc);
+		trace_android_vh_scan_page_skip_current_prio(cgroup_reclaim(sc),
+				sc->priority, lruvec, sc->reclaim_idx,
+				&skip_current_prio);
+		if (!skip_current_prio)
+			shrink_lruvec(lruvec, sc);
 
 		shrink_slab(sc->gfp_mask, pgdat->node_id, memcg,
 			    sc->priority);

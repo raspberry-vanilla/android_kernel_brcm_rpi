@@ -2031,6 +2031,7 @@ int kvm_iommu_register_driver(struct kvm_iommu_driver *kern_ops,
 
 int kvm_iommu_init_driver(void);
 int kvm_iommu_register_hyp_ops(struct kvm_iommu_ops *hyp_ops, pkvm_handle_t *drv_id);
+int kvm_iommu_init_atomic_pool(struct kvm_hyp_memcache *atomic_mc);
 size_t kvm_iommu_pages(void);
 int kvm_get_iommu_id_by_of(struct device_node *np, pkvm_handle_t *out_id);
 int kvm_get_iommu_endpoint(struct of_phandle_args *iommu_spec, u64 *out_endpoint);

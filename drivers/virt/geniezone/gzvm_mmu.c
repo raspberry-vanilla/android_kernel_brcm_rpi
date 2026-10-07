@@ -85,7 +85,6 @@ static int pin_one_page(struct gzvm *vm, unsigned long hva, u64 gpa,
 	ppage->page = page;
 	ppage->ipa = gpa;
 
-	mutex_lock(&vm->mem_lock);
 	ret = gzvm_insert_ppage(vm, ppage);
 
 	/**
@@ -96,13 +95,24 @@ static int pin_one_page(struct gzvm *vm, unsigned long hva, u64 gpa,
 	 * allocated and pinned a page, while the subsequent VCPU attempts
 	 * to pin the same page again. As a result, we prompt the unpinning
 	 * and release of the allocated structure, followed by a return 0.
+	 * If the existing entry maps a different page (e.g. the HVA has been
+	 * remapped), fail with -EFAULT.
 	 */
 	if (ret == -EEXIST) {
+		struct gzvm_pinned_page *existing;
+		struct rb_node *node;
+
 		kfree(ppage);
 		unpin_user_pages(&page, 1);
+
+		node = rb_find((void *)gpa, &vm->pinned_pages, rb_ppage_cmp);
+		if (!node)
+			return -EFAULT;
+		existing = rb_entry(node, struct gzvm_pinned_page, node);
+		if (existing->page != page)
+			return -EFAULT;
 		ret = 0;
 	}
-	mutex_unlock(&vm->mem_lock);
 	*out_page = page;
 
 	return ret;
@@ -157,14 +167,22 @@ static int handle_single_demand_page(struct gzvm *vm, int memslot_id, u64 gfn)
 	int ret;
 	u64 pfn;
 
+	mutex_lock(&vm->mem_lock);
+
 	ret = gzvm_vm_allocate_guest_page(vm, &vm->memslot[memslot_id], gfn, &pfn);
-	if (unlikely(ret))
-		return -EFAULT;
+	if (unlikely(ret)) {
+		ret = -EFAULT;
+		goto err_unlock;
+	}
 
 	ret = gzvm_arch_map_guest(vm->vm_id, memslot_id, pfn, gfn, 1);
-	if (unlikely(ret))
-		return -EFAULT;
+	if (unlikely(ret)) {
+		ret = -EFAULT;
+		goto err_unlock;
+	}
 
+err_unlock:
+	mutex_unlock(&vm->mem_lock);
 	return ret;
 }
 
@@ -188,6 +206,7 @@ static int handle_block_demand_page(struct gzvm *vm, int memslot_id, u64 gfn)
 		end_gfn = base_gfn + total_pages;
 
 	mutex_lock(&vm->demand_paging_lock);
+	mutex_lock(&vm->mem_lock);
 	for (; start_gfn < end_gfn; start_gfn += nr_entries)  {
 		/*
 		 * If the start/end gfn of this demand paging block is outside the
@@ -217,6 +236,7 @@ static int handle_block_demand_page(struct gzvm *vm, int memslot_id, u64 gfn)
 		}
 	}
 err_unlock:
+	mutex_unlock(&vm->mem_lock);
 	mutex_unlock(&vm->demand_paging_lock);
 	return ret;
 }

@@ -449,6 +449,7 @@
   __dev_fwnode_const
   __dev_get_by_index
   dev_get_by_index
+  dev_get_by_name
   dev_get_regmap
   dev_get_stats
   dev_get_tstats64
@@ -593,6 +594,7 @@
   devres_destroy
   devres_find
   devres_free
+  dev_set_mtu
   dev_set_name
   dev_set_threaded
   dev_trans_start
@@ -1947,11 +1949,14 @@
   neigh_destroy
   __netdev_alloc_frag_align
   __netdev_alloc_skb
+  netdev_core_stats_inc
   netdev_err
   netdev_info
   netdev_printk
   netdev_reset_tc
   netdev_rss_key_fill
+  netdev_rx_handler_register
+  netdev_rx_handler_unregister
   netdev_set_default_ethtool_ops
   netdev_set_num_tc
   netdev_set_tc_queue
@@ -2622,6 +2627,7 @@
   security_sock_graft
   seq_buf_printf
   seq_escape_mem
+  seq_hex_dump
   seq_lseek
   seq_open
   __seq_open_private

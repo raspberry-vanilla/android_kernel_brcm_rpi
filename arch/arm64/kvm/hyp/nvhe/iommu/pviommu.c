@@ -17,6 +17,7 @@
 struct pviommu_guest_domain {
 	pkvm_handle_t		id;
 	struct list_head	list;
+	bool			allocated;
 };
 
 static DEFINE_HYP_SPINLOCK(pviommu_guest_domain_lock);
@@ -57,6 +58,22 @@ static void pkvm_guest_iommu_free_id(int domain_id)
 	guest_domains[domain_id / BITS_PER_LONG] &= ~(1UL << (domain_id % BITS_PER_LONG));
 }
 
+/* Find a domain ID that was handed out to this VM by alloc_domain(). */
+static struct pviommu_guest_domain *pkvm_guest_iommu_find_domain(struct pkvm_hyp_vm *vm,
+								 u64 domain_id)
+{
+	struct pviommu_guest_domain *guest_domain;
+
+	hyp_assert_lock_held(&pviommu_guest_domain_lock);
+
+	list_for_each_entry(guest_domain, &vm->domains, list) {
+		if (guest_domain->id == domain_id)
+			return guest_domain;
+	}
+
+	return NULL;
+}
+
 /*
  * check if vcpu has requested memory before
  */
@@ -82,6 +99,7 @@ static bool pkvm_guest_iommu_attach_dev(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exi
 	u64 pasid = smccc_get_arg4(vcpu);
 	u64 domain_id = smccc_get_arg5(vcpu);
 	u64 pasid_bits = smccc_get_arg6(vcpu);
+	struct pviommu_guest_domain *guest_domain;
 	struct pviommu_route route;
 	struct pkvm_hyp_vm *vm = pkvm_hyp_vcpu_to_hyp_vm(hyp_vcpu);
 
@@ -91,21 +109,34 @@ static bool pkvm_guest_iommu_attach_dev(struct pkvm_hyp_vcpu *hyp_vcpu, u64 *exi
 	iommu_id = route.iommu;
 	sid = route.sid;
 
-	ret = kvm_iommu_alloc_domain(pviommu_drv_id, iommu_id, domain_id, KVM_IOMMU_DOMAIN_ANY_TYPE);
-	if (ret == -ENOMEM) {
-		pkvm_pviommu_hyp_req(exit_code);
-		return false;
-	} else if (ret) {
-		goto out_ret;
+	hyp_spin_lock(&pviommu_guest_domain_lock);
+	guest_domain = pkvm_guest_iommu_find_domain(vm, domain_id);
+	if (!guest_domain) {
+		ret = -EINVAL;
+		goto out_unlock;
+	}
+
+	/*
+	 * The domain is allocated on the first attach as alloc_domain() has no
+	 * IOMMU to allocate it from.
+	 */
+	if (!guest_domain->allocated) {
+		ret = kvm_iommu_alloc_domain(pviommu_drv_id, iommu_id, domain_id,
+					     KVM_IOMMU_DOMAIN_ANY_TYPE);
+		if (ret)
+			goto out_unlock;
 	}
 
 	ret = kvm_iommu_attach_dev(iommu_id, domain_id, sid, pasid, pasid_bits, 0);
+	if (ret) {
+		if (!guest_domain->allocated)
+			WARN_ON(kvm_iommu_free_domain(domain_id));
+		goto out_unlock;
+	}
+
+out_unlock:
+	hyp_spin_unlock(&pviommu_guest_domain_lock);
 	if (ret == -ENOMEM) {
-		WARN_ON(kvm_iommu_free_domain(domain_id));
-		/*
-		 * The driver will request memory when returning -ENOMEM, so go back to host to
-		 * fulfill the request and repeat the HVC.
-		 */
 		pkvm_pviommu_hyp_req(exit_code);
 		return false;
 	}

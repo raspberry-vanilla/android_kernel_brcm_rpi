@@ -267,6 +267,8 @@
   devm_drm_of_get_bridge
   __devm_drm_panel_alloc
   devm_free_irq
+  devm_gpiochip_add_data_with_key
+  devm_gpiod_get
   devm_gpiod_get_optional
   devm_gpiod_put
   devm_iio_device_alloc
@@ -609,7 +611,9 @@
   freezer_active
   freezing_slow_path
   fwnode_get_child_node_count
+  fwnode_gpiod_get_index
   fwnode_handle_get
+  fwnode_irq_get_byname
   fwnode_property_present
   fwnode_property_read_string
   fwnode_property_read_u32_array
@@ -648,6 +652,7 @@
   gpiod_put
   gpiod_set_value
   gpiod_set_value_cansleep
+  gpiod_to_irq
   gro_receive_skb
   guid_gen
   guid_null
@@ -707,18 +712,27 @@
   i2c_add_adapter
   i2c_add_numbered_adapter
   i2c_bus_type
+  i2c_client_get_device_id
   i2c_del_adapter
   i2c_del_driver
   i2c_find_adapter_by_fwnode
   i2c_for_each_dev
   i2c_get_adapter
+  i2c_get_adapter_by_fwnode
   i2c_get_dma_safe_msg_buf
+  i2c_get_match_data
   i2c_match_id
+  i2c_new_client_device
   i2c_parse_fw_timings
   i2c_put_adapter
   i2c_put_dma_safe_msg_buf
   i2c_register_driver
+  i2c_smbus_read_block_data
   i2c_smbus_read_byte
+  i2c_smbus_read_byte_data
+  i2c_smbus_read_i2c_block_data
+  i2c_smbus_read_word_data
+  i2c_smbus_write_word_data
   __i2c_smbus_xfer
   i2c_smbus_xfer
   __i2c_transfer
@@ -987,6 +1001,7 @@
   of_drm_get_panel_orientation
   of_find_compatible_node
   of_find_device_by_node
+  of_find_node_by_name
   of_find_node_with_property
   of_find_property
   of_genpd_add_provider_onecell
@@ -997,6 +1012,8 @@
   of_get_mac_address
   of_get_next_available_child
   of_get_next_child
+  of_get_next_child_with_prefix
+  of_get_parent
   of_get_property
   of_graph_get_endpoint_by_regs
   of_graph_get_next_endpoint
@@ -1004,12 +1021,14 @@
   of_graph_get_remote_port_parent
   of_graph_is_present
   of_graph_parse_endpoint
+  of_i2c_get_board_info
   of_iomap
   of_irq_get_byname
   of_machine_compatible_match
   of_match_device
   of_match_node
   of_n_addr_cells
+  of_node_name_eq
   of_node_name_prefix
   of_n_size_cells
   of_nvmem_cell_get
@@ -1031,6 +1050,7 @@
   of_property_read_variable_u8_array
   of_prop_next_string
   of_prop_next_u32
+  of_regulator_get_optional
   of_reserved_mem_device_init_by_idx
   of_reserved_mem_device_release
   of_reserved_mem_lookup
@@ -1281,6 +1301,7 @@
   rproc_remove_subdev
   rproc_report_crash
   rsi_present
+  rtc_ktime_to_tm
   rtc_update_irq
   rt_mutex_lock
   rt_mutex_trylock
@@ -1821,6 +1842,7 @@
   vmf_insert_pfn_prot
   vm_get_page_prot
   vm_unmapped_area
+  vsnprintf
   vunmap
   vzalloc_noprof
   wait_for_completion

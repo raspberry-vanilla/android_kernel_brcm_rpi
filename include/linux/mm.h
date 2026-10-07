@@ -4432,7 +4432,10 @@ void prep_new_page(struct page *page, unsigned int order, gfp_t gfp_flags,
 							unsigned int alloc_flags);
 
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE
+void free_hpage_order(struct page *page, unsigned int order, int __bitwise fpi_flags);
 void free_hpage(struct page *page, int __bitwise fpi_flags);
+void prep_new_hpage_order(struct page *page, unsigned int order,
+			  gfp_t gfp_flags, unsigned int alloc_flags);
 void prep_new_hpage(struct page *page, gfp_t gfp_flags, unsigned int alloc_flags);
 void prep_compound_page(struct page *page, unsigned int order);
 #endif

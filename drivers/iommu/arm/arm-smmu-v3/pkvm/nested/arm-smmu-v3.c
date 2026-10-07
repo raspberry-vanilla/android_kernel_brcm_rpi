@@ -325,8 +325,12 @@ static void smmu_attach_stage_2(struct arm_smmu_ste *ste)
 
 	cfg = FIELD_GET(STRTAB_STE_0_CFG, ste->data[0]);
 	if (!FIELD_GET(STRTAB_STE_0_V, ste->data[0]) ||
-	    (cfg == STRTAB_STE_0_CFG_ABORT))
+	    (cfg == STRTAB_STE_0_CFG_ABORT)) {
+		ste->data[1] = 0;
+		ste->data[2] = 0;
+		ste->data[3] = 0;
 		return;
+	}
 	/* S2 is not advertised, that should never be attempted. */
 	if (WARN_ON(cfg == STRTAB_STE_0_CFG_NESTED))
 		return;

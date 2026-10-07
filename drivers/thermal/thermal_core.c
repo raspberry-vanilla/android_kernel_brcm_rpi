@@ -21,6 +21,8 @@
 #include <linux/of.h>
 #include <linux/suspend.h>
 
+#include <trace/hooks/thermal.h>
+
 #define CREATE_TRACE_POINTS
 #include "thermal_trace.h"
 
@@ -1450,6 +1452,7 @@ static int thermal_zone_init_governor(struct thermal_zone_device *tz)
 static void thermal_zone_init_complete(struct thermal_zone_device *tz)
 {
 	struct thermal_cooling_device *cdev;
+	int irq_wakeable = 0;
 
 	guard(mutex)(&thermal_list_lock);
 
@@ -1467,8 +1470,11 @@ static void thermal_zone_init_complete(struct thermal_zone_device *tz)
 	 * new thermal zone needs to be marked as suspended because
 	 * thermal_pm_notify() has run already.
 	 */
-	if (thermal_pm_suspended)
-		tz->state |= TZ_STATE_FLAG_SUSPENDED;
+	if (thermal_pm_suspended) {
+		trace_android_vh_thermal_pm_notify_suspend(tz, &irq_wakeable);
+		if (!irq_wakeable)
+			tz->state |= TZ_STATE_FLAG_SUSPENDED;
+	}
 
 	__thermal_zone_device_update(tz, THERMAL_EVENT_UNSPECIFIED);
 }
@@ -1825,13 +1831,19 @@ static void thermal_zone_pm_prepare(struct thermal_zone_device *tz)
 static void thermal_pm_notify_prepare(void)
 {
 	struct thermal_zone_device *tz;
+	int irq_wakeable = 0;
 
 	guard(mutex)(&thermal_list_lock);
 
 	thermal_pm_suspended = true;
 
-	list_for_each_entry(tz, &thermal_tz_list, node)
+	list_for_each_entry(tz, &thermal_tz_list, node) {
+		trace_android_vh_thermal_pm_notify_suspend(tz, &irq_wakeable);
+		if (irq_wakeable)
+			continue;
+
 		thermal_zone_pm_prepare(tz);
+	}
 }
 
 static void thermal_zone_pm_complete(struct thermal_zone_device *tz)
@@ -1853,13 +1865,19 @@ static void thermal_zone_pm_complete(struct thermal_zone_device *tz)
 static void thermal_pm_notify_complete(void)
 {
 	struct thermal_zone_device *tz;
+	int irq_wakeable = 0;
 
 	guard(mutex)(&thermal_list_lock);
 
 	thermal_pm_suspended = false;
 
-	list_for_each_entry(tz, &thermal_tz_list, node)
+	list_for_each_entry(tz, &thermal_tz_list, node) {
+		trace_android_vh_thermal_pm_notify_suspend(tz, &irq_wakeable);
+		if (irq_wakeable)
+			continue;
+
 		thermal_zone_pm_complete(tz);
+	}
 }
 
 static int thermal_pm_notify(struct notifier_block *nb,

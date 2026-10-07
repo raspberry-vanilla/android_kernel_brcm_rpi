@@ -854,12 +854,14 @@ static int smmu_dev_block_dma(pkvm_handle_t iommu, u32 sid, bool is_host2guest)
 	struct arm_smmu_ste *dst;
 	int ret = 0;
 
-
 	if (!smmu)
 		return -ENODEV;
 
 	kvm_smmu_lock(&smmu->common);
 	dst = smmu_get_ste_ptr(&smmu->common, sid);
+	/* If no STE allocated, device is blocked. */
+	if (!dst)
+		goto out_unlock;
 
 	/*
 	 * VFIO will attach the device to a blocking domain, this will make the
@@ -875,24 +877,29 @@ static int smmu_dev_block_dma(pkvm_handle_t iommu, u32 sid, bool is_host2guest)
 			ret = -EINVAL;
 		} else {
 			int i = 0;
+			u64 *cd_table = NULL;
+			size_t cd_sz = 0;
 			u32 cfg = FIELD_GET(STRTAB_STE_0_CFG, le64_to_cpu(dst->data[0]));
 
 			if (cfg == STRTAB_STE_0_CFG_S1_TRANS) {
-				size_t nr_entries, cd_sz;
-				u64 *cd_table;
+				size_t nr_entries;
 
 				cd_table = hyp_phys_to_virt(le64_to_cpu(dst->data[0]) & STRTAB_STE_0_S1CTXPTR_MASK);
 				nr_entries = 1 << FIELD_GET(STRTAB_STE_0_S1CDMAX, le64_to_cpu(dst->data[0]));
 				cd_sz = nr_entries * (CTXDESC_CD_DWORDS << 3);
-				kvm_iommu_reclaim_pages(cd_table, get_order(cd_sz));
 			}
 
-			for (i = 0; i < STRTAB_STE_DWORDS; i++)
-				dst->data[i] = 0;
-			ret = smmu_sync_ste(smmu, dst->data, sid);
+			WRITE_ONCE(dst->data[0], 0);
+			WARN_ON(smmu_sync_ste(smmu, dst->data, sid));
+			for (i = 1; i < STRTAB_STE_DWORDS; i++)
+				WRITE_ONCE(dst->data[i], 0);
+			WARN_ON(smmu_sync_ste(smmu, dst->data, sid));
+			if (cd_table)
+				kvm_iommu_reclaim_pages(cd_table, get_order(cd_sz));
 		}
 	}
 
+out_unlock:
 	kvm_smmu_unlock(&smmu->common);
 	return ret;
 }

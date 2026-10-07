@@ -1517,6 +1517,7 @@
   kvm_iommu_attach_dev_nested
   kvm_iommu_detach_dev
   kvm_iommu_free_domain
+  kvm_iommu_init_atomic_pool
   kvm_iommu_iotlb_inv_nested_domain
   kvm_iommu_iova_to_phys
   kvm_iommu_map_pages
@@ -2556,6 +2557,7 @@
   timer_delete_sync
   timer_init_key
   topology_update_hw_pressure
+  topup_hyp_memcache
   _totalram_pages
   touch_softlockup_watchdog
   trace_array_get_by_name

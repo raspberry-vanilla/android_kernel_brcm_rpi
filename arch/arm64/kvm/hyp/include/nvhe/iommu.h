@@ -73,6 +73,7 @@ struct kvm_iommu_ops {
 
 int kvm_iommu_init(void *pool_base, size_t nr_pages);
 int kvm_iommu_register_ops(struct kvm_iommu_ops *ops, pkvm_handle_t *drv_id);
+int kvm_iommu_init_atomic_pool(struct kvm_hyp_memcache *atomic_mc);
 
 int kvm_iommu_host_stage2_idmap(phys_addr_t start, phys_addr_t end,
 				 enum kvm_pgtable_prot prot);

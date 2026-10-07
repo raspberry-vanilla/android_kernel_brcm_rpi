@@ -351,6 +351,7 @@ int gzvm_vm_populate_mem_region(struct gzvm *gzvm, int slot_id)
 	int max_nr_consti, remain_pages;
 	u64 gfn, gfn_end;
 	u32 buf_size;
+	int ret = 0;
 
 	buf_size = PAGE_SIZE * 2;
 	region = alloc_pages_exact(buf_size, GFP_KERNEL);
@@ -365,6 +366,7 @@ int gzvm_vm_populate_mem_region(struct gzvm *gzvm, int slot_id)
 	gfn = memslot->base_gfn;
 	gfn_end = gfn + remain_pages;
 
+	mutex_lock(&gzvm->mem_lock);
 	while (gfn < gfn_end) {
 		int nr_pages;
 
@@ -376,8 +378,8 @@ int gzvm_vm_populate_mem_region(struct gzvm *gzvm, int slot_id)
 		if (nr_pages < 0) {
 			dev_err(gzvm->gzvm_drv->dev,
 				"Failed to fill constituents\n");
-			free_pages_exact(region, buf_size);
-			return -EFAULT;
+			ret = -EFAULT;
+			goto err_unlock;
 		}
 
 		region->gpa = PFN_PHYS(gfn);
@@ -389,13 +391,14 @@ int gzvm_vm_populate_mem_region(struct gzvm *gzvm, int slot_id)
 					    virt_to_phys(region))) {
 			dev_err(gzvm->gzvm_drv->dev,
 				"Failed to register memregion to hypervisor\n");
-			free_pages_exact(region, buf_size);
-			return -EFAULT;
+			ret = -EFAULT;
+			goto err_unlock;
 		}
 	}
+err_unlock:
+	mutex_unlock(&gzvm->mem_lock);
 	free_pages_exact(region, buf_size);
-
-	return 0;
+	return ret;
 }
 
 static int populate_all_mem_regions(struct gzvm *gzvm)

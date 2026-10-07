@@ -860,6 +860,7 @@ static int virtballoon_migratepage(struct balloon_dev_info *vb_dev_info,
 		return -EAGAIN;
 
 	get_page(newpage); /* balloon reference */
+	page_relinquish(newpage, 1);
 
 	/*
 	  * When we migrate a page to a different zone and adjusted the

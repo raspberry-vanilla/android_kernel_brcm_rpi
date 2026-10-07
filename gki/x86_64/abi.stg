@@ -274471,6 +274471,18 @@ function {
   parameter_id: 0x4585663f
 }
 function {
+  id: 0x11e1274d
+  return_type_id: 0x48b5725f
+  parameter_id: 0x0665e6b6
+  parameter_id: 0x3e10b518
+  parameter_id: 0x6720d32f
+  parameter_id: 0x6720d32f
+  parameter_id: 0x6720d32f
+  parameter_id: 0x391f15ea
+  parameter_id: 0xf435685e
+  parameter_id: 0x6d7f5ff6
+}
+function {
   id: 0x11e3d451
   return_type_id: 0x48b5725f
   parameter_id: 0x054f691a
@@ -304968,6 +304980,12 @@ function {
   parameter_id: 0x343ebce3
 }
 function {
+  id: 0xffa35209
+  return_type_id: 0x32a623d7
+  parameter_id: 0x0ca27481
+  parameter_id: 0x3e10b518
+}
+function {
   id: 0xffab65a0
   return_type_id: 0x9cb92037
   parameter_id: 0x35a4d504
@@ -312348,6 +312366,15 @@ elf_symbol {
   crc: 0x52332297
   type_id: 0xfec79391
   full_name: "dev_get_by_index"
+}
+elf_symbol {
+  id: 0x5240d831
+  name: "dev_get_by_name"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x0bc5fa09
+  type_id: 0xffa35209
+  full_name: "dev_get_by_name"
 }
 elf_symbol {
   id: 0x7921841c
@@ -331009,6 +331036,15 @@ elf_symbol {
   full_name: "seq_escape_mem"
 }
 elf_symbol {
+  id: 0xb2b0c8fa
+  name: "seq_hex_dump"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x01fda6c4
+  type_id: 0x11e1274d
+  full_name: "seq_hex_dump"
+}
+elf_symbol {
   id: 0xe0349007
   name: "seq_lseek"
   is_defined: true
@@ -342033,6 +342069,7 @@ interface {
   symbol_id: 0x5a345cb5
   symbol_id: 0x1df78429
   symbol_id: 0x95b2cfdd
+  symbol_id: 0x5240d831
   symbol_id: 0x7921841c
   symbol_id: 0x0b0c0190
   symbol_id: 0x34feac51
@@ -344102,6 +344139,7 @@ interface {
   symbol_id: 0x8e148419
   symbol_id: 0x4814ecd5
   symbol_id: 0x854e793d
+  symbol_id: 0xb2b0c8fa
   symbol_id: 0xe0349007
   symbol_id: 0xfae0b182
   symbol_id: 0xc5442265
