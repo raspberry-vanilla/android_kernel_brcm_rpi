@@ -18,6 +18,7 @@ struct track;
 struct oom_control;
 struct compact_control;
 struct cma;
+struct task_struct;
 
 DECLARE_RESTRICTED_HOOK(android_rvh_shmem_get_folio,
 			TP_PROTO(struct shmem_inode_info *info, struct folio **folio, int order),
@@ -857,6 +858,9 @@ DECLARE_RESTRICTED_HOOK(android_rvh_read_swap_cache_async_timeout,
 DECLARE_HOOK(android_vh_unlock_mmap_bypass,
 	TP_PROTO(struct vm_fault *vmf, struct file *fpin, bool *bypass),
 	TP_ARGS(vmf, fpin, bypass));
+DECLARE_RESTRICTED_HOOK(android_rvh_process_vm_rw_core,
+	TP_PROTO(struct task_struct *task, int vm_write, ssize_t *rc),
+	TP_ARGS(task, vm_write, rc), 1);
 #endif /* _TRACE_HOOK_MM_H */
 
 /* This part must be outside protection */

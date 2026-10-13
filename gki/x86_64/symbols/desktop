@@ -2036,6 +2036,7 @@
   of_device_is_compatible
   of_dma_controller_free
   of_dma_controller_register
+  of_find_node_opts_by_path
   of_find_property
   of_fwnode_ops
   of_get_child_by_name
@@ -2661,6 +2662,8 @@
   set_capacity
   set_default_d_op
   set_freezable
+  set_memory_decrypted
+  set_memory_encrypted
   set_memory_uc
   set_memory_wb
   set_nlink

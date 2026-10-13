@@ -1073,7 +1073,10 @@ impl Process {
 
         let (new_alloc, addr) = loop {
             let mut inner = self.inner.lock();
-            let mapping = inner.mapping.as_mut().ok_or_else(BinderError::new_dead)?;
+            let mapping = inner
+                .mapping
+                .as_mut()
+                .ok_or_else(|| BinderError::new_dead())?;
             let alloc_request = match mapping.alloc.reserve_new(reserve_new_args)? {
                 ReserveNew::Success(new_alloc) => break (new_alloc, mapping.address),
                 ReserveNew::NeedAlloc(request) => request,
@@ -1214,12 +1217,12 @@ impl Process {
         let mut out = BinderNodeDebugInfo::default();
 
         {
-            let inner = self.inner.lock();
-            for (node_ptr, node) in &inner.nodes {
-                if *node_ptr > ptr {
-                    node.populate_debug_info(&mut out, &inner);
-                    break;
-                }
+            let mut inner = self.inner.lock();
+            // cursor_lower_bound retrieves the "key" passed or the next existing larger key
+            if let Some(cursor) = inner.nodes.cursor_lower_bound(&(ptr + 1)) {
+                let (_, node) = cursor.current();
+                let node = node.clone();
+                node.populate_debug_info(&mut out, &inner);
             }
         }
 

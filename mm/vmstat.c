@@ -28,6 +28,7 @@
 #include <linux/mm_inline.h>
 #include <linux/page_owner.h>
 #include <linux/sched/isolation.h>
+#include <linux/page_size_compat_defs.h>
 
 #include <trace/hooks/mm.h>
 #include "internal.h"
@@ -1789,22 +1790,22 @@ static void zoneinfo_show_print(struct seq_file *m, pg_data_t *pgdat,
 		   "\n        present  %lu"
 		   "\n        managed  %lu"
 		   "\n        cma      %lu",
-		   zone_page_state(zone, NR_FREE_PAGES),
-		   zone->watermark_boost,
-		   min_wmark_pages(zone),
-		   low_wmark_pages(zone),
-		   high_wmark_pages(zone),
-		   promo_wmark_pages(zone),
-		   zone->spanned_pages,
-		   zone->present_pages,
-		   zone_managed_pages(zone),
-		   zone_cma_pages(zone));
+		   __page_size_count(zone_page_state(zone, NR_FREE_PAGES)),
+		   __page_size_count(zone->watermark_boost),
+		   __page_size_count(min_wmark_pages(zone)),
+		   __page_size_count(low_wmark_pages(zone)),
+		   __page_size_count(high_wmark_pages(zone)),
+		   __page_size_count(promo_wmark_pages(zone)),
+		   __page_size_count(zone->spanned_pages),
+		   __page_size_count(zone->present_pages),
+		   __page_size_count(zone_managed_pages(zone)),
+		   __page_size_count(zone_cma_pages(zone)));
 
 	seq_printf(m,
-		   "\n        protection: (%ld",
-		   zone->lowmem_reserve[0]);
+		   "\n        protection: (%lu",
+		   __page_size_count(zone->lowmem_reserve[0]));
 	for (i = 1; i < ARRAY_SIZE(zone->lowmem_reserve); i++)
-		seq_printf(m, ", %ld", zone->lowmem_reserve[i]);
+		seq_printf(m, ", %lu", __page_size_count(zone->lowmem_reserve[i]));
 	seq_putc(m, ')');
 
 	/* If unpopulated, no other information is useful */
@@ -1838,11 +1839,11 @@ static void zoneinfo_show_print(struct seq_file *m, pg_data_t *pgdat,
 			   "\n              high_min: %i"
 			   "\n              high_max: %i",
 			   i,
-			   pcp->count,
-			   pcp->high,
-			   pcp->batch,
-			   pcp->high_min,
-			   pcp->high_max);
+			   (int)__page_size_count(pcp->count),
+			   (int)__page_size_count(pcp->high),
+			   (int)__page_size_count(pcp->batch),
+			   (int)__page_size_count(pcp->high_min),
+			   (int)__page_size_count(pcp->high_max));
 #ifdef CONFIG_SMP
 		pzstats = per_cpu_ptr(zone->per_cpu_zonestats, i);
 		seq_printf(m, "\n  vm stats threshold: %d",

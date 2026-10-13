@@ -1,0 +1,16 @@
+# SPDX-License-Identifier: GPL-2.0-only
+#
+# Copyright 2026 Google LLC
+#
+# Kconfig for the Advanced Packet Filter (APF) subsystem
+#
+
+config NET_APF
+	bool "Advanced Packet Filter (APF) Subsystem"
+	depends on NET
+	help
+	  This enables the Advanced Packet Filter (APF) subsystem, which provides
+	  a generic netlink interface for userspace to configure network driver
+	  and firmware implemented packet filtering capabilities.
+
+	  If you are building a kernel that uses APF, say Y.

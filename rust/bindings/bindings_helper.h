@@ -35,6 +35,7 @@
 #include <drm/drm_gem.h>
 #include <drm/drm_ioctl.h>
 #include <kunit/test.h>
+#include <linux/anon_inodes.h>
 #include <linux/auxiliary_bus.h>
 #include <linux/bitmap.h>
 #include <linux/blk-mq.h>
@@ -122,6 +123,17 @@ const gfp_t RUST_CONST_HELPER_XA_FLAGS_ALLOC = XA_FLAGS_ALLOC;
 const gfp_t RUST_CONST_HELPER_XA_FLAGS_ALLOC1 = XA_FLAGS_ALLOC1;
 const vm_flags_t RUST_CONST_HELPER_VM_MERGEABLE = VM_MERGEABLE;
 
+enum {
+	RUST_CONST_HELPER_FMODE_READ = FMODE_READ,
+	RUST_CONST_HELPER_FMODE_WRITE = FMODE_WRITE,
+	RUST_CONST_HELPER_FMODE_CAN_READ = FMODE_CAN_READ,
+	RUST_CONST_HELPER_FMODE_CAN_ODIRECT = FMODE_CAN_ODIRECT,
+};
+
+#ifdef CONFIG_64BIT
+const vm_flags_t RUST_CONST_HELPER_VM_NO_REMAP_FILE_PAGES = VM_NO_REMAP_FILE_PAGES;
+#endif
+
 #if IS_ENABLED(CONFIG_ANDROID_BINDER_IPC_RUST)
 #include "../../drivers/android/binder_pick.h"
 #include "../../drivers/android/binder/rust_binder.h"
@@ -133,4 +145,8 @@ const vm_flags_t RUST_CONST_HELPER_VM_MERGEABLE = VM_MERGEABLE;
 #include "../../drivers/staging/android/ashmem.h"
 const size_t RUST_CONST_HELPER_ASHMEM_NAME_PREFIX_LEN = ASHMEM_NAME_PREFIX_LEN;
 const size_t RUST_CONST_HELPER_ASHMEM_FULL_NAME_LEN = ASHMEM_FULL_NAME_LEN;
+#endif
+
+#if IS_ENABLED(CONFIG_ANDROID_WRAPFD)
+#include <linux/wrapfd.h>
 #endif

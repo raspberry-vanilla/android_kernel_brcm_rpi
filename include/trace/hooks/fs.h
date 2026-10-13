@@ -11,6 +11,8 @@
 #include <trace/hooks/vendor_hooks.h>
 struct f2fs_sb_info;
 struct va_format;
+struct file;
+struct dentry;
 
 DECLARE_HOOK(android_vh_ep_create_wakeup_source,
 	TP_PROTO(char *name, int len),
@@ -133,6 +135,19 @@ DECLARE_HOOK(android_vh_f2fs_iostat_submit,
 DECLARE_HOOK(android_vh_f2fs_iostat_update,
 	TP_PROTO(struct super_block *sb, struct bio *bio, bool *skip),
 	TP_ARGS(sb, bio, skip));
+
+DECLARE_RESTRICTED_HOOK(android_rvh_post_setattr,
+	TP_PROTO(struct dentry *dentry),
+	TP_ARGS(dentry), 1);
+
+DECLARE_RESTRICTED_HOOK(android_rvh_exec_binprm_check,
+	TP_PROTO(struct linux_binprm *bprm, int depth),
+	TP_ARGS(bprm, depth), 1);
+
+DECLARE_RESTRICTED_HOOK(android_rvh_exec_binprm_fail,
+	TP_PROTO(struct task_struct *task, struct file *file),
+	TP_ARGS(task, file), 1);
+
 #endif /* _TRACE_HOOK_FS_H */
 
 /* This part must be outside protection */

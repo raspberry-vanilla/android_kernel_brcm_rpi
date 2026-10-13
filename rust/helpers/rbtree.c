@@ -8,3 +8,8 @@ __rust_helper void rust_helper_rb_link_node(struct rb_node *node,
 {
 	rb_link_node(node, parent, rb_link);
 }
+
+__rust_helper bool rust_helper_RB_EMPTY_ROOT(const struct rb_root *root)
+{
+	return RB_EMPTY_ROOT(root) != 0;
+}

@@ -27,6 +27,7 @@
 #include <linux/task_work.h>
 #include <linux/swap.h>
 #include <linux/kmemleak.h>
+#include <trace/hooks/security.h>
 
 #include <linux/atomic.h>
 
@@ -478,6 +479,7 @@ static void __fput(struct file *file)
 	locks_remove_file(file);
 
 	security_file_release(file);
+	trace_android_rvh_security_file_free(file);
 	if (unlikely(file->f_flags & FASYNC)) {
 		if (file->f_op->fasync)
 			file->f_op->fasync(-1, file, 0);

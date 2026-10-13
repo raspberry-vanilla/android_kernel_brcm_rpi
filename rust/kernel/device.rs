@@ -406,6 +406,13 @@ impl<Ctx: DeviceContext> Device<Ctx> {
 kernel::impl_device_context_deref!(unsafe { Device });
 kernel::impl_device_context_into_aref!(Device);
 
+impl PartialEq for Device {
+    fn eq(&self, other: &Self) -> bool {
+        self.as_raw() == other.as_raw()
+    }
+}
+impl Eq for Device {}
+
 // SAFETY: Instances of `Device` are always reference-counted.
 unsafe impl crate::sync::aref::AlwaysRefCounted for Device {
     fn inc_ref(&self) {

@@ -253,7 +253,12 @@ common_kernel(
     kcflags = COMMON_KCFLAGS,
     kmi_enforced = True,
     kmi_symbol_list = "gki/aarch64/symbols/base",
-    kmi_symbol_list_strict_mode = True,
+    # TODO(b/571902075): Re-enable once dedicated 16K/64K symbol lists are added.
+    kmi_symbol_list_strict_mode = select({
+        "//build/kernel/kleaf:page_size_16k": False,
+        "//build/kernel/kleaf:page_size_64k": False,
+        "//conditions:default": True,
+    }),
     make_goals = _GKI_AARCH64_MAKE_GOALS,
     makefile = ":Makefile",
     module_implicit_outs = get_gki_modules_list("arm64") + get_kunit_modules_list("arm64"),
@@ -281,7 +286,8 @@ common_kernel(
     gki_system_dlkm_modules = ":gki_system_dlkm_modules_arm64",
     kcflags = COMMON_KCFLAGS,
     kmi_symbol_list = "gki/aarch64/symbols/base",
-    kmi_symbol_list_strict_mode = True,
+    # TODO(b/571902075): Re-enable once dedicated 16K symbol lists are added.
+    kmi_symbol_list_strict_mode = False,
     make_goals = _GKI_AARCH64_MAKE_GOALS,
     makefile = ":Makefile",
     module_implicit_outs = get_gki_modules_list("arm64") + get_kunit_modules_list("arm64"),
@@ -3568,6 +3574,26 @@ cc_binary_with_abi(
     ],
 )
 
+cc_binary_with_abi(
+    name = "kselftest_wrapfd_test",
+    srcs = [
+        "include/uapi/linux/wrapfd.h",
+        "tools/include/linux/align.h",
+        "tools/include/uapi/linux/const.h",
+        "tools/testing/selftests/drivers/wrapfd/wrapfd.c",
+    ],
+    copts = _KSELFTEST_COPTS,
+    includes = [
+        "include/uapi",
+        "tools/include",
+        "tools/testing/selftests",
+    ],
+    linkopts = ["-static"],
+    path_prefix = _KSELFTEST_DIR,
+    visibility = ["//visibility:private"],
+    deps = [":kselftest_headers_lib"],
+)
+
 pkg_files(
     name = "kselftest_config_x86_64",
     srcs = ["tools/testing/selftests/android/config_x86_64.xml"],
@@ -3655,6 +3681,7 @@ pkg_filegroup(
         ":kselftest_vdso_vdso_test_abi_x86_64",
         ":kselftest_vdso_vdso_test_getcpu_x86_64",
         ":kselftest_vdso_vdso_test_gettimeofday_x86_64",
+        ":kselftest_wrapfd_test_x86_64",
         ":kselftest_x86_check_initial_reg_state_x86_64",
         ":kselftest_x86_ldt_gdt_x86_64",
         ":kselftest_x86_ptrace_syscall_x86_64",
@@ -3937,6 +3964,7 @@ pkg_filegroup(
         ":kselftest_vdso_vdso_test_abi_arm64",
         ":kselftest_vdso_vdso_test_getcpu_arm64",
         ":kselftest_vdso_vdso_test_gettimeofday_arm64",
+        ":kselftest_wrapfd_test_arm64",
     ],
     visibility = ["//visibility:private"],
 )

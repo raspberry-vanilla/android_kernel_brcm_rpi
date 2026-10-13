@@ -4033,3 +4033,11 @@
   __tracepoint_android_vh_save_cpu_resume
   __tracepoint_android_vh_save_hib_resume_bdev
   __tracepoint_android_vh_skip_swap_map_write
+  __traceiter_android_rvh_usb_dev_suspend
+  __traceiter_android_vh_usb_dev_resume
+  __traceiter_android_vh_xhci_suspend
+  __traceiter_android_vh_xhci_resume
+  __tracepoint_android_rvh_usb_dev_suspend
+  __tracepoint_android_vh_usb_dev_resume
+  __tracepoint_android_vh_xhci_suspend
+  __tracepoint_android_vh_xhci_resume

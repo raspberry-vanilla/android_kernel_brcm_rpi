@@ -1,0 +1,239 @@
+# SPDX-License-Identifier: ((GPL-2.0 WITH Linux-syscall-note) OR BSD-3-Clause)
+---
+name: net-apf
+
+protocol: genetlink
+
+doc: |
+  Generic Netlink interface for Advanced Packet Filter (APF).
+
+  This interface is a vendor-agnostic API for configuring the Advanced Packet
+  Filter (APF) on any network interface that supports it, including wireless
+  and ethernet interfaces.
+
+  APF is a packet filtering bytecode interpreter implemented in a network
+  device, allowing the host to remain suspended while the device drops
+  uninteresting traffic.
+
+  Every command operates on a single network interface, identified by
+  @ifindex.
+
+definitions:
+  -
+    type: const
+    name: eth-alen
+    header: linux/if_ether.h
+    value: 6
+
+attribute-sets:
+  -
+    name: net-apf
+    attributes:
+      -
+        name: ifindex
+        doc: Netdev interface index.
+        type: u32
+        checks:
+          min: 1
+      -
+        name: info-version
+        doc: APF interpreter version (e.g. 6100 represents APFv6.1).
+        type: u32
+      -
+        name: info-chip-id
+        doc: Chip-level APF instance identifier (defaults to 0).
+        type: u32
+      -
+        name: info-total-ram
+        doc: Total APF RAM size in bytes.
+        type: u32
+      -
+        name: info-used-ram
+        doc: Currently allocated APF RAM in bytes.
+        type: u32
+      -
+        name: info-overhead
+        doc: Per-interface state overhead in bytes.
+        type: u32
+      -
+        name: info-granularity
+        doc: Memory allocation granularity in bytes.
+        type: u32
+      -
+        name: ram-size
+        doc: |
+          Requested RAM size in bytes (1..32767) in @enable, or allocated RAM
+          size in bytes in @get-ram-size.
+        type: u32
+        checks:
+          min: 1
+          max: s16-max
+      -
+        name: offset
+        doc: |
+          Byte offset into APF RAM (0..32767). If absent in @read, defaults to
+          0. If absent in @write, installs a new bytecode program.
+        type: u32
+        checks:
+          max: s16-max
+      -
+        name: data
+        doc: |
+          Bytecode program or data buffer in @write, or read buffer payload in
+          @read.
+        type: binary
+        checks:
+          min-len: 1
+      -
+        name: data-len
+        doc: |
+          Number of bytes to read (1..32767), or absent to read all (which
+          requires @offset to be absent or 0).
+        type: u32
+        checks:
+          min: 1
+          max: s16-max
+      -
+        name: fp-ucast-mac
+        doc: Interface unicast MAC address.
+        type: binary
+        display-hint: mac
+        checks:
+          exact-len: eth-alen
+      -
+        name: fp-vlan-tag
+        doc: VLAN tag ID to filter (0..4095), or absent to disable.
+        type: u16
+        checks:
+          max: 4095
+      -
+        name: fp-ucast-addr4
+        doc: Interface unicast IPv4 address (0.0.0.0 to disable, defaults to 0.0.0.0 if absent).
+        type: u32
+        byte-order: big-endian
+        display-hint: ipv4
+      -
+        name: fp-enable-ipv6
+        doc: Boolean flag enabling IPv6 fast path (present to enable, absent to disable).
+        type: flag
+
+operations:
+  list:
+    -
+      name: get-info
+      doc: Query APF capabilities and device information.
+      attribute-set: net-apf
+      flags: [admin-perm]
+      do:
+        pre: net-apf-nl-pre-doit
+        post: net-apf-nl-post-doit
+        request:
+          attributes:
+            - ifindex
+        reply:
+          attributes:
+            - info-version
+            - info-chip-id
+            - info-total-ram
+            - info-used-ram
+            - info-overhead
+            - info-granularity
+    -
+      name: set-id
+      doc: Set chip-level APF instance identifier.
+      attribute-set: net-apf
+      flags: [admin-perm]
+      do:
+        pre: net-apf-nl-pre-doit
+        post: net-apf-nl-post-doit
+        request:
+          attributes:
+            - ifindex
+            - info-chip-id
+    -
+      name: enable
+      doc: Allocate and enable per-interface APF state.
+      attribute-set: net-apf
+      flags: [admin-perm]
+      do:
+        pre: net-apf-nl-pre-doit
+        post: net-apf-nl-post-doit
+        request:
+          attributes:
+            - ifindex
+            - ram-size
+    -
+      name: get-ram-size
+      doc: Query allocated RAM size for an interface.
+      attribute-set: net-apf
+      flags: [admin-perm]
+      do:
+        pre: net-apf-nl-pre-doit
+        post: net-apf-nl-post-doit
+        request:
+          attributes:
+            - ifindex
+        reply:
+          attributes:
+            - ram-size
+    -
+      name: read
+      doc: |
+        Read data from APF RAM at a specified byte offset (APFv6.1 only
+        supports @offset absent or 0 and @data-len absent).
+      attribute-set: net-apf
+      flags: [admin-perm]
+      do:
+        pre: net-apf-nl-pre-doit
+        post: net-apf-nl-post-doit
+        request:
+          attributes:
+            - ifindex
+            - offset
+            - data-len
+        reply:
+          attributes:
+            - data
+    -
+      name: write
+      doc: |
+        Write data to APF RAM or install a bytecode program (APFv6.1 only
+        supports @offset absent).
+      attribute-set: net-apf
+      flags: [admin-perm]
+      do:
+        pre: net-apf-nl-pre-doit
+        post: net-apf-nl-post-doit
+        request:
+          attributes:
+            - ifindex
+            - offset
+            - data
+    -
+      name: disable
+      doc: Disable and free per-interface APF state.
+      attribute-set: net-apf
+      flags: [admin-perm]
+      do:
+        pre: net-apf-nl-pre-doit
+        post: net-apf-nl-post-doit
+        request:
+          attributes:
+            - ifindex
+    -
+      name: set-fast-path
+      doc: Configure hardware/driver APF fast path filtering.
+      attribute-set: net-apf
+      flags: [admin-perm]
+      do:
+        pre: net-apf-nl-pre-doit
+        post: net-apf-nl-post-doit
+        request:
+          attributes:
+            - ifindex
+            - fp-ucast-mac
+            - fp-vlan-tag
+            - fp-ucast-addr4
+            - fp-enable-ipv6
+
+...

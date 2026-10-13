@@ -11,6 +11,7 @@ use crate::{
     error::{from_err_ptr, to_result},
     fs::File,
     prelude::*,
+    sync::SpinLock,
     types::{ARef, AlwaysRefCounted, Opaque},
 };
 use core::{
@@ -128,6 +129,41 @@ impl DmaBuf {
         // SAFETY: `self.opaque.get()` is valid.
         unsafe { File::from_raw_file((*self.as_ptr()).file) }
     }
+
+    /// Returns the exporter name `exp_name` of the underlying `dma_buf`.
+    pub fn exporter_name(&self) -> &CStr {
+        // SAFETY: `self.as_ptr()` returns a valid pointer to `struct dma_buf`. There's no need
+        // to hold any lock as `exp_name` is immutable after the dma-buf's creation, it's also
+        // guaranteed not to be NULL.
+        let exporter_name = unsafe { (*self.as_ptr()).exp_name };
+
+        // SAFETY: `exporter_name` is a valid pointer to a `NUL`-terminated C string.
+        unsafe { CStr::from_char_ptr(exporter_name) }
+    }
+
+    /// Calls the closure `f` with the dmabuf's `name` (or None if the field is NULL).
+    /// Holds the dmabuf's `name_lock` SpinLock for the duration.
+    pub fn with_name<T>(&self, f: impl FnOnce(Option<&CStr>) -> T) -> T {
+        // SAFETY: `self.as_ptr()` returns a valid pointer to `struct dma_buf`.
+        let name_lock = unsafe { &raw mut (*self.as_ptr()).name_lock };
+
+        // SAFETY: `name_lock` is a valid pointer to a `spinlock_t`.
+        let _guard = unsafe { SpinLock::from_raw(name_lock) }.lock();
+
+        // SAFETY: `self.as_ptr()` returns a valid pointer to `struct dma_buf`. We're holding
+        // the `name_lock` as long as we're accessing `name`.
+        let name = unsafe { (*self.as_ptr()).name };
+
+        let opt_name = if name.is_null() {
+            None
+        } else {
+            // SAFETY: `name` is a valid pointer to a `NUL`-terminated C string.
+            let name_as_cstr = unsafe { CStr::from_char_ptr(name) };
+            Some(name_as_cstr)
+        };
+
+        f(opt_name)
+    }
 }
 
 /// A wrapper for the kernel's `struct dma_buf_attachment`.
@@ -235,10 +271,26 @@ impl DmaBufVmap {
         }
     }
 
-    /// Internal helper for cpu access.
-    fn begin_cpu_access<const READ: bool, const WRITE: bool, F>(&self, f: F) -> Result
+    /// Internal helper for cpu access. This is the fallible version, i.e. the closure passed
+    /// returns some Result type that can express errors of type kernel::Error.
+    fn begin_cpu_access_fallible<const READ: bool, const WRITE: bool, F, T, E>(
+        &self,
+        f: F,
+    ) -> Result<T, E>
     where
-        F: FnOnce(CpuAccess<'_, READ, WRITE>),
+        F: FnOnce(CpuAccess<'_, READ, WRITE>) -> Result<T, E>,
+        E: From<Error>,
+    {
+        match self.begin_cpu_access::<READ, WRITE, _, _>(f) {
+            Ok(res) => res,
+            Err(err) => Err(err.into()),
+        }
+    }
+
+    /// Internal helper for cpu access.
+    fn begin_cpu_access<const READ: bool, const WRITE: bool, F, T>(&self, f: F) -> Result<T>
+    where
+        F: FnOnce(CpuAccess<'_, READ, WRITE>) -> T,
     {
         let dir = const {
             match (READ, WRITE) {
@@ -252,36 +304,63 @@ impl DmaBufVmap {
         // SAFETY: It's always safe to begin cpu access.
         to_result(unsafe { bindings::dma_buf_begin_cpu_access(self.dmabuf.as_ptr(), dir.into()) })?;
         // INVARIANT: Cpu access has begin with the given direction.
-        f(CpuAccess {
+        let result = f(CpuAccess {
             map: &raw mut map,
             size: self.dmabuf.size(),
             _lifetime: PhantomData,
         });
         // SAFETY: We started cpu access, so we can end it.
         to_result(unsafe { bindings::dma_buf_end_cpu_access(self.dmabuf.as_ptr(), dir.into()) })?;
-        Ok(())
+        Ok(result)
+    }
+
+    /// Perform cpu-access that only writes to the device. Fallible version.
+    pub fn begin_cpu_access_to_fallible<F, T, E>(&self, f: F) -> Result<T, E>
+    where
+        F: FnOnce(CpuAccess<'_, false, true>) -> Result<T, E>,
+        E: From<Error>,
+    {
+        self.begin_cpu_access_fallible(f)
     }
 
     /// Perform cpu-access that only writes to the device.
-    pub fn begin_cpu_access_to<F>(&self, f: F) -> Result
+    pub fn begin_cpu_access_to<F, T>(&self, f: F) -> Result<T>
     where
-        F: FnOnce(CpuAccess<'_, false, true>),
+        F: FnOnce(CpuAccess<'_, false, true>) -> T,
     {
         self.begin_cpu_access(f)
+    }
+
+    /// Perform cpu-access that only reads from the device. Fallible version.
+    pub fn begin_cpu_access_from_fallible<F, T, E>(&self, f: F) -> Result<T, E>
+    where
+        F: FnOnce(CpuAccess<'_, true, false>) -> Result<T, E>,
+        E: From<Error>,
+    {
+        self.begin_cpu_access_fallible(f)
     }
 
     /// Perform cpu-access that only reads from the device.
-    pub fn begin_cpu_access_from<F>(&self, f: F) -> Result
+    pub fn begin_cpu_access_from<F, T>(&self, f: F) -> Result<T>
     where
-        F: FnOnce(CpuAccess<'_, true, false>),
+        F: FnOnce(CpuAccess<'_, true, false>) -> T,
     {
         self.begin_cpu_access(f)
     }
 
-    /// Perform bidirectional cpu-access.
-    pub fn begin_cpu_access_bidirectional<F>(&self, f: F) -> Result
+    /// Perform bidirectional cpu-access. Fallible version.
+    pub fn begin_cpu_access_bidirectional_fallible<F, T, E>(&self, f: F) -> Result<T, E>
     where
-        F: FnOnce(CpuAccess<'_, true, true>),
+        F: FnOnce(CpuAccess<'_, true, true>) -> Result<T, E>,
+        E: From<Error>,
+    {
+        self.begin_cpu_access_fallible(f)
+    }
+
+    /// Perform bidirectional cpu-access.
+    pub fn begin_cpu_access_bidirectional<F, T>(&self, f: F) -> Result<T>
+    where
+        F: FnOnce(CpuAccess<'_, true, true>) -> T,
     {
         self.begin_cpu_access(f)
     }

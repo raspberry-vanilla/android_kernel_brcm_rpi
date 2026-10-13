@@ -46,6 +46,7 @@
 DEFINE_SHOW_ATTRIBUTE(rust_binder_stats);
 DEFINE_SHOW_ATTRIBUTE(rust_binder_state);
 DEFINE_SHOW_ATTRIBUTE(rust_binder_transactions);
+DEFINE_SHOW_ATTRIBUTE(rust_binder_transaction_log);
 DEFINE_SHOW_ATTRIBUTE(rust_binder_proc);
 
 char *rust_binder_devices_param = CONFIG_ANDROID_BINDER_DEVICES;
@@ -72,6 +73,7 @@ struct binder_features {
 	bool oneway_spam_detection;
 	bool extended_error;
 	bool freeze_notification;
+	bool transaction_report;
 };
 
 static const struct constant_table binderfs_param_stats[] = {
@@ -89,6 +91,7 @@ static struct binder_features binder_features = {
 	.oneway_spam_detection = true,
 	.extended_error = true,
 	.freeze_notification = true,
+	.transaction_report = true,
 };
 
 static inline struct binderfs_info *BINDERFS_SB(const struct super_block *sb)
@@ -626,6 +629,12 @@ static int init_binder_features(struct super_block *sb)
 	if (IS_ERR(dentry))
 		return PTR_ERR(dentry);
 
+	dentry = rust_binderfs_create_file(dir, "transaction_report",
+				      &binder_features_fops,
+				      &binder_features.transaction_report);
+	if (IS_ERR(dentry))
+		return PTR_ERR(dentry);
+
 	return 0;
 }
 
@@ -658,6 +667,24 @@ static int init_binder_logs(struct super_block *sb)
 
 	dentry = rust_binderfs_create_file(binder_logs_root_dir, "transactions",
 				      &rust_binder_transactions_fops, NULL);
+	if (IS_ERR(dentry)) {
+		ret = PTR_ERR(dentry);
+		goto out;
+	}
+
+	dentry = rust_binderfs_create_file(binder_logs_root_dir,
+				      "transaction_log",
+				      &rust_binder_transaction_log_fops,
+				      (void *)0);
+	if (IS_ERR(dentry)) {
+		ret = PTR_ERR(dentry);
+		goto out;
+	}
+
+	dentry = rust_binderfs_create_file(binder_logs_root_dir,
+				      "failed_transaction_log",
+				      &rust_binder_transaction_log_fops,
+				      (void *)1);
 	if (IS_ERR(dentry)) {
 		ret = PTR_ERR(dentry);
 		goto out;

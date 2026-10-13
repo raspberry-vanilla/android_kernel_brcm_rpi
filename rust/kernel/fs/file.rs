@@ -105,6 +105,18 @@ pub mod flags {
     pub const O_RDWR: u32 = bindings::O_RDWR;
 }
 
+/// Mode associated with a [`File`].
+pub mod mode {
+    /// File is open for reading.
+    pub const FMODE_READ: u32 = bindings::FMODE_READ;
+    /// File is open for writing.
+    pub const FMODE_WRITE: u32 = bindings::FMODE_WRITE;
+    /// File has read method(s).
+    pub const FMODE_CAN_READ: u32 = bindings::FMODE_CAN_READ;
+    /// File supports DIRECT_IO.
+    pub const FMODE_CAN_ODIRECT: u32 = bindings::FMODE_CAN_ODIRECT;
+}
+
 /// Wraps the kernel's `struct file`. Thread safe.
 ///
 /// This represents an open file rather than a file on a filesystem. Processes generally reference
@@ -341,6 +353,15 @@ impl LocalFile {
         //
         // FIXME(read_once): Replace with `read_once` when available on the Rust side.
         unsafe { core::ptr::addr_of!((*self.as_ptr()).f_flags).read_volatile() }
+    }
+
+    /// Returns the mode associated with the file.
+    ///
+    /// The mode is a combination of the constants in [`mode`].
+    #[inline]
+    pub fn mode(&self) -> u32 {
+        // SAFETY: The file is valid because the shared reference guarantees a nonzero refcount.
+        unsafe { (*self.as_ptr()).f_mode }
     }
 }
 

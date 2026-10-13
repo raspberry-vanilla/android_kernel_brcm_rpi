@@ -115,6 +115,11 @@ impl_frombytes! {
     // patterns are also acceptable for arrays of that type.
     {<T: FromBytes>} [T],
     {<T: FromBytes, const N: usize>} [T; N],
+
+    uapi::wrapfd_wrap,
+    uapi::wrapfd_get_state,
+    uapi::wrapfd_load,
+    uapi::wrapfd_rewrap,
 }
 
 /// Types that can be viewed as an immutable slice of initialized bytes.
@@ -178,4 +183,9 @@ impl_asbytes! {
     // itself does not have any uninitialized portions either.
     {<T: AsBytes>} [T],
     {<T: AsBytes, const N: usize>} [T; N],
+
+    uapi::wrapfd_wrap,
+    uapi::wrapfd_get_state,
+    uapi::wrapfd_load,
+    uapi::wrapfd_rewrap,
 }

@@ -35,6 +35,21 @@ pub const fn page_align(addr: usize) -> usize {
     (addr + (PAGE_SIZE - 1)) & PAGE_MASK
 }
 
+/// Round down the given number to the nearest multiple of [`PAGE_SIZE`].
+pub fn page_align_down(addr: usize) -> usize {
+    addr & PAGE_MASK
+}
+
+/// Extract the offset within the page from the full address.
+pub fn offset_in_page(addr: usize) -> usize {
+    addr & !PAGE_MASK
+}
+
+/// Returns whether or not the given address falls on a page boundary.
+pub fn is_page_aligned(addr: usize) -> bool {
+    offset_in_page(addr) == 0
+}
+
 /// Representation of a non-owning reference to a [`Page`].
 ///
 /// This type provides a borrowed version of a [`Page`] that is owned by some other entity, e.g. a

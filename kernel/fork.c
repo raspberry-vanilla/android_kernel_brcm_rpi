@@ -128,6 +128,7 @@
 #undef CREATE_TRACE_POINTS
 #include <trace/hooks/sched.h>
 #include <trace/hooks/dtask.h>
+#include <trace/hooks/security.h>
 /*
  * Minimum number of threads to boot the kernel
  */
@@ -1335,6 +1336,7 @@ struct file *get_task_exe_file(struct task_struct *task)
 	task_unlock(task);
 	return exe_file;
 }
+EXPORT_SYMBOL_GPL(get_task_exe_file);
 
 /**
  * get_task_mm - acquire a reference to the task's mm
@@ -2403,6 +2405,10 @@ __latent_entropy struct task_struct *copy_process(
 		retval = -EINTR;
 		goto bad_fork_core_free;
 	}
+
+	trace_android_rvh_copy_process_integrity(clone_flags, p, &retval);
+	if (retval)
+		goto bad_fork_cancel_cgroup;
 
 	/* No more failure paths after this point. */
 

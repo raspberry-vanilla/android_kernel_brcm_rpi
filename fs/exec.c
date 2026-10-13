@@ -80,6 +80,7 @@
 
 #include <trace/events/sched.h>
 #include <trace/hooks/sched.h>
+#include <trace/hooks/fs.h>
 
 /* For vma exec functions. */
 #include "../mm/internal.h"
@@ -1725,6 +1726,8 @@ static int exec_binprm(struct linux_binprm *bprm)
 		if (depth > 5)
 			return -ELOOP;
 
+		trace_android_rvh_exec_binprm_check(bprm, depth);
+
 		ret = search_binary_handler(bprm);
 		if (ret < 0)
 			return ret;
@@ -1778,8 +1781,10 @@ static int bprm_execve(struct linux_binprm *bprm)
 		goto out;
 
 	retval = exec_binprm(bprm);
-	if (retval < 0)
+	if (retval < 0) {
+		trace_android_rvh_exec_binprm_fail(current, bprm->file);
 		goto out;
+	}
 
 	sched_mm_cid_after_execve(current);
 	rseq_execve(current);

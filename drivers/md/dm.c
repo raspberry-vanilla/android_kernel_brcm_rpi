@@ -688,12 +688,14 @@ struct dm_table *dm_get_live_table(struct mapped_device *md,
 
 	return srcu_dereference(md->map, &md->io_barrier);
 }
+EXPORT_SYMBOL_GPL(dm_get_live_table);
 
 void dm_put_live_table(struct mapped_device *md,
 		       int srcu_idx) __releases(md->io_barrier)
 {
 	srcu_read_unlock(&md->io_barrier, srcu_idx);
 }
+EXPORT_SYMBOL_GPL(dm_put_live_table);
 
 void dm_sync_table(struct mapped_device *md)
 {

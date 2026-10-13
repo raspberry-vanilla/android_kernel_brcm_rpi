@@ -381,6 +381,16 @@ impl VmaNew {
         unsafe { self.update_flags(0, flags::MAYEXEC) };
         Ok(())
     }
+
+    /// Set the `VM_NO_REMAP_FILE_PAGES` flag on this vma.
+    ///
+    /// This prevents the use of `remap_file_pages()` on the vma.
+    #[cfg(CONFIG_64BIT)]
+    #[inline]
+    pub fn set_no_remap_file_pages(&self) {
+        // SAFETY: Setting the VM_NO_REMAP_FILE_PAGES flag is always okay.
+        unsafe { self.update_flags(flags::NO_REMAP_FILE_PAGES, 0) };
+    }
 }
 
 /// The integer type used for vma flags.
@@ -469,4 +479,8 @@ pub mod flags {
 
     /// KSM may merge identical pages.
     pub const MERGEABLE: vm_flags_t = bindings::VM_MERGEABLE as vm_flags_t;
+
+    /// Prevent calling `remap_file_pages()` on vma.
+    #[cfg(CONFIG_64BIT)]
+    pub const NO_REMAP_FILE_PAGES: vm_flags_t = bindings::VM_NO_REMAP_FILE_PAGES as vm_flags_t;
 }

@@ -1,0 +1,12 @@
+# SPDX-License-Identifier: GPL-2.0
+
+config ANDROID_WRAPFD
+	bool "WrapFD Driver (Rust)"
+	depends on RUST && MMU && 64BIT
+	help
+	  Enables the Rust implementation of the WrapFD driver to control
+          ability to map a file.
+
+	  WrapFD allows wrapping an fd representing a memory buffer into a new
+	  file supporting ioctl API for file ownership that controls ability to
+	  map the file.

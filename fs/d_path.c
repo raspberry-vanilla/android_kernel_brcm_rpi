@@ -235,6 +235,7 @@ char *d_absolute_path(const struct path *path,
 		return ERR_PTR(-EINVAL);
 	return extract_string(&b);
 }
+EXPORT_SYMBOL_GPL(d_absolute_path);
 
 static void get_fs_root_rcu(struct fs_struct *fs, struct path *root)
 {

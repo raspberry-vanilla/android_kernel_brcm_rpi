@@ -2100,6 +2100,7 @@ void audit_log_n_hex(struct audit_buffer *ab, const unsigned char *buf,
 	*ptr = 0;
 	skb_put(skb, len << 1); /* new string is twice the old string */
 }
+EXPORT_SYMBOL_GPL(audit_log_n_hex);
 
 /*
  * Format a string of no more than slen characters into the audit buffer,
@@ -2183,6 +2184,7 @@ void audit_log_untrustedstring(struct audit_buffer *ab, const char *string)
 {
 	audit_log_n_untrustedstring(ab, string, strlen(string));
 }
+EXPORT_SYMBOL_GPL(audit_log_untrustedstring);
 
 /* This is a helper-function to print the escaped d_path */
 void audit_log_d_path(struct audit_buffer *ab, const char *prefix,

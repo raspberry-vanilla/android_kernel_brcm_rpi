@@ -69,6 +69,7 @@
   swap_cache_del_folio
   sync_blockdev
   __traceiter_android_rvh_arm64_serror_panic
+  __traceiter_android_rvh_copy_process_integrity
   __traceiter_android_rvh_die_kernel_fault
   __traceiter_android_rvh_do_el1_bti
   __traceiter_android_rvh_do_el1_fpac
@@ -77,10 +78,20 @@
   __traceiter_android_rvh_do_sp_pc_abort
   __traceiter_android_rvh_do_swap_page_relax
   __traceiter_android_rvh_do_swap_page_start
+  __traceiter_android_rvh_exec_binprm_check
+  __traceiter_android_rvh_exec_binprm_fail
   __traceiter_android_rvh_handle_bad_stack
   __traceiter_android_rvh_panic_unhandled
   __traceiter_android_rvh_process_madvise_bypass
+  __traceiter_android_rvh_process_vm_rw_core
+  __traceiter_android_rvh_ptrace
   __traceiter_android_rvh_report_bug
+  __traceiter_android_rvh_security_file_free
+  __traceiter_android_rvh_security_file_open
+  __traceiter_android_rvh_security_inode_free
+  __traceiter_android_rvh_security_mmap_file
+  __traceiter_android_rvh_security_task_alloc
+  __traceiter_android_rvh_security_task_free
   __traceiter_android_rvh_try_alloc_pages_gfp
   __traceiter_android_vh_adjust_nr_reclaimed
   __traceiter_android_vh_alloc_contig_range_not_isolated
@@ -148,6 +159,7 @@
   __traceiter_vm_unmapped_area
   __traceiter_workqueue_execute_start
   __tracepoint_android_rvh_arm64_serror_panic
+  __tracepoint_android_rvh_copy_process_integrity
   __tracepoint_android_rvh_die_kernel_fault
   __tracepoint_android_rvh_do_el1_bti
   __tracepoint_android_rvh_do_el1_fpac
@@ -156,10 +168,20 @@
   __tracepoint_android_rvh_do_sp_pc_abort
   __tracepoint_android_rvh_do_swap_page_relax
   __tracepoint_android_rvh_do_swap_page_start
+  __tracepoint_android_rvh_exec_binprm_check
+  __tracepoint_android_rvh_exec_binprm_fail
   __tracepoint_android_rvh_handle_bad_stack
   __tracepoint_android_rvh_panic_unhandled
   __tracepoint_android_rvh_process_madvise_bypass
+  __tracepoint_android_rvh_process_vm_rw_core
+  __tracepoint_android_rvh_ptrace
   __tracepoint_android_rvh_report_bug
+  __tracepoint_android_rvh_security_file_free
+  __tracepoint_android_rvh_security_file_open
+  __tracepoint_android_rvh_security_inode_free
+  __tracepoint_android_rvh_security_mmap_file
+  __tracepoint_android_rvh_security_task_alloc
+  __tracepoint_android_rvh_security_task_free
   __tracepoint_android_rvh_try_alloc_pages_gfp
   __tracepoint_android_vh_adjust_nr_reclaimed
   __tracepoint_android_vh_alloc_contig_range_not_isolated
@@ -292,3 +314,25 @@
   vfs_iter_read
   vfs_iter_write
   wake_up_var
+  __vfs_getxattr
+  audit_log_n_hex
+  audit_log_task_context
+  audit_log_untrustedstring
+  d_absolute_path
+  dm_disk
+  dm_get_live_table
+  dm_get_md
+  dm_put
+  dm_put_live_table
+  dm_table_get_mode
+  file_open_root
+  get_task_exe_file
+  inode_query_iversion
+  keyring_search
+  shmem_kernel_file_setup
+  verify_signature
+  walk_system_ram_res
+  hash_algo_name
+  key_type_asymmetric
+  key_type_keyring
+  kimage_vaddr

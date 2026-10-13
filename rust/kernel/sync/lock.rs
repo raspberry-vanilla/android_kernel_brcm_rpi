@@ -15,6 +15,7 @@ use pin_init::{pin_data, pin_init, PinInit};
 
 pub mod mutex;
 pub mod spinlock;
+pub mod spinlock_irq;
 
 pub(super) mod global;
 pub use global::{GlobalGuard, GlobalLock, GlobalLockBackend, GlobalLockedBy};

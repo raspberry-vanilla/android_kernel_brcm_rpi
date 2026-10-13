@@ -64,6 +64,7 @@ pub use ffi;
 
 pub mod acpi;
 pub mod alloc;
+pub mod anon_inodes;
 #[cfg(CONFIG_AUXILIARY_BUS)]
 pub mod auxiliary;
 pub mod bitmap;
@@ -111,6 +112,7 @@ pub mod list;
 pub mod maple_tree;
 pub mod miscdevice;
 pub mod mm;
+pub mod module_param;
 #[cfg(CONFIG_NET)]
 pub mod net;
 pub mod of;

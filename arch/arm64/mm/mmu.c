@@ -53,6 +53,9 @@
 
 DEFINE_STATIC_KEY_FALSE(arm64_ptdump_lock_key);
 
+u64 kimage_vaddr __ro_after_init = (u64)&_text;
+EXPORT_SYMBOL(kimage_vaddr);
+
 u64 kimage_voffset __ro_after_init;
 EXPORT_SYMBOL(kimage_voffset);
 

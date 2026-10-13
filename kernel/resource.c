@@ -455,6 +455,7 @@ int walk_system_ram_res(u64 start, u64 end, void *arg,
 	return __walk_iomem_res_desc(start, end, flags, IORES_DESC_NONE, arg,
 				     func);
 }
+EXPORT_SYMBOL(walk_system_ram_res);
 
 /*
  * This function, being a variant of walk_system_ram_res(), calls the @func

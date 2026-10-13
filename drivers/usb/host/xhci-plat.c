@@ -22,6 +22,9 @@
 #include <linux/reset.h>
 #include <linux/usb/xhci-sideband.h>
 
+#include <trace/hooks/xhci.h>
+ANDROID_KABI_DECLONLY(trace_eval_map);
+
 #include "xhci.h"
 #include "xhci-plat.h"
 #include "xhci-mvebu.h"
@@ -588,10 +591,15 @@ static int __maybe_unused xhci_plat_runtime_suspend(struct device *dev)
 	struct usb_hcd  *hcd = dev_get_drvdata(dev);
 	struct xhci_hcd *xhci = hcd_to_xhci(hcd);
 	int ret;
+	int bypass = 0;
 
 	ret = xhci_priv_suspend_quirk(hcd);
 	if (ret)
 		return ret;
+
+	trace_android_vh_xhci_suspend(dev, &bypass);
+	if (bypass)
+		return 0;
 
 	return xhci_suspend(xhci, true);
 }
@@ -600,6 +608,11 @@ static int __maybe_unused xhci_plat_runtime_resume(struct device *dev)
 {
 	struct usb_hcd  *hcd = dev_get_drvdata(dev);
 	struct xhci_hcd *xhci = hcd_to_xhci(hcd);
+	int	bypass = 0;
+
+	trace_android_vh_xhci_resume(dev, &bypass);
+	if (bypass)
+		return 0;
 
 	return xhci_resume(xhci, false, true);
 }

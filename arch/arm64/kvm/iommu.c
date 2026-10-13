@@ -27,7 +27,7 @@
 #define kvm_call_hyp_nvhe_elem(res, gfp, ret, ...)					\
 ({											\
 	struct kvm_hyp_req __req;							\
-	int __num_elems;								\
+	size_t __num_elems;								\
 	ret = 0;									\
 	res = kvm_call_hyp_nvhe_smccc(__VA_ARGS__);					\
 	__num_elems = res.a1;								\

@@ -450,6 +450,13 @@ extern unsigned int kobjsize(const void *objp);
 #define VM_SEALED	VM_NONE
 #endif
 
+#ifdef CONFIG_64BIT
+#define VM_NO_REMAP_FILE_PAGES_BIT	43
+#define VM_NO_REMAP_FILE_PAGES		BIT(VM_NO_REMAP_FILE_PAGES_BIT)
+#else
+#define VM_NO_REMAP_FILE_PAGES		VM_NONE
+#endif
+
 /* Bits set in the VMA until the stack is in its final location */
 #define VM_STACK_INCOMPLETE_SETUP (VM_RAND_READ | VM_SEQ_READ | VM_STACK_EARLY)
 

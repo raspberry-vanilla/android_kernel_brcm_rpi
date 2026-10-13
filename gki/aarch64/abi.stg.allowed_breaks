@@ -27,3 +27,7 @@ type 'struct pkvm_module_ops' changed
   member 'u64 __kabi_reserved1' was removed
   member 'union { int(* host_stage2_set_owned)(u64, u64, bool); struct { u64 __kabi_reserved1; }; union { }; }' was added
 
+type 'struct net_device_ops' changed
+  member 'u64 __kabi_reserved1' was removed
+  member 'union { const struct apf_ops* apf_ops; struct { u64 __kabi_reserved1; }; union { }; }' was added
+

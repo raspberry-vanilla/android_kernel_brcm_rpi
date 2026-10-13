@@ -910,6 +910,12 @@ enum folio_references {
 	FOLIOREF_ACTIVATE,
 };
 
+static inline bool is_exec_file_folio(const struct folio *folio,
+		const vm_flags_t vm_flags)
+{
+	return (vm_flags & VM_EXEC) && folio_is_file_lru(folio);
+}
+
 #ifdef CONFIG_LRU_GEN
 /*
  * Only used on a mapped folio in the eviction (rmap walk) path, where promotion
@@ -917,10 +923,16 @@ enum folio_references {
  * with PG_active set. In contrast, the aging (page table walk) path uses
  * folio_update_gen().
  */
-static bool lru_gen_set_refs(struct folio *folio)
+static bool lru_gen_set_refs(struct folio *folio, const vm_flags_t vm_flags)
 {
 	/* see the comment on LRU_REFS_FLAGS */
 	if (!folio_test_referenced(folio) && !folio_test_workingset(folio)) {
+		/* Activate file-backed executable folios after first usage. */
+		if (is_exec_file_folio(folio, vm_flags)) {
+			set_mask_bits(&folio->flags.f, LRU_REFS_FLAGS, BIT(PG_workingset));
+			return true;
+		}
+
 		set_mask_bits(&folio->flags.f, LRU_REFS_MASK, BIT(PG_referenced));
 		return false;
 	}
@@ -929,7 +941,7 @@ static bool lru_gen_set_refs(struct folio *folio)
 	return true;
 }
 #else
-static bool lru_gen_set_refs(struct folio *folio)
+static bool lru_gen_set_refs(struct folio *folio, const vm_flags_t vm_flags)
 {
 	return false;
 }
@@ -969,10 +981,16 @@ static enum folio_references folio_check_references(struct folio *folio,
 		return FOLIOREF_KEEP;
 
 	if (lru_gen_enabled()) {
+#ifdef CONFIG_64BIT
+		if (test_and_clear_bit(PG_oem_reserved_5, folio_flags(folio, 0))) {
+			folio_set_workingset(folio);
+			return FOLIOREF_ACTIVATE;
+		}
+#endif
 		if (!referenced_ptes)
 			return FOLIOREF_RECLAIM;
 
-		return lru_gen_set_refs(folio) ? FOLIOREF_ACTIVATE : FOLIOREF_KEEP;
+		return lru_gen_set_refs(folio, vm_flags) ? FOLIOREF_ACTIVATE : FOLIOREF_KEEP;
 	}
 
 	referenced_folio = folio_test_clear_referenced(folio);
@@ -1000,7 +1018,7 @@ static enum folio_references folio_check_references(struct folio *folio,
 		/*
 		 * Activate file-backed executable folios after first usage.
 		 */
-		if ((vm_flags & VM_EXEC) && folio_is_file_lru(folio))
+		if (is_exec_file_folio(folio, vm_flags))
 			return FOLIOREF_ACTIVATE;
 
 		return FOLIOREF_KEEP;
@@ -2300,7 +2318,7 @@ static void shrink_active_list(unsigned long nr_to_scan,
 			 * IO, plus JVM can create lots of anon VM_EXEC folios,
 			 * so we ignore them here.
 			 */
-			if ((vm_flags & VM_EXEC) && folio_is_file_lru(folio)) {
+			if (is_exec_file_folio(folio, vm_flags)) {
 				bool bypass = false;
 				nr_rotated += folio_nr_pages(folio);
 				trace_android_vh_folio_trylock_clear_bypass(folio, &bypass);
@@ -3409,14 +3427,19 @@ static bool positive_ctrl_err(struct ctrl_pos *sp, struct ctrl_pos *pv)
  ******************************************************************************/
 
 /* promote pages accessed through page tables */
-static int folio_update_gen(struct folio *folio, int gen)
+static int folio_update_gen(struct folio *folio, int gen, const vm_flags_t vm_flags)
 {
 	unsigned long new_flags, old_flags = READ_ONCE(folio->flags.f);
 
 	VM_WARN_ON_ONCE(gen >= MAX_NR_GENS);
 
-	/* see the comment on LRU_REFS_FLAGS */
-	if (!folio_test_referenced(folio) && !folio_test_workingset(folio)) {
+	/*
+	 * See the comment on LRU_REFS_FLAGS, and activate file-backed
+	 * executable folios after first usage to avoid typical IO
+	 * thrashing from reclaiming.
+	 */
+	if (!folio_test_referenced(folio) && !folio_test_workingset(folio) &&
+	    !is_exec_file_folio(folio, vm_flags)) {
 		set_mask_bits(&folio->flags.f, LRU_REFS_MASK, BIT(PG_referenced));
 		return -1;
 	}
@@ -3648,8 +3671,8 @@ static bool suitable_to_scan(int total, int young)
 	return young * n >= total;
 }
 
-static void walk_update_folio(struct lru_gen_mm_walk *walk, struct folio *folio,
-			      int new_gen, bool dirty)
+static void walk_update_folio(struct lru_gen_mm_walk *walk, struct vm_area_struct *vma,
+		struct folio *folio, int new_gen, bool dirty)
 {
 	int old_gen;
 
@@ -3662,10 +3685,10 @@ static void walk_update_folio(struct lru_gen_mm_walk *walk, struct folio *folio,
 		folio_mark_dirty(folio);
 
 	if (walk) {
-		old_gen = folio_update_gen(folio, new_gen);
+		old_gen = folio_update_gen(folio, new_gen, vma->vm_flags);
 		if (old_gen >= 0 && old_gen != new_gen)
 			update_batch_size(walk, folio, old_gen, new_gen);
-	} else if (lru_gen_set_refs(folio)) {
+	} else if (lru_gen_set_refs(folio, vma->vm_flags)) {
 		old_gen = folio_lru_gen(folio);
 		if (old_gen >= 0 && old_gen != new_gen)
 			folio_activate(folio);
@@ -3726,7 +3749,7 @@ restart:
 			continue;
 
 		if (last != folio) {
-			walk_update_folio(walk, last, gen, dirty);
+			walk_update_folio(walk, args->vma, last, gen, dirty);
 
 			last = folio;
 			dirty = false;
@@ -3739,7 +3762,7 @@ restart:
 		walk->mm_stats[MM_LEAF_YOUNG]++;
 	}
 
-	walk_update_folio(walk, last, gen, dirty);
+	walk_update_folio(walk, args->vma, last, gen, dirty);
 	last = NULL;
 
 	if (i < PTRS_PER_PTE && get_next_vma(PMD_MASK, PAGE_SIZE, args, &start, &end))
@@ -3817,7 +3840,7 @@ static void walk_pmd_range_locked(pud_t *pud, unsigned long addr, struct vm_area
 			goto next;
 
 		if (last != folio) {
-			walk_update_folio(walk, last, gen, dirty);
+			walk_update_folio(walk, vma, last, gen, dirty);
 
 			last = folio;
 			dirty = false;
@@ -3831,7 +3854,7 @@ next:
 		i = i > MIN_LRU_BATCH ? 0 : find_next_bit(bitmap, MIN_LRU_BATCH, i) + 1;
 	} while (i <= MIN_LRU_BATCH);
 
-	walk_update_folio(walk, last, gen, dirty);
+	walk_update_folio(walk, vma, last, gen, dirty);
 
 	arch_leave_lazy_mmu_mode();
 	spin_unlock(ptl);
@@ -4452,7 +4475,7 @@ bool lru_gen_look_around(struct page_vma_mapped_walk *pvmw)
 			continue;
 
 		if (last != folio) {
-			walk_update_folio(walk, last, gen, dirty);
+			walk_update_folio(walk, vma, last, gen, dirty);
 
 			last = folio;
 			dirty = false;
@@ -4464,7 +4487,7 @@ bool lru_gen_look_around(struct page_vma_mapped_walk *pvmw)
 		young++;
 	}
 
-	walk_update_folio(walk, last, gen, dirty);
+	walk_update_folio(walk, vma, last, gen, dirty);
 
 	arch_leave_lazy_mmu_mode();
 
@@ -4998,15 +5021,17 @@ static long get_nr_to_scan(struct lruvec *lruvec, struct scan_control *sc, int s
 
 	success = should_run_aging(lruvec, max_seq, swappiness, &nr_to_scan);
 
-	/* try to scrape all its memory if this memcg was deleted */
-	if (nr_to_scan && !mem_cgroup_online(memcg))
-		return nr_to_scan;
-
 	nr_to_scan = apply_proportional_protection(memcg, sc, nr_to_scan);
 
 	/* try to get away with not aging at the default priority */
-	if (!success || sc->priority == DEF_PRIORITY)
-		return nr_to_scan >> sc->priority;
+	if (!success || sc->priority == DEF_PRIORITY) {
+		unsigned long scan = nr_to_scan >> sc->priority;
+
+		/* scrape out the remaining pages of a deleted memcg */
+		if (!scan && !mem_cgroup_online(memcg))
+			scan = min(nr_to_scan, SWAP_CLUSTER_MAX);
+		return scan;
+	}
 
 	trace_android_vh_mglru_aging_bypass(lruvec, max_seq, swappiness,
 					   &bypass, &young);
@@ -5132,7 +5157,7 @@ static int shrink_one(struct lruvec *lruvec, struct scan_control *sc)
 	if (success && mem_cgroup_online(memcg))
 		return MEMCG_LRU_YOUNG;
 
-	if (!success && lruvec_is_sizable(lruvec, sc))
+	if (!success && mem_cgroup_online(memcg) && lruvec_is_sizable(lruvec, sc))
 		return 0;
 
 	/* one retry if offlined or too small */
@@ -5236,6 +5261,18 @@ static void lru_gen_shrink_lruvec(struct lruvec *lruvec, struct scan_control *sc
 	blk_finish_plug(&plug);
 }
 
+#ifdef CONFIG_MEMCG
+static unsigned long shrink_root_memcg_slab(gfp_t gfp_mask, int nid, int priority)
+{
+	return shrink_slab(gfp_mask, nid, root_mem_cgroup, priority);
+}
+#else
+static unsigned long shrink_root_memcg_slab(gfp_t gfp_mask, int nid, int priority)
+{
+	return 0;
+}
+#endif
+
 static void lru_gen_shrink_node(struct pglist_data *pgdat, struct scan_control *sc)
 {
 	struct blk_plug plug;
@@ -5262,11 +5299,13 @@ static void lru_gen_shrink_node(struct pglist_data *pgdat, struct scan_control *
 	if (current_is_kswapd())
 		sc->nr_reclaimed = 0;
 
-	if (mem_cgroup_disabled())
+	if (mem_cgroup_disabled()) {
 		shrink_one(&pgdat->__lruvec, sc);
-	else
-		shrink_many(pgdat, sc);
-
+	} else {
+		shrink_root_memcg_slab(sc->gfp_mask, pgdat->node_id, sc->priority);
+		if (sc->nr_reclaimed < sc->nr_to_reclaim)
+			shrink_many(pgdat, sc);
+	}
 	if (current_is_kswapd())
 		sc->nr_reclaimed += reclaimed;
 
