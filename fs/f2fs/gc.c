@@ -1259,6 +1259,17 @@ static int ra_data_block(struct inode *inode, pgoff_t index)
 	}
 	f2fs_up_read(&F2FS_I(inode)->i_sem);
 
+	f2fs_down_read(&F2FS_I(inode)->i_sem);
+	if (f2fs_is_cow_file(inode)) {
+		atomic_inode = igrab(F2FS_I(inode)->atomic_inode);
+		if (!atomic_inode) {
+			f2fs_up_read(&F2FS_I(inode)->i_sem);
+			return -EBUSY;
+		}
+		mapping = atomic_inode->i_mapping;
+	}
+	f2fs_up_read(&F2FS_I(inode)->i_sem);
+
 	page = f2fs_grab_cache_page(mapping, index, true);
 	if (!page) {
 		err = -ENOMEM;
@@ -1368,6 +1379,17 @@ static int move_data_block(struct inode *inode, block_t bidx,
 						      off, &err, &bypass);
 	if (bypass)
 		return err;
+
+	f2fs_down_read(&F2FS_I(inode)->i_sem);
+	if (f2fs_is_cow_file(inode)) {
+		atomic_inode = igrab(F2FS_I(inode)->atomic_inode);
+		if (!atomic_inode) {
+			f2fs_up_read(&F2FS_I(inode)->i_sem);
+			return -EBUSY;
+		}
+		mapping = atomic_inode->i_mapping;
+	}
+	f2fs_up_read(&F2FS_I(inode)->i_sem);
 
 	f2fs_down_read(&F2FS_I(inode)->i_sem);
 	if (f2fs_is_cow_file(inode)) {
