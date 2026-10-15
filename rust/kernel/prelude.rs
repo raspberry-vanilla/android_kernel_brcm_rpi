@@ -36,6 +36,10 @@ pub use super::{build_assert, build_error};
 pub use super::dbg;
 pub use super::{dev_alert, dev_crit, dev_dbg, dev_emerg, dev_err, dev_info, dev_notice, dev_warn};
 pub use super::{pr_alert, pr_crit, pr_debug, pr_emerg, pr_err, pr_info, pr_notice, pr_warn};
+pub use super::{
+    pr_alert_ratelimited, pr_crit_ratelimited, pr_debug_ratelimited, pr_emerg_ratelimited,
+    pr_err_ratelimited, pr_info_ratelimited, pr_notice_ratelimited, pr_warn_ratelimited,
+};
 pub use core::format_args as fmt;
 
 pub use super::{try_init, try_pin_init};

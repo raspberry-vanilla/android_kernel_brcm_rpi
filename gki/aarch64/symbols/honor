@@ -530,5 +530,7 @@
   __percpu_counter_compare
   __percpu_counter_sum
   percpu_counter_set
+  percpu_ref_init
+  percpu_ref_exit
   wbt_disable_default
   wbt_enable_default
