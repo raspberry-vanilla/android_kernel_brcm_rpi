@@ -4623,12 +4623,49 @@ void ufshcd_auto_hibern8_update(struct ufs_hba *hba, u32 ahit)
 	if (!pm_runtime_suspended(&hba->ufs_device_wlun->sdev_gendev)) {
 		ufshcd_rpm_get_sync(hba);
 		ufshcd_hold(hba);
-		ufshcd_configure_auto_hibern8(hba);
+		/*
+		 * Serialize with the host driver's AHIT control. Skip the
+		 * register write while the driver has AHIT forced off; the
+		 * driver programs hba->ahit back when it re-enables it.
+		 * Mutex is taken here (not across the rpm calls above) so it
+		 * never blocks a resume that the driver's path may need.
+		 */
+		mutex_lock(&to_hba_priv(hba)->ahit_mutex);
+		if (!to_hba_priv(hba)->ahit_disable_depth)
+			ufshcd_configure_auto_hibern8(hba);
+		mutex_unlock(&to_hba_priv(hba)->ahit_mutex);
 		ufshcd_release(hba);
 		ufshcd_rpm_put_sync(hba);
 	}
 }
 EXPORT_SYMBOL_GPL(ufshcd_auto_hibern8_update);
+
+void ufshcd_ahit_disable(struct ufs_hba *hba)
+{
+	struct ufs_hba_priv *priv = to_hba_priv(hba);
+
+	if (!ufshcd_is_auto_hibern8_supported(hba))
+		return;
+
+	mutex_lock(&priv->ahit_mutex);
+	priv->ahit_disable_depth++;
+	mutex_unlock(&priv->ahit_mutex);
+}
+EXPORT_SYMBOL_GPL(ufshcd_ahit_disable);
+
+void ufshcd_ahit_enable(struct ufs_hba *hba)
+{
+	struct ufs_hba_priv *priv = to_hba_priv(hba);
+
+	if (!ufshcd_is_auto_hibern8_supported(hba))
+		return;
+
+	mutex_lock(&priv->ahit_mutex);
+	if (!--priv->ahit_disable_depth)
+		ufshcd_writel(hba, hba->ahit, REG_AUTO_HIBERNATE_IDLE_TIMER);
+	mutex_unlock(&priv->ahit_mutex);
+}
+EXPORT_SYMBOL_GPL(ufshcd_ahit_enable);
 
  /**
  * ufshcd_init_pwr_info - setting the POR (power on reset)
@@ -4822,9 +4859,13 @@ int ufshcd_config_pwr_mode(struct ufs_hba *hba,
 
 	ret = ufshcd_change_power_mode(hba, &final_params);
 
-	if (!ret)
-		ufshcd_vops_pwr_change_notify(hba, POST_CHANGE, NULL,
-					&final_params);
+	/*
+	 * Always notify POST_CHANGE to pair with PRE_CHANGE, even on failure.
+	 * On failure, pass dev_req_params = NULL to indicate nothing to apply.
+	 * POST_CHANGE return value is advisory and does not mask @ret.
+	 */
+	ufshcd_vops_pwr_change_notify(hba, POST_CHANGE, NULL,
+					ret ? NULL : &final_params);
 
 	return ret;
 }
@@ -10791,6 +10832,8 @@ int ufshcd_init(struct ufs_hba *hba, void __iomem *mmio_base, unsigned int irq)
 
 	/* Initialize mutex for PM QoS request synchronization */
 	mutex_init(&to_hba_priv(hba)->pm_qos_mutex);
+
+	mutex_init(&to_hba_priv(hba)->ahit_mutex);
 
 	/*
 	 * Set the default power management level for runtime and system PM.

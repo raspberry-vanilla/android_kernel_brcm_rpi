@@ -58,6 +58,7 @@
 #include "page.c"
 #include "pid_namespace.c"
 #include "poll.c"
+#include "ratelimit.c"
 #include "rbtree.c"
 #include "refcount.c"
 #include "security.c"

@@ -60,6 +60,7 @@ pub mod page_size_compat;
 pub mod pid_namespace;
 pub mod prelude;
 pub mod print;
+pub mod ratelimit;
 pub mod rbtree;
 pub mod security;
 pub mod seq_file;

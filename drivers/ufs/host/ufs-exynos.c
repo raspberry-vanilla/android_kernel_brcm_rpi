@@ -1666,7 +1666,9 @@ static int exynos_ufs_pwr_change_notify(struct ufs_hba *hba,
 					      dev_req_params);
 		break;
 	case POST_CHANGE:
-		ret = exynos_ufs_post_pwr_mode(hba, dev_req_params);
+		/* NULL when the gear switch failed: nothing to apply */
+		if (dev_req_params)
+			ret = exynos_ufs_post_pwr_mode(hba, dev_req_params);
 		break;
 	}
 

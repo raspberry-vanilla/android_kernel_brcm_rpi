@@ -12,6 +12,14 @@ struct ufs_hba_priv {
 	bool zwor_sup;
 	/* synchronizes PM QoS request and status updates */
 	struct mutex pm_qos_mutex;
+	/* Serializes AHIT register access between sysfs and the host driver */
+	struct mutex ahit_mutex;
+	/*
+	 * Nesting count of host-driver paths that have AHIT forced off.
+	 * Non-zero blocks sysfs AHIT writes; AHIT is reprogrammed only when
+	 * the last disabler drops it back to zero. Guarded by ahit_mutex.
+	 */
+	int ahit_disable_depth;
 };
 
 static inline struct ufs_hba_priv *to_hba_priv(struct ufs_hba *hba)

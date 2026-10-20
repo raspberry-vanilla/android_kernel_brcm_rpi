@@ -395,9 +395,13 @@ impl AshmemGuard {
         while let Some(range) = self.lru_list.pop_back() {
             let start = range.pgstart(self) * PAGE_SIZE;
             let end = (range.pgend(self) + 1) * PAGE_SIZE;
+            let size = range.size(self);
             range.set_purged(self);
-            self.remove_lru(&range);
-            freed += range.size(self);
+            freed += size;
+
+            let mut lru_count = LRU_COUNT.load(Ordering::Relaxed);
+            lru_count -= size;
+            LRU_COUNT.store(lru_count, Ordering::Relaxed);
 
             // C ashmem releases the mutex and uses a different mechanism to ensure mutual
             // exclusion with `pin_unpin` operations, but we only hold `ASHMEM_MUTEX` here and in

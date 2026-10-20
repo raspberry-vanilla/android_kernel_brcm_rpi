@@ -348,7 +348,8 @@ EXPORT_SYMBOL_GPL(page_cache_ra_unbounded);
  * We really don't want to intermingle reads and writes like that.
  */
 static void do_page_cache_ra(struct readahead_control *ractl,
-		unsigned long nr_to_read, unsigned long lookahead_size)
+		unsigned long nr_to_read, unsigned long lookahead_size,
+		bool forced)
 {
 	struct inode *inode = ractl->mapping->host;
 	unsigned long index = readahead_index(ractl);
@@ -366,6 +367,21 @@ static void do_page_cache_ra(struct readahead_control *ractl,
 		nr_to_read = end_index - index + 1;
 
 	page_cache_ra_unbounded(ractl, nr_to_read, lookahead_size);
+#ifdef CONFIG_64BIT
+	if (forced && lru_gen_enabled()) {
+		struct address_space *mapping = ractl->mapping;
+		unsigned long i;
+
+		for (i = 0; i < nr_to_read; i++) {
+			struct folio *folio = filemap_get_folio(mapping, index + i);
+
+			if (!IS_ERR(folio)) {
+				set_bit(PG_oem_reserved_5, folio_flags(folio, 0));
+				folio_put(folio);
+			}
+		}
+	}
+#endif
 }
 
 /*
@@ -402,7 +418,7 @@ void force_page_cache_ra(struct readahead_control *ractl,
 
 		if (this_chunk > nr_to_read)
 			this_chunk = nr_to_read;
-		do_page_cache_ra(ractl, this_chunk, 0);
+		do_page_cache_ra(ractl, this_chunk, 0, true);
 
 		nr_to_read -= this_chunk;
 	}
@@ -592,7 +608,7 @@ fallback:
 	 */
 	if (ra->size > index - start)
 		do_page_cache_ra(ractl, ra->size - (index - start),
-				 ra->async_size);
+				 ra->async_size, false);
 }
 
 static unsigned long ractl_max_pages(struct readahead_control *ractl,
@@ -671,7 +687,7 @@ void page_cache_sync_ra(struct readahead_control *ractl,
 	 * readahead state.
 	 */
 	if (contig_count <= req_count) {
-		do_page_cache_ra(ractl, req_count, 0);
+		do_page_cache_ra(ractl, req_count, 0, false);
 		return;
 	}
 	/*

@@ -331,5 +331,23 @@
         }
       ]
     }
+  ],
+"avf-postsubmit": [
+    {
+      "imports": [
+        {
+          "path": "packages/modules/Virtualization"
+        }
+      ]
+    }
+  ],
+  "avf-presubmit": [
+    {
+      "imports": [
+        {
+          "path": "packages/modules/Virtualization"
+        }
+      ]
+    }
   ]
 }

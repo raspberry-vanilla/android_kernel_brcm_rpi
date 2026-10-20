@@ -160,6 +160,19 @@ ssize_t fuse_passthrough_mmap(struct file *file, struct vm_area_struct *vma)
 	return backing_file_mmap(backing_file, vma, &ctx);
 }
 
+int fuse_passthrough_fadvise(struct fuse_file *ff, loff_t offset, loff_t len, int advice)
+{
+	struct file *backing_file = fuse_file_passthrough(ff);
+	const struct cred *old_cred;
+	int ret;
+
+	old_cred = override_creds(ff->cred);
+	ret = vfs_fadvise(backing_file, offset, len, advice);
+	revert_creds(old_cred);
+
+	return ret;
+}
+
 struct fuse_backing *fuse_backing_get(struct fuse_backing *fb)
 {
 	if (fb && refcount_inc_not_zero(&fb->count))
@@ -381,20 +394,4 @@ void fuse_passthrough_release(struct fuse_file *ff, struct fuse_backing *fb)
 	ff->passthrough = NULL;
 	put_cred(ff->cred);
 	ff->cred = NULL;
-}
-
-int fuse_passthrough_fadvise(struct fuse_file *ff, loff_t offset, loff_t len, int advice)
-{
-	struct file *backing_file = fuse_file_passthrough(ff);
-	const struct cred *old_cred;
-	int ret;
-
-	if (!backing_file)
-		return -EINVAL;
-
-	old_cred = override_creds(ff->cred);
-	ret = vfs_fadvise(backing_file, offset, len, advice);
-	revert_creds(old_cred);
-
-	return ret;
 }

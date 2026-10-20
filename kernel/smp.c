@@ -63,7 +63,14 @@ int smpcfd_prepare_cpu(unsigned int cpu)
 		free_cpumask_var(cfd->cpumask);
 		return -ENOMEM;
 	}
-	cfd->csd = alloc_percpu(call_single_data_t);
+
+	/*
+	 * Allocate the per-CPU CSD the first time a CPU comes up. It is
+	 * not freed when the CPU is offlined, so csd_lock_wait() can access
+	 * it even when the CPU was offlined after preemption was re-enabled.
+	 */
+	if (!cfd->csd)
+		cfd->csd = alloc_percpu(call_single_data_t);
 	if (!cfd->csd) {
 		free_cpumask_var(cfd->cpumask);
 		free_cpumask_var(cfd->cpumask_ipi);
@@ -79,7 +86,6 @@ int smpcfd_dead_cpu(unsigned int cpu)
 
 	free_cpumask_var(cfd->cpumask);
 	free_cpumask_var(cfd->cpumask_ipi);
-	free_percpu(cfd->csd);
 	return 0;
 }
 
@@ -320,6 +326,8 @@ static void __csd_lock_wait(call_single_data_t *csd)
 	unsigned long nmessages = 0;
 	int bug_id = 0;
 	u64 ts0, ts1;
+
+	guard(preempt)();
 
 	ts1 = ts0 = sched_clock();
 	for (;;) {
@@ -619,16 +627,9 @@ void flush_smp_call_function_queue(void)
 	local_irq_restore(flags);
 }
 
-/*
- * smp_call_function_single - Run a function on a specific CPU
- * @func: The function to run. This must be fast and non-blocking.
- * @info: An arbitrary pointer to pass to the function.
- * @wait: If true, wait until function has completed on other CPUs.
- *
- * Returns 0 on success, else a negative status code.
- */
-int smp_call_function_single(int cpu, smp_call_func_t func, void *info,
-			     int wait)
+static int __smp_call_function_single(int cpu, smp_call_func_t func,
+				      void *info, const struct cpumask *mask,
+				      bool wait)
 {
 	call_single_data_t *csd;
 	call_single_data_t csd_stack = {
@@ -642,6 +643,25 @@ int smp_call_function_single(int cpu, smp_call_func_t func, void *info,
 	 * as well as CPU removal
 	 */
 	this_cpu = get_cpu();
+
+	if (mask) {
+		/* Try for same CPU (cheapest) */
+		if (cpumask_test_cpu(this_cpu, mask)) {
+			cpu = this_cpu;
+		} else {
+			const struct cpumask *nodemask = cpumask_of_node(cpu_to_node(this_cpu));
+
+			for (cpu = cpumask_first_and(nodemask, mask); cpu < nr_cpu_ids;
+			     cpu = cpumask_next_and(cpu, nodemask, mask)) {
+				if (cpu_online(cpu))
+					break;
+			}
+
+			/* Any online will do: generic_exec_single handles nr_cpu_ids. */
+			if (cpu >= nr_cpu_ids)
+				cpu = cpumask_any_and(mask, cpu_online_mask);
+		}
+	}
 
 	/*
 	 * Can deadlock when called with interrupts disabled.
@@ -675,12 +695,31 @@ int smp_call_function_single(int cpu, smp_call_func_t func, void *info,
 
 	err = generic_exec_single(cpu, csd);
 
+	/*
+	 * @csd is stack-allocated when @wait is true. No concurrent access
+	 * except from the IPI completion path, so we can re-enable preemption
+	 * early to reduce latency.
+	 */
+	put_cpu();
+
 	if (wait)
 		csd_lock_wait(csd);
 
-	put_cpu();
-
 	return err;
+}
+
+/**
+ * smp_call_function_single - Run a function on a specific CPU
+ * @cpu:	Specific target CPU for this function.
+ * @func:	The function to run. This must be fast and non-blocking.
+ * @info:	An arbitrary pointer to pass to the function.
+ * @wait:	If true, wait until function has completed on other CPUs.
+ *
+ * Returns: %0 on success, else a negative status code.
+ */
+int smp_call_function_single(int cpu, smp_call_func_t func, void *info, int wait)
+{
+	return __smp_call_function_single(cpu, func, info, NULL, wait);
 }
 EXPORT_SYMBOL(smp_call_function_single);
 
@@ -732,10 +771,10 @@ EXPORT_SYMBOL_GPL(smp_call_function_single_async);
 
 /*
  * smp_call_function_any - Run a function on any of the given cpus
- * @mask: The mask of cpus it can run on.
- * @func: The function to run. This must be fast and non-blocking.
- * @info: An arbitrary pointer to pass to the function.
- * @wait: If true, wait until function has completed.
+ * @mask:	The mask of cpus it can run on.
+ * @func:	The function to run. This must be fast and non-blocking.
+ * @info:	An arbitrary pointer to pass to the function.
+ * @wait:	If true, wait until function has completed.
  *
  * Returns 0 on success, else a negative status code (if no cpus were online).
  *
@@ -747,29 +786,7 @@ EXPORT_SYMBOL_GPL(smp_call_function_single_async);
 int smp_call_function_any(const struct cpumask *mask,
 			  smp_call_func_t func, void *info, int wait)
 {
-	unsigned int cpu;
-	const struct cpumask *nodemask;
-	int ret;
-
-	/* Try for same CPU (cheapest) */
-	cpu = get_cpu();
-	if (cpumask_test_cpu(cpu, mask))
-		goto call;
-
-	/* Try for same node. */
-	nodemask = cpumask_of_node(cpu_to_node(cpu));
-	for (cpu = cpumask_first_and(nodemask, mask); cpu < nr_cpu_ids;
-	     cpu = cpumask_next_and(cpu, nodemask, mask)) {
-		if (cpu_online(cpu))
-			goto call;
-	}
-
-	/* Any online will do: smp_call_function_single handles nr_cpu_ids. */
-	cpu = cpumask_any_and(mask, cpu_online_mask);
-call:
-	ret = smp_call_function_single(cpu, func, info, wait);
-	put_cpu();
-	return ret;
+	return __smp_call_function_single(-1, func, info, mask, wait);
 }
 EXPORT_SYMBOL_GPL(smp_call_function_any);
 
@@ -787,14 +804,17 @@ static void smp_call_function_many_cond(const struct cpumask *mask,
 					unsigned int scf_flags,
 					smp_cond_func_t cond_func)
 {
-	int cpu, last_cpu, this_cpu = smp_processor_id();
+	int cpu, last_cpu, this_cpu;
 	struct call_function_data *cfd;
+	cpumask_t mask_storage;
+	struct cpumask *cpumask = &mask_storage;
 	bool wait = scf_flags & SCF_WAIT;
 	int nr_cpus = 0;
 	bool run_remote = false;
 	bool run_local = false;
 
-	lockdep_assert_preemption_disabled();
+	this_cpu = get_cpu();
+	cfd = this_cpu_ptr(&cfd_data);
 
 	/*
 	 * Can deadlock when called with interrupts disabled.
@@ -826,16 +846,15 @@ static void smp_call_function_many_cond(const struct cpumask *mask,
 		run_remote = true;
 
 	if (run_remote) {
-		cfd = this_cpu_ptr(&cfd_data);
-		cpumask_and(cfd->cpumask, mask, cpu_online_mask);
-		__cpumask_clear_cpu(this_cpu, cfd->cpumask);
+		cpumask_and(cpumask, mask, cpu_online_mask);
+		__cpumask_clear_cpu(this_cpu, cpumask);
 
 		cpumask_clear(cfd->cpumask_ipi);
-		for_each_cpu(cpu, cfd->cpumask) {
+		for_each_cpu(cpu, cpumask) {
 			call_single_data_t *csd = per_cpu_ptr(cfd->csd, cpu);
 
 			if (cond_func && !cond_func(cpu, info)) {
-				__cpumask_clear_cpu(cpu, cfd->cpumask);
+				__cpumask_clear_cpu(cpu, cpumask);
 				continue;
 			}
 
@@ -876,8 +895,15 @@ static void smp_call_function_many_cond(const struct cpumask *mask,
 		local_irq_restore(flags);
 	}
 
+	/*
+	 * The IPI work has been queued and dispatched. Preemption can now be
+	 * re-enabled before waiting for completion. The wait mask is local
+	 * to this stack frame, so it cannot be overwritten by another task.
+	 */
+	put_cpu();
+
 	if (run_remote && wait) {
-		for_each_cpu(cpu, cfd->cpumask) {
+		for_each_cpu(cpu, cpumask) {
 			call_single_data_t *csd;
 
 			csd = per_cpu_ptr(cfd->csd, cpu);
@@ -887,16 +913,15 @@ static void smp_call_function_many_cond(const struct cpumask *mask,
 }
 
 /**
- * smp_call_function_many(): Run a function on a set of CPUs.
- * @mask: The set of cpus to run on (only runs on online subset).
- * @func: The function to run. This must be fast and non-blocking.
- * @info: An arbitrary pointer to pass to the function.
- * @wait: If true, wait (atomically) until function has completed
- *        on other CPUs.
+ * smp_call_function_many() - Run a function on a set of CPUs.
+ * @mask:	The set of cpus to run on (only runs on online subset).
+ * @func:	The function to run. This must be fast and non-blocking.
+ * @info:	An arbitrary pointer to pass to the function.
+ * @wait:	If true, wait (atomically) until function has completed
+ *		on other CPUs.
  *
  * You must not call this function with disabled interrupts or from a
- * hardware interrupt handler or from a bottom half handler. Preemption
- * must be disabled when calling this function.
+ * hardware interrupt handler or from a bottom half handler.
  *
  * @func is not called on the local CPU even if @mask contains it.  Consider
  * using on_each_cpu_cond_mask() instead if this is not desirable.
@@ -910,10 +935,10 @@ EXPORT_SYMBOL(smp_call_function_many);
 
 /**
  * smp_call_function(): Run a function on all other CPUs.
- * @func: The function to run. This must be fast and non-blocking.
- * @info: An arbitrary pointer to pass to the function.
- * @wait: If true, wait (atomically) until function has completed
- *        on other CPUs.
+ * @func:	The function to run. This must be fast and non-blocking.
+ * @info:	An arbitrary pointer to pass to the function.
+ * @wait:	If true, wait (atomically) until function has completed
+ *		on other CPUs.
  *
  * Returns 0.
  *
@@ -925,9 +950,8 @@ EXPORT_SYMBOL(smp_call_function_many);
  */
 void smp_call_function(smp_call_func_t func, void *info, int wait)
 {
-	preempt_disable();
-	smp_call_function_many(cpu_online_mask, func, info, wait);
-	preempt_enable();
+	smp_call_function_many_cond(cpu_online_mask, func, info,
+				    wait ? SCF_WAIT : 0, NULL);
 }
 EXPORT_SYMBOL(smp_call_function);
 
@@ -1029,11 +1053,13 @@ void __init smp_init(void)
  * @func:	The function to run on all applicable CPUs.
  *		This must be fast and non-blocking.
  * @info:	An arbitrary pointer to pass to both functions.
- * @wait:	If true, wait (atomically) until function has
- *		completed on other CPUs.
+ * @wait:	If true, wait until function has completed on other CPUs.
  *
- * Preemption is disabled to protect against CPUs going offline but not online.
- * CPUs going online during the call will not be seen or sent an IPI.
+ * Target CPU selection and work queueing are done with preemption
+ * disabled. This protects against CPUs going offline, but not against
+ * CPUs coming online concurrently; newly online CPUs are not guaranteed
+ * to be seen or sent an IPI. If @wait is true, the final wait for remote
+ * completion happens after that preemption-disabled section.
  *
  * You must not call this function with disabled interrupts or
  * from a hardware interrupt handler or from a bottom half handler.
@@ -1046,9 +1072,7 @@ void on_each_cpu_cond_mask(smp_cond_func_t cond_func, smp_call_func_t func,
 	if (wait)
 		scf_flags |= SCF_WAIT;
 
-	preempt_disable();
 	smp_call_function_many_cond(mask, func, info, scf_flags, cond_func);
-	preempt_enable();
 }
 EXPORT_SYMBOL(on_each_cpu_cond_mask);
 

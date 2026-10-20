@@ -1266,12 +1266,12 @@ static int ufs_mtk_pwr_change_notify(struct ufs_hba *hba,
 				     struct ufs_pa_layer_attr *dev_req_params)
 {
 	int ret = 0;
-	static u32 reg;
 
 	switch (stage) {
 	case PRE_CHANGE:
 		if (ufshcd_is_auto_hibern8_supported(hba)) {
-			reg = ufshcd_readl(hba, REG_AUTO_HIBERNATE_IDLE_TIMER);
+			/* Block sysfs AHIT writes while we force AHIT off */
+			ufshcd_ahit_disable(hba);
 			ufs_mtk_auto_hibern8_disable(hba);
 		}
 		ret = ufs_mtk_pre_pwr_change(hba, dev_max_params,
@@ -1279,7 +1279,7 @@ static int ufs_mtk_pwr_change_notify(struct ufs_hba *hba,
 		break;
 	case POST_CHANGE:
 		if (ufshcd_is_auto_hibern8_supported(hba))
-			ufshcd_writel(hba, reg, REG_AUTO_HIBERNATE_IDLE_TIMER);
+			ufshcd_ahit_enable(hba);
 		break;
 	default:
 		ret = -EINVAL;

@@ -22,7 +22,7 @@
 
 /* Precision of fixed point for the m values from the filter */
 #define M_PRECISION BIT(23)
-#define MAX_DRIFT_PPM 200LL
+#define MAX_DRIFT_PPM 5000LL
 #define MAX_M ((s64)(MAX_DRIFT_PPM * M_PRECISION / 1000000))
 
 /* Only activate the filter once we have at least this many elements. */
@@ -278,7 +278,7 @@ cros_ec_sensor_ring_ts_filter_update(struct cros_ec_sensors_ts_filter_state
 	dy = (state->y_history[0] + state->y_offset) - y;
 	m = div64_s64(dy * M_PRECISION, dx);
 	/*
-	 * Clamp the calculated slope to a realistic range (+/- 200 ppm).
+	 * Clamp the calculated slope to a realistic range (+/- 5000 ppm).
 	 * Temporary large jitter spikes can produce huge slopes (e.g. +/- 20000 ppm)
 	 * that would otherwise corrupt the median filter history.
 	 */

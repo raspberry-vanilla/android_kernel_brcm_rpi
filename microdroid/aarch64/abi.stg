@@ -535,6 +535,11 @@ pointer_reference {
   pointee_type_id: 0x392bba3e
 }
 pointer_reference {
+  id: 0x04e4820e
+  kind: POINTER
+  pointee_type_id: 0x39d2eea6
+}
+pointer_reference {
   id: 0x04ea42a7
   kind: POINTER
   pointee_type_id: 0x39e9ec01
@@ -4063,6 +4068,11 @@ pointer_reference {
   id: 0x21b9b50c
   kind: POINTER
   pointee_type_id: 0xaca632ad
+}
+pointer_reference {
+  id: 0x21e26633
+  kind: POINTER
+  pointee_type_id: 0xadc97e53
 }
 pointer_reference {
   id: 0x21e5ca8a
@@ -9005,6 +9015,11 @@ pointer_reference {
   pointee_type_id: 0xdf149691
 }
 pointer_reference {
+  id: 0x3d5e73a1
+  kind: POINTER
+  pointee_type_id: 0xdf392819
+}
+pointer_reference {
   id: 0x3d610880
   kind: POINTER
   pointee_type_id: 0xdfc4c49d
@@ -10928,6 +10943,11 @@ qualified {
   id: 0xdeba4131
   qualifier: CONST
   qualified_type_id: 0x0aaeb24e
+}
+qualified {
+  id: 0xdf392819
+  qualifier: CONST
+  qualified_type_id: 0x0ca316ec
 }
 qualified {
   id: 0xdfc4c49d
@@ -23593,6 +23613,11 @@ member {
   name: "cra_users"
   type_id: 0xd3c80119
   offset: 128
+}
+member {
+  id: 0x5200f72d
+  name: "crc"
+  type_id: 0x33756485
 }
 member {
   id: 0xeff5ade1
@@ -45711,6 +45736,12 @@ member {
   name: "name"
   type_id: 0x0121d57c
   offset: 192
+}
+member {
+  id: 0x0dda4969
+  name: "name"
+  type_id: 0x0121d57c
+  offset: 64
 }
 member {
   id: 0x0ddfe55c
@@ -85915,6 +85946,16 @@ struct_union {
   name: "module_sect_attrs"
 }
 struct_union {
+  id: 0xadc97e53
+  kind: STRUCT
+  name: "modversion_info"
+  definition {
+    bytesize: 64
+    member_id: 0x5200f72d
+    member_id: 0x0dda4969
+  }
+}
+struct_union {
   id: 0x74b70e80
   kind: STRUCT
   name: "mount"
@@ -98850,6 +98891,15 @@ function {
   parameter_id: 0x26ee682a
 }
 function {
+  id: 0x12d88613
+  return_type_id: 0x48b5725f
+  parameter_id: 0x0b27dc43
+  parameter_id: 0x21e26633
+  parameter_id: 0x3ad73636
+  parameter_id: 0x04e4820e
+  parameter_id: 0x3d5e73a1
+}
+function {
   id: 0x12deb8cd
   return_type_id: 0xd5cc9c9a
   parameter_id: 0x18bd6530
@@ -104407,19 +104457,31 @@ elf_symbol {
   name: "__put_task_struct"
   is_defined: true
   symbol_type: FUNCTION
+  crc: 0x5a86987e
   type_id: 0x17de3be6
   full_name: "__put_task_struct"
+}
+elf_symbol {
+  id: 0x7eaf76f6
+  name: "module_layout"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x01ec539e
+  type_id: 0x12d88613
+  full_name: "module_layout"
 }
 elf_symbol {
   id: 0xa459c02b
   name: "utf8_data_table"
   is_defined: true
   symbol_type: OBJECT
+  crc: 0x3565a929
   type_id: 0x45396185
   full_name: "utf8_data_table"
 }
 interface {
   id: 0x84ea5130
   symbol_id: 0x45993ba3
+  symbol_id: 0x7eaf76f6
   symbol_id: 0xa459c02b
 }

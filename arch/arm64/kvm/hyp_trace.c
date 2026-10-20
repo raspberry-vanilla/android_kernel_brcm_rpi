@@ -123,7 +123,7 @@ static void __hyp_clock_work(struct work_struct *work)
 					    err / NSEC_PER_USEC);
 	}
 
-	rate = div64_u64(delta_cycles * NSEC_PER_SEC, delta_boot);
+	rate = mul_u64_u64_div_u64(delta_cycles, NSEC_PER_SEC, delta_boot);
 	clocks_calc_mult_shift(&hyp_clock->mult, &hyp_clock->shift,
 			       rate, NSEC_PER_SEC, CLOCK_MAX_CONVERSION_S);
 

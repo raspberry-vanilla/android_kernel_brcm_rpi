@@ -200,6 +200,7 @@ enum {
 	Opt_errors,
 	Opt_nat_bits,
 	Opt_lookup_mode,
+	Opt_resizable_tail_secno,
 	Opt_err,
 };
 
@@ -282,6 +283,7 @@ static match_table_t f2fs_tokens = {
 	{Opt_errors, "errors=%s"},
 	{Opt_nat_bits, "nat_bits"},
 	{Opt_lookup_mode, "lookup_mode=%s"},
+	{Opt_resizable_tail_secno, "resizable_tail_secno=%u"},
 	{Opt_err, NULL},
 };
 
@@ -392,6 +394,17 @@ static inline void adjust_unusable_cap_perc(struct f2fs_sb_info *sbi)
 	f2fs_info(sbi, "Adjust unusable cap for checkpoint=disable = %u / %u%%",
 			F2FS_OPTION(sbi).unusable_cap,
 			F2FS_OPTION(sbi).unusable_cap_perc);
+}
+
+static inline void adjust_pinned_area_boundary(struct f2fs_sb_info *sbi)
+{
+	sbi->pinned_area_max_secno = MAIN_SECS(sbi);
+	if (f2fs_sb_has_blkzoned(sbi) && sbi->first_seq_zone_segno != NULL_SEGNO)
+		sbi->pinned_area_max_secno = min(sbi->pinned_area_max_secno,
+				GET_SEC_FROM_SEG(sbi, sbi->first_seq_zone_segno));
+	if (F2FS_OPTION(sbi).resizable_tail_secno)
+		sbi->pinned_area_max_secno = min(sbi->pinned_area_max_secno,
+				MAIN_SECS(sbi) - F2FS_OPTION(sbi).resizable_tail_secno);
 }
 
 static void init_once(void *foo)
@@ -1358,6 +1371,13 @@ static int parse_options(struct f2fs_sb_info *sbi, char *options, bool is_remoun
 			}
 			kfree(name);
 			break;
+		case Opt_resizable_tail_secno:
+			if (args->from && match_int(args, &arg))
+				return -EINVAL;
+			if (arg < 0)
+				return -EINVAL;
+			F2FS_OPTION(sbi).resizable_tail_secno = arg;
+			break;
 		default:
 			f2fs_err(sbi, "Unrecognized mount option \"%s\" or missing value",
 				 p);
@@ -1386,6 +1406,14 @@ static int f2fs_default_check(struct f2fs_sb_info *sbi)
 	if (!IS_ENABLED(CONFIG_UNICODE) && f2fs_sb_has_casefold(sbi)) {
 		f2fs_err(sbi,
 			"Filesystem with casefold feature cannot be mounted without CONFIG_UNICODE");
+		return -EINVAL;
+	}
+
+	if (F2FS_OPTION(sbi).resizable_tail_secno >=
+			le32_to_cpu(sbi->raw_super->section_count)) {
+		f2fs_err(sbi, "Option resizable_tail_secno is larger than or equal to total sections (%u >= %u)",
+				F2FS_OPTION(sbi).resizable_tail_secno,
+				le32_to_cpu(sbi->raw_super->section_count));
 		return -EINVAL;
 	}
 
@@ -1777,7 +1805,7 @@ static void f2fs_put_super(struct super_block *sb)
 	/* flush s_error_work before sbi destroy */
 	flush_work(&sbi->s_error_work);
 
-	f2fs_destroy_post_read_wq(sbi);
+	f2fs_destroy_wq(sbi);
 
 	kvfree(sbi->ckpt);
 
@@ -2241,6 +2269,10 @@ static int f2fs_show_options(struct seq_file *seq, struct dentry *root)
 	else if (f2fs_get_lookup_mode(sbi) == LOOKUP_AUTO)
 		seq_show_option(seq, "lookup_mode", "auto");
 
+	if (F2FS_OPTION(sbi).resizable_tail_secno)
+		seq_printf(seq, ",resizable_tail_secno=%u",
+				F2FS_OPTION(sbi).resizable_tail_secno);
+
 	return 0;
 }
 
@@ -2283,6 +2315,7 @@ static void default_options(struct f2fs_sb_info *sbi, bool remount)
 	F2FS_OPTION(sbi).bggc_mode = BGGC_MODE_ON;
 	F2FS_OPTION(sbi).memory_mode = MEMORY_MODE_NORMAL;
 	F2FS_OPTION(sbi).errors = MOUNT_ERRORS_CONTINUE;
+	F2FS_OPTION(sbi).resizable_tail_secno = 0;
 
 	set_opt(sbi, INLINE_XATTR);
 	set_opt(sbi, INLINE_DATA);
@@ -2755,6 +2788,7 @@ skip:
 	sb->s_flags = (sb->s_flags & ~SB_POSIXACL) |
 		(test_opt(sbi, POSIX_ACL) ? SB_POSIXACL : 0);
 
+	adjust_pinned_area_boundary(sbi);
 	limit_reserve_root(sbi);
 	*flags = (*flags & ~SB_LAZYTIME) | (sb->s_flags & SB_LAZYTIME);
 
@@ -4721,6 +4755,7 @@ try_onemore:
 
 	sb->s_fs_info = sbi;
 	sbi->raw_super = raw_super;
+	sbi->max_atc_write_bio_size = UINT_MAX;
 
 	INIT_WORK(&sbi->s_error_work, f2fs_record_error_work);
 	memcpy(sbi->errors, raw_super->s_errors, MAX_F2FS_ERRORS);
@@ -4848,9 +4883,9 @@ try_onemore:
 		goto free_devices;
 	}
 
-	err = f2fs_init_post_read_wq(sbi);
+	err = f2fs_init_wq(sbi);
 	if (err) {
-		f2fs_err(sbi, "Failed to initialize post read workqueue");
+		f2fs_err(sbi, "Failed to create workqueue");
 		goto free_devices;
 	}
 
@@ -4905,6 +4940,8 @@ try_onemore:
 
 	/* get segno of first zoned block device */
 	sbi->first_seq_zone_segno = get_first_seq_zone_segno(sbi);
+
+	adjust_pinned_area_boundary(sbi);
 
 	sbi->reserved_pin_section = f2fs_sb_has_blkzoned(sbi) ?
 			ZONED_PIN_SEC_REQUIRED_COUNT :
@@ -5143,7 +5180,7 @@ stop_ckpt_thread:
 	f2fs_stop_ckpt_thread(sbi);
 	/* flush s_error_work before sbi destroy */
 	flush_work(&sbi->s_error_work);
-	f2fs_destroy_post_read_wq(sbi);
+	f2fs_destroy_wq(sbi);
 free_devices:
 	destroy_device_list(sbi);
 	kvfree(sbi->ckpt);

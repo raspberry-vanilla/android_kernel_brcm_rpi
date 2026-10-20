@@ -9,6 +9,7 @@
 #include <linux/bitfield.h>
 #include <linux/errno.h>
 #include <linux/interrupt.h>
+#include <linux/ktime.h>
 #include <linux/limits.h>
 #include <linux/list.h>
 #include <linux/mod_devicetable.h>
@@ -608,4 +609,41 @@ gunyah_hypercall_addrspace_find_info_area(unsigned long *ipa, unsigned long *siz
 enum gunyah_error
 #define GUNYAH_ADDRSPACE_VMMIO_CONFIGURE_OP_ADD_RANGE	0
 gunyah_hypercall_addrspc_configure_vmmio_range(u64 capid, u64 base, u64 size, u64 op);
+
+/******************************************************************************/
+/* Arch-specific timer functions for deadline conversion                      */
+
+#if IS_REACHABLE(CONFIG_GUNYAH_TIMER)
+/**
+ * gunyah_arch_timer_init() - Initialize arch-specific timer scaling factors
+ *
+ * Must be called once during driver initialization to set up the timer
+ * conversion parameters. This pre-calculates the scaling factors needed
+ * to convert hypervisor tick deadlines to kernel time.
+ *
+ * Returns: 0 on success, negative error code on failure
+ */
+int gunyah_arch_timer_init(void);
+#else
+static inline int gunyah_arch_timer_init(void)
+{
+	return 0;
+}
+#endif /* IS_REACHABLE(CONFIG_GUNYAH_TIMER) */
+
+/**
+ * gunyah_arch_deadline_to_ktime() - Convert hypervisor tick deadline to CLOCK_MONOTONIC ktime
+ * @timeout_ticks: Absolute deadline in system counter ticks
+ * @expires:       Output ktime, set only when the deadline is still in the future
+ *
+ * Converts a hypervisor-provided absolute deadline (in system counter ticks)
+ * to a kernel ktime value suitable for use with hrtimer.
+ *
+ * Returns: true and populates @expires if @timeout_ticks is still in the future
+ *          and the counter frequency is available. Returns false if the deadline
+ *          has already passed or the frequency is unavailable; the caller should
+ *          re-enter the hypercall immediately without waiting.
+ */
+bool gunyah_arch_deadline_to_ktime(u64 timeout_ticks, ktime_t *expires);
+
 #endif
