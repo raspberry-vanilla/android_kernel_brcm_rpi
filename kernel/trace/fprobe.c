@@ -778,14 +778,15 @@ bool fprobe_is_registered(struct fprobe *fp)
 }
 
 /**
- * unregister_fprobe() - Unregister fprobe.
+ * unregister_fprobe_async() - Unregister fprobe without RCU GP wait
  * @fp: A fprobe data structure to be unregistered.
  *
  * Unregister fprobe (and remove ftrace hooks from the function entries).
+ * This function will NOT wait until the fprobe is no longer used.
  *
  * Return 0 if @fp is unregistered successfully, -errno if not.
  */
-int unregister_fprobe(struct fprobe *fp)
+int unregister_fprobe_async(struct fprobe *fp)
 {
 	struct fprobe_hlist *hlist_array;
 	unsigned long *addrs = NULL;
@@ -821,6 +822,24 @@ out:
 	mutex_unlock(&fprobe_mutex);
 
 	kfree(addrs);
+	return ret;
+}
+
+/**
+ * unregister_fprobe() - Unregister fprobe with RCU GP wait
+ * @fp: A fprobe data structure to be unregistered.
+ *
+ * Unregister fprobe (and remove ftrace hooks from the function entries).
+ * This function will block until the fprobe is no longer used.
+ *
+ * Return 0 if @fp is unregistered successfully, -errno if not.
+ */
+int unregister_fprobe(struct fprobe *fp)
+{
+	int ret = unregister_fprobe_async(fp);
+
+	if (!ret)
+		synchronize_rcu();
 	return ret;
 }
 EXPORT_SYMBOL_GPL(unregister_fprobe);
