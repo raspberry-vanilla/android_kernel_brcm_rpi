@@ -363,6 +363,14 @@ impl LocalFile {
         // SAFETY: The file is valid because the shared reference guarantees a nonzero refcount.
         unsafe { (*self.as_ptr()).f_mode }
     }
+
+    /// Returns the size of the file's inode in bytes.
+    #[inline]
+    pub fn i_size_read(&self) -> Offset {
+        // SAFETY: The file is valid because the shared reference guarantees a nonzero refcount, so
+        // `file_inode` returns a valid `struct inode` pointer for the duration of this call.
+        unsafe { bindings::i_size_read(bindings::file_inode(self.as_ptr())) }
+    }
 }
 
 impl File {

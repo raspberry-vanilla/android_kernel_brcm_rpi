@@ -1080,6 +1080,9 @@
   fwnode_typec_mux_get
   fwnode_typec_switch_get
   gcd
+  gcma_alloc_range
+  gcma_free_range
+  gcma_stat_get
   generic_device_group
   generic_file_llseek
   generic_handle_domain_irq
@@ -2100,6 +2103,7 @@
   register_chrdev_region
   register_console
   register_die_notifier
+  register_gcma_area
   register_inet6addr_notifier
   register_inetaddr_notifier
   register_kretprobe
@@ -2598,6 +2602,7 @@
   __traceiter_android_vh_do_sync_mmap_readahead
   __traceiter_android_vh_dwc3_core_soft_reset
   __traceiter_android_vh_dwc3_xhci_soft_reset
+  __traceiter_android_vh_enable_thermal_genl_check
   __traceiter_android_vh_ep_create_wakeup_source
   __traceiter_android_vh_filemap_get_folio
   __traceiter_android_vh_free_one_page_flag_check
@@ -2623,6 +2628,7 @@
   __traceiter_android_vh_smaps_pte_entry
   __traceiter_android_vh_swap_writepage
   __traceiter_android_vh_sysrq_crash
+  __traceiter_android_vh_thermal_pm_notify_suspend
   __traceiter_android_vh_timerfd_create
   __traceiter_android_vh_tune_swappiness
   __traceiter_android_vh_ufs_check_int_errors
@@ -2684,6 +2690,7 @@
   __tracepoint_android_vh_do_sync_mmap_readahead
   __tracepoint_android_vh_dwc3_core_soft_reset
   __tracepoint_android_vh_dwc3_xhci_soft_reset
+  __tracepoint_android_vh_enable_thermal_genl_check
   __tracepoint_android_vh_ep_create_wakeup_source
   __tracepoint_android_vh_filemap_get_folio
   __tracepoint_android_vh_free_one_page_flag_check
@@ -2709,6 +2716,7 @@
   __tracepoint_android_vh_smaps_pte_entry
   __tracepoint_android_vh_swap_writepage
   __tracepoint_android_vh_sysrq_crash
+  __tracepoint_android_vh_thermal_pm_notify_suspend
   __tracepoint_android_vh_timerfd_create
   __tracepoint_android_vh_tune_swappiness
   __tracepoint_android_vh_ufs_check_int_errors

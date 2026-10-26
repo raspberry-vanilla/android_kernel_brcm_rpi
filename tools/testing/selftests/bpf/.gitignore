@@ -46,3 +46,6 @@ xdp_synproxy
 xdp_hw_metadata
 xdp_features
 verification_cert.h
+*.BTF
+*.BTF_ids
+*.BTF.base

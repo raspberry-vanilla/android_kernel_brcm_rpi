@@ -743,6 +743,8 @@ static int gunyah_gup_reclaim_parcel(struct gunyah_vm *ghvm,
 	struct gunyah_rm_mem_entry *entry;
 	struct folio *folio;
 	pgoff_t i;
+	u64 phys_addr, end_addr;
+	size_t folio_sz;
 	int ret;
 
 	if (parcel->mem_handle == GUNYAH_MEM_HANDLE_INVAL)
@@ -761,14 +763,29 @@ static int gunyah_gup_reclaim_parcel(struct gunyah_vm *ghvm,
 
 	for (i = 0; i < parcel->n_mem_entries; i++) {
 		entry = &parcel->mem_entries[i];
+		phys_addr = le64_to_cpu(entry->phys_addr);
+		end_addr = phys_addr + le64_to_cpu(entry->size);
 
-		folio = pfn_folio(PHYS_PFN(le64_to_cpu(entry->phys_addr)));
+		/*
+		 * A single entry can span multiple folios that were merged
+		 * together at share time because they were physically
+		 * contiguous (see the entry_size coalescing in
+		 * gunyah_gup_share_parcel()). Each of those folios holds its
+		 * own GUP pin, so every one of them must be unpinned here,
+		 * not just the folio at entry->phys_addr.
+		 */
+		while (phys_addr < end_addr) {
+			folio = pfn_folio(PHYS_PFN(phys_addr));
+			folio_sz = folio_size(folio);
 
-		if (folio_test_private(folio))
-			gunyah_folio_host_reclaim(folio);
+			if (folio_test_private(folio))
+				gunyah_folio_host_reclaim(folio);
 
-		unpin_user_page(folio_page(folio, 0));
-		account_locked_vm(ghvm->mm_s, 1, false);
+			unpin_user_page(folio_page(folio, 0));
+			account_locked_vm(ghvm->mm_s, 1, false);
+
+			phys_addr += folio_sz;
+		}
 	}
 
 	parcel->mem_handle = GUNYAH_MEM_HANDLE_INVAL;

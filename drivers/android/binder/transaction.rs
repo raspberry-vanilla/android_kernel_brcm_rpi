@@ -825,7 +825,7 @@ impl DeliverToRead for Transaction {
         self.flags & TF_ONE_WAY == 0
     }
 
-    fn debug_print(&self, m: &SeqFile, _prefix: &str, tprefix: &str) -> Result<()> {
+    fn debug_print(&self, m: &SeqFile, _prefix: &str, tprefix: &str, _hashed: bool) -> Result {
         self.debug_print_inner(m, tprefix);
         Ok(())
     }

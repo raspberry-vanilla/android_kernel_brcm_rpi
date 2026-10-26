@@ -9,7 +9,7 @@ use crate::module_parameters;
 use kernel::{
     alloc::{AllocError, Flags},
     bindings,
-    dma_buf::{CpuAccess, DmaBufVmap},
+    dma_buf::CpuAccess,
     ffi,
     fs::LocalFile,
     new_spinlock_irq,
@@ -17,7 +17,7 @@ use kernel::{
         is_page_aligned, offset_in_page, page_align, page_align_down, Page, PAGE_MASK, PAGE_SIZE,
     },
     prelude::*,
-    sync::{Arc, SpinLockIrq},
+    sync::{Arc, Completion, SpinLockIrq},
     types::{ARef, Opaque},
 };
 
@@ -83,7 +83,7 @@ struct IoResults {
 #[pin_data]
 struct SharedContext {
     #[pin]
-    io_done: Opaque<bindings::completion>,
+    io_done: Completion,
 
     #[pin]
     inner: SpinLockIrq<IoResults>,
@@ -95,12 +95,7 @@ struct SharedContext {
 impl SharedContext {
     fn new(nr_reqs: usize) -> impl PinInit<Self> {
         pin_init!(Self {
-            io_done <- Opaque::ffi_init(|slot| {
-                // SAFETY: `slot` points to valid, properly aligned, uninitialized memory for a
-                // `struct completion` provided by `Opaque::ffi_init`. `init_completion` safely
-                // initializes it in place.
-                unsafe { bindings::init_completion(slot) }
-            }),
+            io_done <- Completion::new(),
             inner <- new_spinlock_irq!(IoResults {
                 io_ret: 0,
                 bytes_read: 0,
@@ -212,22 +207,18 @@ impl IoRequest {
         // disappear in the process of executing `complete()` below.
         let shared_context = Arc::clone(shared_context);
 
-        shared_context.inner.lock_irq(|mut guard| {
-            if ret < 0 && guard.io_ret == 0 {
-                guard.io_ret = ret;
-            } else if ret > 0 {
-                guard.bytes_read += ret as usize;
-            }
+        let mut guard = shared_context.inner.lock();
+        if ret < 0 && guard.io_ret == 0 {
+            guard.io_ret = ret;
+        } else if ret > 0 {
+            guard.bytes_read += ret as usize;
+        }
 
-            guard.nr_reqs -= 1;
+        guard.nr_reqs -= 1;
 
-            if guard.nr_reqs == 0 {
-                // SAFETY: `SharedContext::io_done` is a properly initialized
-                // `Opaque<bindings::completion>`, and remains valid because `shared_context`
-                // holds a strong `Arc` reference across this call.
-                unsafe { bindings::complete(shared_context.io_done.get()) };
-            }
-        });
+        if guard.nr_reqs == 0 {
+            shared_context.io_done.complete_all();
+        }
     }
 }
 
@@ -261,8 +252,7 @@ impl IoContext {
     /// # Safety
     ///
     /// The caller must guarantee that `vaddr` points to a valid, writable buffer of at least
-    /// `buf_offs + len` bytes that remains allocated and valid across the call to `read()`, and
-    /// matches `map.vaddr()` passed to `complete()`.
+    /// `buf_offs + len` bytes that remains allocated and valid across the call to `read()`.
     pub(crate) unsafe fn new(
         file_offs: usize,
         vaddr: NonNull<ffi::c_void>,
@@ -568,16 +558,15 @@ impl IoContext {
             }
         }
 
-        // SAFETY: `shared_context.io_done` points to a valid `struct completion` initialized in
-        // `SharedContext::new`, and `shared_context` remains live via `Arc` for this call.
-        unsafe { bindings::wait_for_completion(shared_context.io_done.get()) };
+        shared_context.io_done.wait_for_completion();
 
         // It is unfortunate that the kernel SpinLock cannot be unwrapped using something like
         // `into_inner()` now that we no longer need to protect that content. An alternative
         // approach would be to get rid of the SpinLock altogether and use atomic operations
         // to manage the shared state, which would be possible in the current implementation but
         // not necessarily generalize to future additions.
-        let bytes_read = shared_context.inner.lock_irq(|guard| {
+        let bytes_read = {
+            let guard = shared_context.inner.lock();
             let ret = guard.io_ret;
             if ret != 0 {
                 return Err(Error::from_errno(ret as i32));
@@ -587,19 +576,15 @@ impl IoContext {
                 return Err(EINVAL);
             }
 
-            Ok(guard.bytes_read)
-        })?;
+            guard.bytes_read
+        };
 
         self.state = State::ReadDone(bytes_read);
 
         Ok(())
     }
 
-    pub(crate) fn complete<'access, const READ: bool>(
-        &mut self,
-        map: &DmaBufVmap,
-        mut access: CpuAccess<'access, READ, true>,
-    ) -> Result<()> {
+    pub(crate) fn complete(&mut self, mut access: CpuAccess<'_, true, true>) -> Result<()> {
         let State::ReadDone(bytes_read) = self.state else {
             return Err(EINVAL);
         };
@@ -639,17 +624,7 @@ impl IoContext {
              * it's in the right place. Shift it back if it's not.
              */
             if dio_start != dst_offset {
-                // This should never fail as we verified that the map is valid and gives us
-                // a valid vaddr earlier in "load_prepare".
-                let vaddr = map.vaddr().ok_or(EINVAL)?.as_ptr();
-
-                // SAFETY: By the safety contract of `IoContext::new`, `vaddr` backs the buffer
-                // region `[0, self.buf_offs + self.file_seg.len)`. Both `dst_offset + len` and
-                // `dio_start + len` lie within this mapped allocation, so `byte_add` is in bounds
-                // and `memmove` safely copies potentially overlapping regions within the buffer.
-                unsafe {
-                    bindings::memmove(vaddr.byte_add(dst_offset), vaddr.byte_add(dio_start), len)
-                };
+                access.copy_within(dio_start..dio_start + len, dst_offset)?;
             }
 
             dst_offset += len;

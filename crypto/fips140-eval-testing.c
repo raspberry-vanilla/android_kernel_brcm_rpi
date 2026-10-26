@@ -29,9 +29,12 @@
 #undef KBUILD_MODFILE
 #undef __DISABLE_EXPORTS
 
+#include <crypto/aes.h>
+#include <crypto/sha2.h>
 #include <linux/cdev.h>
 #include <linux/fs.h>
 #include <linux/module.h>
+#include <linux/random.h>
 #include <linux/slab.h>
 
 #include "fips140-module.h"
@@ -106,6 +109,91 @@ static long fips140_ioctl_module_version(unsigned long arg)
 	return 0;
 }
 
+static void fips140_begin_zeroization_test(const char *test_name,
+					   const void *data, size_t len)
+{
+	pr_info("Testing %s zeroization...\n", test_name);
+	print_hex_dump(KERN_INFO, "BEFORE: ", DUMP_PREFIX_OFFSET, 16, 1, data,
+		       len, true);
+	WARN_ON_ONCE(mem_is_zero(data, len));
+}
+
+static __must_check bool fips140_end_zeroization_test(const char *test_name,
+						      const void *data,
+						      size_t len)
+{
+	pr_info("Executed %s zeroization\n", test_name);
+	print_hex_dump(KERN_INFO, "AFTER:  ", DUMP_PREFIX_OFFSET, 16, 1, data,
+		       len, true);
+	if (!mem_is_zero(data, len)) {
+		pr_err("%s zeroization test failed!\n", test_name);
+		return false;
+	}
+	pr_info("%s zeroization test passed.\n", test_name);
+	return true;
+}
+
+static noinline_for_stack bool fips140_test_zeroization_raw(void)
+{
+	u8 data[32];
+
+	get_random_bytes(data, sizeof(data));
+	fips140_begin_zeroization_test("memzero_explicit", data, sizeof(data));
+	memzero_explicit(data, sizeof(data));
+	return fips140_end_zeroization_test("memzero_explicit", data,
+					    sizeof(data));
+}
+
+static noinline_for_stack bool fips140_test_zeroization_aes(void)
+{
+	u8 raw_key[AES_KEYSIZE_256];
+	struct crypto_aes_ctx aes_key;
+	int err;
+
+	get_random_bytes(raw_key, sizeof(raw_key));
+	err = aes_expandkey(&aes_key, raw_key, sizeof(raw_key));
+	memzero_explicit(raw_key, sizeof(raw_key));
+	if (err) {
+		pr_err("AES key preparation failed\n");
+		return false;
+	}
+	fips140_begin_zeroization_test("AES key", &aes_key, sizeof(aes_key));
+	memzero_explicit(&aes_key, sizeof(aes_key));
+	return fips140_end_zeroization_test("AES key", &aes_key,
+					    sizeof(aes_key));
+}
+
+static noinline_for_stack bool fips140_test_zeroization_hmac_sha512(void)
+{
+	u8 raw_key[32];
+	u8 data[SHA512_BLOCK_SIZE];
+	struct hmac_sha512_ctx ctx;
+	u8 mac[SHA512_DIGEST_SIZE];
+
+	get_random_bytes(raw_key, sizeof(raw_key));
+	hmac_sha512_init_usingrawkey(&ctx, raw_key, sizeof(raw_key));
+	memzero_explicit(raw_key, sizeof(raw_key));
+
+	get_random_bytes(data, sizeof(data));
+	hmac_sha512_update(&ctx, data, sizeof(data));
+	fips140_begin_zeroization_test("HMAC-SHA512 context", &ctx,
+				       sizeof(ctx));
+	hmac_sha512_final(&ctx, mac);
+	return fips140_end_zeroization_test("HMAC-SHA512 context", &ctx,
+					    sizeof(ctx));
+}
+
+/* Run zeroization tests for selected cases. */
+static int fips140_ioctl_test_zeroization(void)
+{
+	bool ok = true;
+
+	ok &= fips140_test_zeroization_raw();
+	ok &= fips140_test_zeroization_aes();
+	ok &= fips140_test_zeroization_hmac_sha512();
+	return ok ? 1 : 0;
+}
+
 static long fips140_ioctl(struct file *file, unsigned int cmd,
 			  unsigned long arg)
 {
@@ -114,6 +202,8 @@ static long fips140_ioctl(struct file *file, unsigned int cmd,
 		return fips140_ioctl_is_approved_service(arg);
 	case FIPS140_IOCTL_MODULE_VERSION:
 		return fips140_ioctl_module_version(arg);
+	case FIPS140_IOCTL_TEST_ZEROIZATION:
+		return fips140_ioctl_test_zeroization();
 	default:
 		return -ENOTTY;
 	}

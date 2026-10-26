@@ -215,6 +215,7 @@
   build_skb
   bus_find_device
   bus_for_each_dev
+  bus_get_dev_root
   bus_register
   bus_register_notifier
   bus_unregister
@@ -334,6 +335,7 @@
   cppc_get_perf_caps
   cpu_bit_bitmap
   cpu_core_map
+  cpu_die_map
   cpufreq_cpu_get
   cpufreq_cpu_get_raw
   cpufreq_cpu_put
@@ -359,6 +361,7 @@
   cpu_sibling_map
   cpus_read_lock
   cpus_read_unlock
+  cpu_subsys
   crc16
   crc32_be
   crc32_le
@@ -3721,6 +3724,7 @@
   wrmsr_on_cpu
   wrmsr_safe_on_cpu
   wrmsr_safe_regs_on_cpu
+  wrmsrq_on_cpu
   wwan_create_port
   wwan_port_get_drvdata
   wwan_port_rx

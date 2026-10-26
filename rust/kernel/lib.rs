@@ -101,6 +101,7 @@ pub mod id_pool;
 #[doc(hidden)]
 pub mod impl_flags;
 pub mod init;
+pub mod interrupt;
 pub mod io;
 pub mod ioctl;
 pub mod iov;

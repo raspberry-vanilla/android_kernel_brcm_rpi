@@ -12,6 +12,7 @@
 #include <linux/export.h>
 #include <linux/kernel_stat.h>
 #include <linux/interrupt.h>
+#include <linux/interrupt_rc.h>
 #include <linux/init.h>
 #include <linux/local_lock.h>
 #include <linux/mm.h>
@@ -110,6 +111,68 @@ DEFINE_PER_CPU(int, hardirq_context);
 EXPORT_PER_CPU_SYMBOL_GPL(hardirqs_enabled);
 EXPORT_PER_CPU_SYMBOL_GPL(hardirq_context);
 #endif
+
+/*
+ * Refcounted local interrupt disabling; see <linux/interrupt_rc.h>.
+ *
+ * @local_interrupt_disable_count is the nesting depth on this CPU and
+ * @local_interrupt_disable_flags holds the irqflags captured by the outermost
+ * local_interrupt_disable().
+ *
+ * Both are only ever accessed by the owning CPU with interrupts disabled, so
+ * no atomics are needed: local_interrupt_disable() disables interrupts before
+ * touching the count, and a non-zero count implies interrupts are disabled.
+ */
+static DEFINE_PER_CPU(unsigned int, local_interrupt_disable_count);
+static DEFINE_PER_CPU(unsigned long, local_interrupt_disable_flags);
+
+void local_interrupt_disable(void)
+{
+	unsigned int count;
+	unsigned long flags;
+
+	WARN_ON_ONCE(in_nmi());
+
+	/*
+	 * Disable interrupts before touching the count, so that an interrupt
+	 * handler on this CPU cannot observe or modify a half-updated state.
+	 */
+	local_irq_save(flags);
+
+	count = raw_cpu_read(local_interrupt_disable_count);
+	if (count == 0) {
+		preempt_disable();
+		raw_cpu_write(local_interrupt_disable_flags, flags);
+	}
+
+	raw_cpu_write(local_interrupt_disable_count, count + 1);
+}
+EXPORT_SYMBOL_GPL(local_interrupt_disable);
+
+void local_interrupt_enable(void)
+{
+	unsigned int count = raw_cpu_read(local_interrupt_disable_count);
+
+	if (WARN_ON_ONCE(count == 0))
+		return;
+
+	count--;
+	raw_cpu_write(local_interrupt_disable_count, count);
+
+	if (count == 0) {
+		unsigned long flags = raw_cpu_read(local_interrupt_disable_flags);
+
+		/*
+		 * Restore rather than unconditionally enable: the outermost
+		 * local_interrupt_disable() may itself have run with
+		 * interrupts already disabled, in which case they must stay
+		 * disabled here.
+		 */
+		local_irq_restore(flags);
+		preempt_enable();
+	}
+}
+EXPORT_SYMBOL_GPL(local_interrupt_enable);
 
 /*
  * SOFTIRQ_OFFSET usage:

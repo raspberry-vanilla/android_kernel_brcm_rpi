@@ -1788,7 +1788,6 @@ static unsigned long mod_direct_hyp_base;
 
 unsigned long pkvm_el2_mod_kern_va(unsigned long addr)
 {
-#ifdef CONFIG_PKVM_STACKTRACE
 	struct pkvm_el2_module *mod;
 
 	/* Fast lookup into the direct range */
@@ -1806,7 +1805,7 @@ unsigned long pkvm_el2_mod_kern_va(unsigned long addr)
 			return (unsigned long)mod->sections.start +
 				(addr - hyp_va);
 	}
-#endif
+
 	return 0;
 }
 

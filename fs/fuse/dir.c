@@ -354,30 +354,19 @@ invalid:
 	goto out;
 }
 
+#if BITS_PER_LONG < 64 || defined(CONFIG_FUSE_BPF)
 static int fuse_dentry_init(struct dentry *dentry)
 {
-	int ret = 0;
-
-	/*
-	 * Initialising d_time (epoch) to '0' ensures the dentry is invalid
-	 * if compared to fc->epoch, which is initialized to '1'.
-	 */
-	dentry->d_time = 0;
-
-#if BITS_PER_LONG < 64 || defined(CONFIG_FUSE_BPF)
 	dentry->d_fsdata = kzalloc(sizeof(struct fuse_dentry),
 				   GFP_KERNEL_ACCOUNT | __GFP_RECLAIMABLE);
 
-	ret = dentry->d_fsdata ? 0 : -ENOMEM;
-#endif
-
-	return ret;
+	return dentry->d_fsdata ? 0 : -ENOMEM;
 }
 static void fuse_dentry_release(struct dentry *dentry)
 {
 	struct fuse_dentry *fd = dentry->d_fsdata;
 
-#if BITS_PER_LONG < 64 || defined(CONFIG_FUSE_BPF)
+#ifdef CONFIG_FUSE_BPF
 	if (fd && fd->backing_path.dentry)
 		path_put(&fd->backing_path);
 
@@ -387,6 +376,7 @@ static void fuse_dentry_release(struct dentry *dentry)
 
 	kfree_rcu(fd, rcu);
 }
+#endif
 
 static int fuse_dentry_delete(const struct dentry *dentry)
 {
@@ -481,8 +471,10 @@ out:
 const struct dentry_operations fuse_dentry_operations = {
 	.d_revalidate	= fuse_dentry_revalidate,
 	.d_delete	= fuse_dentry_delete,
+#if BITS_PER_LONG < 64 || defined(CONFIG_FUSE_BPF)
 	.d_init		= fuse_dentry_init,
 	.d_release	= fuse_dentry_release,
+#endif
 	.d_automount	= fuse_dentry_automount,
 	.d_canonical_path = fuse_dentry_canonical_path,
 };

@@ -14993,6 +14993,13 @@ static int __pkvm_vcpu_enter_guest(struct kvm_vcpu *vcpu, bool force_immediate_e
 		if (kvm_check_request(KVM_REQ_TLB_FLUSH_GUEST, vcpu))
 			kvm_vcpu_flush_tlb_guest(vcpu);
 
+		if (kvm_check_request(KVM_REQ_TRIPLE_FAULT, vcpu)) {
+			pkvm_make_req_to_host(HOST_TRIPLE_FAULT, vcpu);
+			if (pkvm_is_protected_vcpu(vcpu))
+				vcpu->arch.mp_state = KVM_MP_STATE_STOPPED;
+			return 0;
+		}
+
 		if (kvm_check_request(KVM_REQ_APICV_UPDATE, vcpu))
 			kvm_vcpu_update_apicv(vcpu);
 

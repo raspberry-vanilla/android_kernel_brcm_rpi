@@ -15,6 +15,7 @@
   arc4_setkey
   __arch_copy_from_user
   __arch_copy_to_user
+  arch_timer_read_counter
   arm64_use_ng_mappings
   __arm_smccc_smc
   autoremove_wake_function
@@ -1200,6 +1201,7 @@
   __rcu_read_unlock
   rdev_get_drvdata
   rdev_get_id
+  rdev_get_name
   refcount_warn_saturate
   regcache_cache_bypass
   regcache_cache_only
@@ -1232,12 +1234,17 @@
   regmap_write
   regulator_bulk_disable
   regulator_bulk_enable
+  regulator_check_consumers
+  regulator_check_voltage
+  regulator_coupler_register
   regulator_disable
   regulator_disable_regmap
+  regulator_do_balance_voltage
   regulator_enable
   regulator_enable_regmap
   regulator_get
   regulator_get_optional
+  regulator_get_voltage_rdev
   regulator_get_voltage_sel_regmap
   regulator_is_enabled
   regulator_is_enabled_regmap
@@ -1250,6 +1257,7 @@
   regulator_put
   regulator_set_mode
   regulator_set_voltage
+  regulator_set_voltage_rdev
   regulator_set_voltage_sel_regmap
   regulator_set_voltage_time_sel
   release_firmware
@@ -1314,6 +1322,10 @@
   sched_set_fifo_low
   schedule
   schedule_timeout
+  scmi_driver_register
+  scmi_driver_unregister
+  scmi_protocol_register
+  scmi_protocol_unregister
   scnprintf
   sdio_claim_host
   sdio_claim_irq
@@ -1669,6 +1681,8 @@
   ucsi_set_drvdata
   ucsi_sync_control_common
   ucsi_unregister
+  ufshcd_ahit_disable
+  ufshcd_ahit_enable
   ufshcd_delay_us
   ufshcd_dme_configure_adapt
   ufshcd_dme_get_attr

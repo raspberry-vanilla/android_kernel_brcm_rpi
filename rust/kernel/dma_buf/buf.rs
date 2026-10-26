@@ -11,11 +11,14 @@ use crate::{
     error::{from_err_ptr, to_result},
     fs::File,
     prelude::*,
+    scatterlist::SGTable,
     sync::SpinLock,
     types::{ARef, AlwaysRefCounted, Opaque},
 };
 use core::{
     marker::PhantomData,
+    ops::Deref,
+    ops::{Bound, RangeBounds},
     ptr::{self, NonNull},
 };
 
@@ -237,6 +240,16 @@ impl Drop for DmaBufMapping {
     }
 }
 
+impl Deref for DmaBufMapping {
+    type Target = SGTable;
+
+    #[inline]
+    fn deref(&self) -> &Self::Target {
+        // SAFETY: `self.sgt` is valid for the lifetime of `Self`.
+        unsafe { SGTable::from_raw(self.sgt.as_ptr()) }
+    }
+}
+
 /// A wrapper for an active DMA-BUF virtual mapping.
 ///
 /// # Invariants
@@ -403,6 +416,19 @@ impl<'a, const READ: bool> CpuAccess<'a, READ, true> {
         // enabled.
         unsafe { bindings::iosys_map_memcpy_to(self.map, offset, src.as_ptr().cast(), src.len()) };
     }
+
+    /// Sets a range of `len` bytes starting at `offset` into the buffer to `value`.
+    #[inline]
+    #[track_caller]
+    pub fn memset(&mut self, offset: usize, value: u8, len: usize) {
+        let (end, end_overflow) = offset.overflowing_add(len);
+        if end_overflow || end > self.size {
+            panic!("memset of {len} bytes at {offset} in dma-buf out of bounds",);
+        }
+        // SAFETY: The bounds check ensures we don't write out of bounds. The guard has WRITE
+        // enabled.
+        unsafe { bindings::iosys_map_memset(self.map, offset, value as c_int, len) };
+    }
 }
 
 impl<'a, const WRITE: bool> CpuAccess<'a, true, WRITE> {
@@ -423,5 +449,56 @@ impl<'a, const WRITE: bool> CpuAccess<'a, true, WRITE> {
         unsafe {
             bindings::iosys_map_memcpy_from(dst.as_mut_ptr().cast(), self.map, offset, dst.len())
         };
+    }
+}
+
+impl<'a> CpuAccess<'a, true, true> {
+    /// Copies bytes from one part of the buffer to another part of itself, using `memmove`.
+    ///
+    /// `src` is the range within the buffer to copy from. `dst` is the starting index of the
+    /// range within the buffer to copy to, which will have the same length as `src`. The two
+    /// ranges may overlap.
+    ///
+    /// Fails with [`EINVAL`] if the mapping is in I/O memory (`is_iomem`), if either the source
+    /// or destination range exceeds the end of the buffer, or if the start of `src` is after the
+    /// end.
+    #[inline]
+    pub fn copy_within<R: RangeBounds<usize>>(&mut self, src: R, dst: usize) -> Result {
+        let src_start = match src.start_bound() {
+            Bound::Included(&start) => start,
+            Bound::Excluded(&start) => start.checked_add(1).ok_or(EINVAL)?,
+            Bound::Unbounded => 0,
+        };
+        let src_end = match src.end_bound() {
+            Bound::Included(&end) => end.checked_add(1).ok_or(EINVAL)?,
+            Bound::Excluded(&end) => end,
+            Bound::Unbounded => self.size,
+        };
+        let len = src_end.checked_sub(src_start).ok_or(EINVAL)?;
+        if src_end > self.size {
+            return Err(EINVAL);
+        }
+        let dst_end = dst.checked_add(len).ok_or(EINVAL)?;
+        if dst_end > self.size {
+            return Err(EINVAL);
+        }
+
+        // SAFETY: `self.map` is a valid pointer to `struct iosys_map`.
+        let map = unsafe { &*self.map };
+        if map.is_iomem {
+            return Err(EINVAL);
+        }
+
+        // SAFETY: `map.__bindgen_anon_1.vaddr` is valid if `is_iomem` is false.
+        let vaddr = unsafe { map.__bindgen_anon_1.vaddr }.cast::<u8>();
+        if vaddr.is_null() {
+            return Err(EINVAL);
+        }
+
+        // SAFETY: The bounds checks above ensure that both `src_start..src_start + len` and
+        // `dst..dst + len` are within `[0, self.size)`. The guard has both READ and WRITE
+        // enabled.
+        unsafe { ptr::copy(vaddr.add(src_start), vaddr.add(dst), len) };
+        Ok(())
     }
 }

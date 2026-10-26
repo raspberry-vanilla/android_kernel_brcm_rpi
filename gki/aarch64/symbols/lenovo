@@ -2164,3 +2164,4 @@
   kthread_unuse_mm
   snd_ctl_remove
   snd_ctl_free_one
+  irq_stat

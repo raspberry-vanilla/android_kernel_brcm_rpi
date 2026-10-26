@@ -656,7 +656,7 @@ void __noreturn __cold nvhe_hyp_panic_handler(u64 esr, u64 spsr,
 		/* All hyp bugs, including warnings, are treated as fatal. */
 		if (!is_protected_kvm_enabled() ||
 		    IS_ENABLED(CONFIG_PKVM_DISABLE_STAGE2_ON_PANIC)) {
-			struct bug_entry *bug = find_bug(elr_in_kimg);
+			struct bug_entry *bug = find_bug(panic_addr + kaslr_off);
 
 			if (bug)
 				bug_get_file_line(bug, &file, &line);
@@ -681,7 +681,8 @@ void __noreturn __cold nvhe_hyp_panic_handler(u64 esr, u64 spsr,
 	kvm_nvhe_dump_backtrace(hyp_offset);
 
 	/* Dump the faulting instruction */
-	dump_kernel_instr(panic_addr + kaslr_offset());
+	if (!mod_addr)
+		dump_kernel_instr(panic_addr + kaslr_offset());
 
 	/*
 	 * Hyp has panicked and we're going to handle that by panicking the

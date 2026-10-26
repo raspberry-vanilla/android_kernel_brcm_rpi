@@ -87,20 +87,6 @@ struct intel_iommu *iommu_from_phys(unsigned long phys)
 	return NULL;
 }
 
-bool overlaps_iommu_mmio(unsigned long phys, unsigned long size)
-{
-	int i;
-
-	for (i = 0; i < nr_iommus; i++) {
-		struct intel_iommu *iommu = &iommus[i];
-
-		if (phys < (iommu->reg_phys + iommu->reg_size) &&
-		    (phys + size) > iommu->reg_phys)
-			return true;
-	}
-	return false;
-}
-
 static int iommu_direct_mmio_read(struct intel_iommu *iommu, u64 phys,
 				  int len, int expected_len, u64 *val)
 {
@@ -893,13 +879,6 @@ static int iommu_init(struct intel_iommu *iommu)
 		return -EFAULT;
 
 	iommu->reg = __pkvm_va(iommu->reg_phys);
-	ret = pkvm_hyp_mmu_map((unsigned long)iommu->reg, iommu->reg_phys,
-			       iommu->reg_size, (u64)pgprot_val(PAGE_KERNEL_IO_NOCACHE));
-	if (ret) {
-		pkvm_err("iommu%d: failed to map MMIO space in hyp(err=%d)\n",
-			 iommu->seq_id, ret);
-		return ret;
-	}
 
 	ret = pkvm_host_donate_hyp_mmio(iommu->reg_phys, PAGE_ALIGN(iommu->reg_size));
 	if (ret) {

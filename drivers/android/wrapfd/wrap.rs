@@ -42,46 +42,6 @@ enum WrapOwner {
     None,
 }
 
-impl WrapOwner {
-    fn get_valid_owner(&mut self) -> Option<&Task> {
-        if let Self::Task(task) = self {
-            // SAFETY: `task.as_ptr()` returns a raw pointer to an initialized `task_struct`.
-            if unsafe { (*task.as_ptr()).mm }.is_null() {
-                *self = WrapOwner::None;
-            }
-        };
-
-        match self {
-            Self::Task(task) => Some(task),
-            _ => None,
-        }
-    }
-
-    fn has_owner(&mut self) -> bool {
-        match self {
-            Self::None => false,
-            Self::Task(_task) => self.get_valid_owner().is_some(),
-            Self::Device(_dev) => true,
-        }
-    }
-
-    fn owned_by_current_task(&mut self) -> bool {
-        match self {
-            Self::Task(_task) => {
-                let Some(task) = self.get_valid_owner() else {
-                    return false;
-                };
-                task == current!().group_leader()
-            }
-            _ => false,
-        }
-    }
-
-    fn owned_by_device(&self, dev: &device::Device) -> bool {
-        matches!(self, Self::Device(owning_dev) if *dev == **owning_dev)
-    }
-}
-
 enum VmaFile {
     /// This is the case where the `vma_file` matches the file our driver is bound to, in this
     /// case we can be sure that the raw pointer stays valid as long as our driver is. We don't
@@ -104,12 +64,18 @@ enum VmaFile {
 // SAFETY: It is safe to send the enum `VmaFile` across thread boundaries.
 unsafe impl Send for VmaFile {}
 
+enum WrapState {
+    InUse(usize),
+    Available,
+}
+
 pub(crate) struct WrapInfo {
     pub(crate) content: Option<DmaBufContent>,
     owner: WrapOwner,
     allow_guests: bool,
     vma_file: VmaFile,
     num_pending_mmaps: usize,
+    state: WrapState,
 }
 
 impl WrapInfo {
@@ -120,7 +86,94 @@ impl WrapInfo {
             allow_guests: false,
             vma_file: VmaFile::None,
             num_pending_mmaps: 0,
+            state: WrapState::Available,
         }
+    }
+
+    fn get_valid_owner(&mut self) -> Option<&Task> {
+        if let WrapOwner::Task(task) = &self.owner {
+            if !task.has_mm() {
+                self.owner = WrapOwner::None;
+                self.allow_guests = false;
+            }
+        };
+
+        match &self.owner {
+            WrapOwner::Task(task) => Some(task),
+            _ => None,
+        }
+    }
+
+    fn has_owner(&mut self) -> bool {
+        match &self.owner {
+            WrapOwner::None => false,
+            WrapOwner::Task(_task) => self.get_valid_owner().is_some(),
+            WrapOwner::Device(_dev) => true,
+        }
+    }
+
+    fn owned_by_current_task(&mut self) -> bool {
+        let Some(task) = self.get_valid_owner() else {
+            return false;
+        };
+        task == current!().group_leader()
+    }
+
+    fn owned_by_device(&self, dev: &device::Device) -> bool {
+        matches!(&self.owner, WrapOwner::Device(owning_dev) if *dev == **owning_dev)
+    }
+
+    fn with_mmap_rbtree_read_locked<T>(
+        mapping: *mut bindings::address_space,
+        f: impl FnOnce(*const bindings::rb_root) -> T,
+    ) -> T {
+        // SAFETY: `mapping` points to the `struct address_space` of `vma_file`, which is kept
+        // alive by our `ARef<File>` reference.
+        unsafe { bindings::i_mmap_lock_read(mapping) };
+
+        // SAFETY: Reading `i_mmap.rb_root` is synchronized under the `i_mmap_lock_read` lock.
+        let rb_root_ref = unsafe { &(*mapping).i_mmap.rb_root };
+
+        let result = f(rb_root_ref);
+
+        // SAFETY: `mapping` is valid and matches the lock acquired above.
+        unsafe { bindings::i_mmap_unlock_read(mapping) };
+
+        result
+    }
+
+    fn map_count(&mut self) -> usize {
+        let vma_file_ptr = match self.vma_file {
+            VmaFile::None => return 0,
+            VmaFile::Internal(file_ptr) => file_ptr,
+            VmaFile::External(ref file) => file.as_ptr(),
+        };
+
+        // SAFETY: `vma_file` is either a valid `ARef<File>` or is a non-NULL valid raw pointer. The
+        // raw pointer is valid, as it refers to the file structure associated with the wrap object,
+        // and therefore valid throughout the wrap's lifetime. In either case, accessing it is safe.
+        let mapping = unsafe { (*vma_file_ptr).f_mapping };
+
+        let map_count = Self::with_mmap_rbtree_read_locked(mapping, |rb_root_ref| {
+            // SAFETY: `rb_root_ref` is a valid reference to `rb_root` wihin `struct address_space`.
+            let mut node = unsafe { bindings::rb_first(rb_root_ref) };
+            let mut map_count = 0;
+
+            while !node.is_null() {
+                map_count += 1;
+                // SAFETY: the rbtree lock is held throughout this function, so the entire tree is
+                // valid.
+                node = unsafe { bindings::rb_next(node) };
+            }
+
+            map_count
+        });
+
+        if map_count == 0 && self.num_pending_mmaps == 0 {
+            self.vma_file = VmaFile::None;
+        }
+
+        map_count
     }
 
     fn is_mapped(&mut self) -> bool {
@@ -136,22 +189,15 @@ impl WrapInfo {
             return true;
         }
 
-        // SAFETY: `vma_file` is a valid `ARef<File>`, so `vma_file.as_ptr()` is non-null and
-        // valid for reads.
+        // SAFETY: `vma_file` is either a valid `ARef<File>` or is a non-NULL valid raw pointer. The
+        // raw pointer is valid, as it refers to the file structure associated with the wrap object,
+        // and therefore valid throughout the wrap's lifetime. In either case, accessing it is safe.
         let mapping = unsafe { (*vma_file_ptr).f_mapping };
 
-        // SAFETY: `mapping` points to the `struct address_space` of `vma_file`, which is kept
-        // alive by our `ARef<File>` reference.
-        unsafe { bindings::i_mmap_lock_read(mapping) };
-
-        // SAFETY: Reading `i_mmap.rb_root` is synchronized under the `i_mmap_lock_read` lock.
-        let rb_root_ref = unsafe { &(*mapping).i_mmap.rb_root };
-
         // SAFETY: `rb_root_ref` is a valid reference to `rb_root` within `struct address_space`.
-        let is_mapped = !unsafe { bindings::RB_EMPTY_ROOT(rb_root_ref) };
-
-        // SAFETY: `mapping` is valid and matches the lock acquired above.
-        unsafe { bindings::i_mmap_unlock_read(mapping) };
+        let is_mapped = Self::with_mmap_rbtree_read_locked(mapping, |rb_root| !unsafe {
+            bindings::RB_EMPTY_ROOT(rb_root)
+        });
 
         if !is_mapped {
             self.vma_file = VmaFile::None;
@@ -160,12 +206,20 @@ impl WrapInfo {
         is_mapped
     }
 
-    fn check_modifiable(&mut self) -> Result<()> {
-        if !self.owner.owned_by_current_task() {
+    fn check_accessible(&mut self) -> Result<&DmaBufContent> {
+        if !(self.allow_guests || !self.has_owner() || self.owned_by_current_task()) {
             return Err(EBUSY);
         }
 
-        if self.is_mapped() {
+        self.content.as_ref().ok_or(ENOENT)
+    }
+
+    fn check_modifiable(&mut self) -> Result<()> {
+        if !self.owned_by_current_task() {
+            return Err(EBUSY);
+        }
+
+        if matches!(self.state, WrapState::InUse(_)) || self.is_mapped() {
             return Err(EINVAL);
         }
 
@@ -188,16 +242,8 @@ enum AllowState {
     ProhibitGuests,
 }
 
-enum WrapState {
-    InUse(usize),
-    UsageBlocked,
-    Available,
-}
-
-#[pin_data(PinnedDrop)]
+#[pin_data]
 pub(crate) struct Wrap {
-    #[pin]
-    state: Mutex<WrapState>,
     pub(crate) inner: Arc<Mutex<WrapInfo>>,
 
     // Set once on construction, never modified afterwards, does not need to be guarded by
@@ -205,25 +251,15 @@ pub(crate) struct Wrap {
     pub(crate) close_on_exec: bool,
 }
 
-#[pinned_drop]
-impl PinnedDrop for Wrap {
-    fn drop(self: Pin<&mut Self>) {
-        // The driver instance and the associated file are about to go away, let's make sure
-        // we don't leave a dangling raw pointer to the file inside the VmaFile enum.
-        self.inner.lock().vma_file = VmaFile::None;
-    }
-}
-
 struct UseGuard<'a>(&'a Wrap);
 
 impl<'a> Drop for UseGuard<'a> {
     fn drop(&mut self) {
-        let mut guard = self.0.state.lock();
-        *guard = match *guard {
+        let mut guard = self.0.inner.lock();
+        guard.state = match guard.state {
             WrapState::Available => panic!(),
             WrapState::InUse(1) => WrapState::Available,
             WrapState::InUse(n) => WrapState::InUse(n - 1),
-            WrapState::UsageBlocked => WrapState::Available,
         };
     }
 }
@@ -231,52 +267,29 @@ impl<'a> Drop for UseGuard<'a> {
 impl Wrap {
     pub(crate) fn new(close_on_exec: bool) -> impl PinInit<Self, Error> {
         try_pin_init!(Self {
-            state <- new_mutex!(WrapState::Available),
             inner: Arc::pin_init(new_mutex!(WrapInfo::new()), GFP_KERNEL)?,
             close_on_exec,
         })
     }
 
-    fn begin_block_usage(&self) -> Option<UseGuard<'_>> {
-        let mut guard = self.state.lock();
-        *guard = match *guard {
-            WrapState::Available => WrapState::UsageBlocked,
-            _ => {
-                return None;
-            }
-        };
-        Some(UseGuard(self))
-    }
-
-    fn begin_use(&self) -> Option<UseGuard<'_>> {
-        let mut guard = self.state.lock();
-        *guard = match *guard {
+    fn begin_use(&self, info: &mut WrapInfo) -> UseGuard<'_> {
+        info.state = match info.state {
             WrapState::Available => WrapState::InUse(1),
             WrapState::InUse(n) => WrapState::InUse(n + 1),
-            WrapState::UsageBlocked => {
-                return None;
-            }
         };
-        Some(UseGuard(self))
+        UseGuard(self)
     }
 
     fn file_ioctl(&self, cmd: u32, arg: usize) -> Result<isize> {
-        let Some(_use_guard) = self.begin_use() else {
-            return Err(ENOENT);
+        let (_use_guard, dmabuf) = {
+            let mut guard = self.inner.lock();
+            let content = guard.check_accessible()?;
+
+            let dmabuf = content.dmabuf.clone();
+            (self.begin_use(&mut guard), dmabuf)
         };
 
-        let mut guard = self.inner.lock();
-
-        if !(guard.allow_guests || !guard.owner.has_owner() || guard.owner.owned_by_current_task())
-        {
-            return Err(EBUSY);
-        }
-
-        let Some(ref content) = guard.content else {
-            return Err(ENOENT);
-        };
-
-        content.ioctl(cmd, arg)
+        DmaBufContent::ioctl(&dmabuf, cmd, arg)
     }
 
     fn get_wrap_state(&self, user_slice: UserSlice) -> Result<isize> {
@@ -287,10 +300,10 @@ impl Wrap {
             return Err(EINVAL);
         }
 
-        if let Some(_use_guard) = self.begin_use() {
+        get_state_args.state = {
             let guard = self.inner.lock();
 
-            get_state_args.state = if let Some(ref content) = guard.content {
+            if let Some(ref content) = guard.content {
                 if content.is_writable() {
                     uapi::WRAPFD_CONTENT_RDWR
                 } else {
@@ -298,10 +311,8 @@ impl Wrap {
                 }
             } else {
                 uapi::WRAPFD_CONTENT_EMPTY
-            };
-        } else {
-            get_state_args.state = uapi::WRAPFD_CONTENT_EMPTY;
-        }
+            }
+        };
 
         writer.write(&get_state_args)?;
 
@@ -309,29 +320,22 @@ impl Wrap {
     }
 
     fn acquire_ownership(&self) -> Result<isize> {
-        let state_guard = self.state.lock();
-        match *state_guard {
-            WrapState::Available => {}
-            WrapState::UsageBlocked => return Err(ENOENT),
-            WrapState::InUse(_) => return Err(EINVAL),
-        }
-
         let mut guard = self.inner.lock();
 
-        if guard.owner.owned_by_current_task() {
+        if guard.owned_by_current_task() {
             return Ok(0);
         }
 
-        if guard.owner.has_owner() {
+        if guard.has_owner() {
             return Err(EBUSY);
-        }
-
-        if guard.is_mapped() {
-            return Err(EINVAL);
         }
 
         if guard.content.is_none() {
             return Err(ENOENT);
+        }
+
+        if matches!(guard.state, WrapState::InUse(_)) || guard.is_mapped() {
+            return Err(EINVAL);
         }
 
         guard.owner = WrapOwner::Task(ARef::from(current!().group_leader()));
@@ -342,7 +346,9 @@ impl Wrap {
     fn release_ownership(&self) -> Result<isize> {
         let mut guard = self.inner.lock();
 
-        guard.check_modifiable()?;
+        if !guard.owned_by_current_task() {
+            return Err(EBUSY);
+        }
 
         guard.owner = WrapOwner::None;
         guard.allow_guests = false;
@@ -391,28 +397,20 @@ impl Wrap {
             return Err(EINVAL);
         };
 
-        // SAFETY: `file_inode` returns a valid `struct inode` for a live `struct file`, and
-        // `i_size_read` safely reads its size under kernel RCU / lock rules.
-        if end > unsafe { bindings::i_size_read(bindings::file_inode(localfile.as_ptr())) } {
+        if end > localfile.i_size_read() {
             return Err(EINVAL);
         }
 
-        let Some(_use_guard) = self.begin_use() else {
-            return Err(ENOENT);
-        };
-
-        let dmabuf = {
-            let guard = self.inner.lock();
-
-            let Some(ref content) = guard.content else {
-                return Err(ENOENT);
-            };
+        let (_use_guard, dmabuf) = {
+            let mut guard = self.inner.lock();
+            let content = guard.check_accessible()?;
 
             if !content.is_writable() {
                 return Err(EACCES);
             }
 
-            content.dmabuf.clone()
+            let dmabuf = content.dmabuf.clone();
+            (self.begin_use(&mut guard), dmabuf)
         };
 
         DmaBufContent::load(&dmabuf, localfile, file_offset, buf_offset, len)
@@ -430,10 +428,6 @@ impl Wrap {
             return Err(EINVAL);
         }
 
-        let Some(_use_guard) = self.begin_block_usage() else {
-            return Err(EINVAL);
-        };
-
         let mut guard = self.inner.lock();
         guard.check_modifiable()?;
 
@@ -441,6 +435,7 @@ impl Wrap {
             return Err(ENOENT);
         };
 
+        let was_writable = content.is_writable();
         match content.make_writable((rewrap_args.prot & bindings::PROT_WRITE) != 0) {
             Ok(()) => {}
             Err(err) => {
@@ -452,13 +447,14 @@ impl Wrap {
         let close_on_exec = self.close_on_exec;
 
         let result = match KBox::pin_init(Wrap::new(close_on_exec), GFP_KERNEL) {
-            Ok(new_wrap) => crate::WrapFdDevice::publish_wrap(new_wrap, content, close_on_exec),
+            Ok(new_wrap) => DmaBufContent::publish_wrap(new_wrap, content, close_on_exec, true),
             Err(err) => Err((err, content)),
         };
 
         match result {
-            Err((err, content)) => {
-                // Restore original wrap. XXX hasn't writeability potentially changed?
+            Err((err, mut content)) => {
+                // Restore original wrap.
+                _ = content.make_writable(was_writable);
                 guard.content = Some(content);
 
                 Err(err)
@@ -468,18 +464,12 @@ impl Wrap {
     }
 
     fn empty(&self) -> Result<isize> {
-        let Some(_use_guard) = self.begin_block_usage() else {
-            return Err(EINVAL);
+        let _content = {
+            let mut guard = self.inner.lock();
+            guard.check_modifiable_and_has_content()?;
+            guard.content.take()
         };
-
-        let mut guard = self.inner.lock();
-        guard.check_modifiable()?;
-
-        if let Some(_content) = guard.content.take() {
-            Ok(0)
-        } else {
-            Err(ENOENT)
-        }
+        Ok(0)
     }
 
     fn allow_guests(&self, allow: AllowState) -> Result<isize> {
@@ -496,22 +486,28 @@ impl Wrap {
 impl AnonInodeFileInterface for Wrap {
     type Ptr = Pin<KBox<Self>>;
 
+    fn release(wrap: Self::Ptr, _file: &File) {
+        // The driver instance and the associated file are about to go away, let's make sure
+        // we don't leave a dangling raw pointer to the file inside the VmaFile enum.
+        wrap.inner.lock().vma_file = VmaFile::None;
+
+        drop(wrap);
+    }
+
     fn llseek(
         wrap: <Self::Ptr as ForeignOwnable>::Borrowed<'_>,
         offs: Offset,
         whence: ffi::c_int,
     ) -> Result<Offset> {
-        let Some(_use_guard) = wrap.begin_use() else {
-            return Err(ENOENT);
+        let (_use_guard, dmabuf) = {
+            let mut guard = wrap.inner.lock();
+            let content = guard.check_accessible()?;
+
+            let dmabuf = content.dmabuf.clone();
+            (wrap.begin_use(&mut guard), dmabuf)
         };
 
-        let mut guard = wrap.inner.lock();
-
-        let Some(ref mut content) = guard.content else {
-            return Err(ENOENT);
-        };
-
-        content.llseek(offs, whence)
+        DmaBufContent::llseek(&dmabuf, offs, whence)
     }
 
     fn mmap(
@@ -519,24 +515,8 @@ impl AnonInodeFileInterface for Wrap {
         file: &File,
         vma: &VmaNew,
     ) -> Result {
-        let Some(_use_guard) = wrap.begin_use() else {
-            return Err(ENOENT);
-        };
-
         let mut guard = wrap.inner.lock();
-
-        if !guard.allow_guests && guard.owner.has_owner() && !guard.owner.owned_by_current_task() {
-            return Err(EBUSY);
-        }
-
-        // We're going to assume that this `mmap` call will succeed,  we'll increment the "pending"
-        // counter now and `DeferredMmapCounter` will decrement it again upon return to user-space.
-        DeferredMmapCounter::new(&wrap.inner, GFP_KERNEL)?.defer()?;
-        guard.num_pending_mmaps += 1;
-
-        let Some(ref content) = guard.content else {
-            return Err(ENOENT);
-        };
+        let content = guard.check_accessible()?;
 
         let mut make_rdonly = false;
 
@@ -548,11 +528,18 @@ impl AnonInodeFileInterface for Wrap {
             make_rdonly = (vma.flags() & kernel::mm::virt::flags::MAYWRITE) != 0;
         }
 
-        // SAFETY: `content.dmabuf` and `vma` are valid references, and `vm_pgoff` is safely
-        // read from `vma`.
+        let dmabuf_ptr = content.dmabuf.as_ptr();
+
+        // We're going to assume that this `mmap` call will succeed,  we'll increment the "pending"
+        // counter now and `DeferredMmapCounter` will decrement it again upon return to user-space.
+        DeferredMmapCounter::new(&wrap.inner, GFP_KERNEL)?.defer()?;
+        guard.num_pending_mmaps += 1;
+
+        // SAFETY: `dmabuf_ptr` and `vma` are valid pointers (`guard` keeps `content.dmabuf`
+        // alive), and `vm_pgoff` is safely read from `vma`.
         to_result(unsafe {
             let pgoff = (*vma.as_ptr()).vm_pgoff;
-            bindings::dma_buf_mmap(content.dmabuf.as_ptr(), vma.as_ptr(), pgoff)
+            bindings::dma_buf_mmap(dmabuf_ptr, vma.as_ptr(), pgoff)
         })?;
 
         if make_rdonly {
@@ -573,6 +560,9 @@ impl AnonInodeFileInterface for Wrap {
          * associated with wrapped files.
          */
         vma.set_no_remap_file_pages();
+
+        // We want clients to create these mappings explicitly, rather than implicitly via fork().
+        vma.set_dontcopy();
 
         // SAFETY: `vma` is a valid reference to `struct vm_area_struct`.
         let vma_file_raw = unsafe { (*vma.as_ptr()).vm_file };
@@ -665,7 +655,7 @@ impl AnonInodeFileInterface for Wrap {
         let mut guard = wrap.inner.lock();
         if matches!(&guard.owner, WrapOwner::Device(_dev)) {
             seq_print!(m, "owner:\t<device>\n");
-        } else if let Some(task) = guard.owner.get_valid_owner() {
+        } else if let Some(task) = guard.get_valid_owner() {
             seq_print!(m, "owner:\t{}\n", task.pid());
         } else {
             seq_print!(m, "owner:\t<none>\n");
@@ -676,11 +666,7 @@ impl AnonInodeFileInterface for Wrap {
             "guests:\t{}\n",
             if guard.allow_guests { "yes" } else { "no" }
         );
-        seq_print!(
-            m,
-            "maps:\t{}\n",
-            if guard.is_mapped() { "yes" } else { "no" }
-        );
+        seq_print!(m, "maps:\t{}\n", guard.map_count());
 
         if let Some(ref content) = guard.content {
             seq_print!(
@@ -844,24 +830,21 @@ unsafe extern "C" fn wrapfd_get_mappable(
             return Err(EINVAL);
         }
 
-        let state_guard = wrap.state.lock();
-        match *state_guard {
-            WrapState::Available => {}
-            WrapState::UsageBlocked => return Err(ENOENT),
-            WrapState::InUse(_) => return Err(EINVAL),
-        }
-
         let mut guard = wrap.inner.lock();
 
         // SAFETY: `dev` is verified non-null and points to a valid C `struct device`. `get_device`
         // safely increments its reference count.
         let device = unsafe { device::Device::get_device(dev) };
 
-        if guard.owner.has_owner() && !guard.owner.owned_by_device(&device) {
+        if guard.has_owner() && !guard.owned_by_device(&device) {
             return Err(EBUSY);
         }
 
-        if guard.is_mapped() {
+        if guard.content.is_none() {
+            return Err(ENOENT);
+        }
+
+        if matches!(guard.state, WrapState::InUse(_)) || guard.is_mapped() {
             return Err(EINVAL);
         }
 
@@ -919,7 +902,7 @@ unsafe extern "C" fn wrapfd_put_mappable(
         // It's valid for the duration of this call.
         let device = unsafe { device::Device::from_raw(dev) };
 
-        if !guard.owner.owned_by_device(&device) {
+        if !guard.owned_by_device(&device) {
             return Err(EBUSY);
         }
 
@@ -940,6 +923,175 @@ unsafe extern "C" fn wrapfd_put_mappable(
         }
 
         guard.owner = WrapOwner::None;
+        guard.allow_guests = false;
+        Ok(())
+    });
+
+    match result {
+        Ok(()) => 0,
+        Err(err) => err.to_errno(),
+    }
+}
+
+#[export]
+/// # Safety
+///
+/// - `file` must be a valid, non-null pointer to a live C `struct file` created by this driver.
+/// - `dev` must be a valid pointer to a live C `struct device` or null (handled gracefully).
+/// - `ops` must be a valid pointer to a live C `struct wrapfd_listener_operations`.
+/// - The caller must ensure `file` and `dev` remain allocated for the duration of this call.
+/// - `ops` must remain allocated and `param` valid until a matching call to `wrapfd_del_listener`.
+unsafe extern "C" fn wrapfd_add_listener(
+    file: *mut bindings::file,
+    dev: *mut bindings::device,
+    ops: *const bindings::wrapfd_listener_operations,
+    param: *mut ffi::c_void,
+    handlep: *mut *mut ffi::c_void,
+) -> ffi::c_int {
+    let result = with_wrap_helper(file, "wrapfd_add_listener", |wrap| {
+        if dev.is_null() {
+            pr_warn!("wrapfd_add_listener: dev is NULL!\n");
+            return Err(ENODEV);
+        }
+
+        if ops.is_null() || handlep.is_null() {
+            return Err(EINVAL);
+        }
+
+        // SAFETY: We've previously verified that `ops` is a non-null pointer, the contract for
+        // `wrapfd_add_listener` requires `ops` to point to a valid `struct
+        // wrapfd_listener_operation` and remain valid for as long as the listener is
+        // registered.
+        if unsafe { (*ops).on_content_release }.is_none() {
+            return Err(EINVAL);
+        }
+
+        let mut guard = wrap.inner.lock();
+
+        let WrapOwner::Device(ref owning_dev) = guard.owner else {
+            return Err(EBUSY);
+        };
+
+        // SAFETY: `dev` has been verified to be a non-null pointer and points to a live C `struct
+        // device` per function contract.
+        if owning_dev != &unsafe { kernel::device::Device::get_device(dev) } {
+            return Err(EBUSY);
+        }
+
+        let Some(ref mut content) = guard.content else {
+            return Err(ENOENT);
+        };
+
+        let handle = content.add_listener(ops, param)?;
+
+        // SAFETY: We've verified that `handlep` is a non-null pointer, per function contract it
+        // points to writable memory and can store a `*mut c_void`.
+        unsafe {
+            *handlep = handle as _;
+        }
+
+        Ok(())
+    });
+
+    match result {
+        Ok(()) => 0,
+        Err(err) => err.to_errno(),
+    }
+}
+
+#[export]
+/// # Safety
+///
+/// - `file` must be a valid, non-null pointer to a live C `struct file` created by this driver.
+unsafe extern "C" fn wrapfd_del_listener(
+    file: *mut bindings::file,
+    handle: *mut ffi::c_void,
+) -> ffi::c_int {
+    let result = with_wrap_helper(file, "wrapfd_del_listener", |wrap| {
+        let mut guard = wrap.inner.lock();
+
+        if handle.is_null() {
+            return Err(EINVAL);
+        }
+
+        let Some(ref mut content) = guard.content else {
+            return Err(EINVAL);
+        };
+
+        content.remove_listener(handle)
+    });
+
+    match result {
+        Ok(()) => 0,
+        Err(err) => err.to_errno(),
+    }
+}
+
+#[export]
+unsafe extern "C" fn wrapfd_acquire_ownership(
+    file: *mut bindings::file,
+    dev: *mut bindings::device,
+) -> ffi::c_int {
+    let result = with_wrap_helper(file, "wrapfd_get_ownership", |wrap| {
+        if dev.is_null() {
+            return Err(ENODEV);
+        }
+
+        let mut guard = wrap.inner.lock();
+
+        // SAFETY: `dev` is verified non-null and points to a valid C `struct device`. `get_device`
+        // safely increments its reference count.
+        let device = unsafe { device::Device::get_device(dev) };
+
+        if guard.has_owner() {
+            if guard.owned_by_device(&device) {
+                return Ok(());
+            } else {
+                return Err(EBUSY);
+            }
+        }
+
+        if guard.content.is_none() {
+            return Err(ENOENT);
+        }
+
+        if matches!(guard.state, WrapState::InUse(_)) || guard.is_mapped() {
+            return Err(EINVAL);
+        }
+
+        guard.owner = WrapOwner::Device(device);
+
+        Ok(())
+    });
+
+    match result {
+        Ok(()) => 0,
+        Err(err) => err.to_errno(),
+    }
+}
+
+#[export]
+unsafe extern "C" fn wrapfd_release_ownership(
+    file: *mut bindings::file,
+    dev: *mut bindings::device,
+) -> ffi::c_int {
+    let result = with_wrap_helper(file, "wrapfd_put_ownership", |wrap| {
+        if dev.is_null() {
+            return Err(ENODEV);
+        }
+
+        let mut guard = wrap.inner.lock();
+
+        // SAFETY: `dev` is verified non-null and points to a valid C `struct device`. `get_device`
+        // safely increments its reference count.
+        let device = unsafe { device::Device::get_device(dev) };
+
+        if !guard.owned_by_device(&device) {
+            return Err(EBUSY);
+        }
+
+        guard.owner = WrapOwner::None;
+
         Ok(())
     });
 

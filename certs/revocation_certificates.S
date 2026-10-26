@@ -4,14 +4,14 @@
 
 	__INITRODATA
 
-	.align 8
+	.balign 8
 	.globl revocation_certificate_list
 revocation_certificate_list:
 __revocation_list_start:
 	.incbin "certs/x509_revocation_list"
 __revocation_list_end:
 
-	.align 8
+	.balign 8
 	.globl revocation_certificate_list_size
 revocation_certificate_list_size:
 #ifdef CONFIG_64BIT
