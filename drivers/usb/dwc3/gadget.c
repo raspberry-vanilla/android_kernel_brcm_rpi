@@ -4498,8 +4498,18 @@ static void dwc3_gadget_interrupt(struct dwc3 *dwc,
 		break;
 	case DWC3_DEVICE_EVENT_SUSPEND:
 		/* It changed to be suspend event for version 2.30a and above */
-		if (!DWC3_VER_IS_PRIOR(DWC3, 230A))
-			dwc3_gadget_suspend_interrupt(dwc, event->event_info);
+		if (!DWC3_VER_IS_PRIOR(DWC3, 230A)) {
+			/*
+			 * A spurious U3 suspend event is fired during HS link
+			 * training before CONNECT_DONE sets the gadget speed.
+			 * Ignore it at that point to avoid triggering an unwanted
+			 * composite_suspend. A genuine suspend at ADDRESS state
+			 * (required for BC1.2 compliance) only arrives after
+			 * CONNECT_DONE, so gadget->speed is no longer UNKNOWN then.
+			 */
+			if (dwc->gadget->speed != USB_SPEED_UNKNOWN)
+				dwc3_gadget_suspend_interrupt(dwc, event->event_info);
+		}
 		break;
 	case DWC3_DEVICE_EVENT_SOF:
 	case DWC3_DEVICE_EVENT_ERRATIC_ERROR:

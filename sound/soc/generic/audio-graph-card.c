@@ -17,6 +17,7 @@
 #include <linux/platform_device.h>
 #include <linux/string.h>
 #include <sound/graph_card.h>
+#include <trace/hooks/sound.h>
 
 #define DPCM_SELECTABLE 1
 
@@ -281,6 +282,8 @@ static int graph_dai_link_of_dpcm(struct simple_util_priv *priv,
 
 	ret = graph_link_init(priv, cpu_ep, codec_ep, li, dai_name);
 
+	trace_android_vh_audio_graph_dai_link_name(dev, ep, &dai_link->name);
+
 	li->link++;
 
 	return ret;
@@ -318,6 +321,8 @@ static int graph_dai_link_of(struct simple_util_priv *priv,
 	ret = graph_link_init(priv, cpu_ep, codec_ep, li, dai_name);
 	if (ret < 0)
 		return ret;
+
+	trace_android_vh_audio_graph_dai_link_name(dev, codec_ep, &dai_link->name);
 
 	li->link++;
 

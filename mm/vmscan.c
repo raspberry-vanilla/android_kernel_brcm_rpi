@@ -4047,6 +4047,7 @@ static bool inc_min_seq(struct lruvec *lruvec, int type, int swappiness)
 {
 	int zone;
 	int remaining = MAX_LRU_BATCH;
+	bool stop = false;
 	struct lru_gen_folio *lrugen = &lruvec->lrugen;
 	int hist = lru_hist_from_seq(lrugen->min_seq[type]);
 	int new_gen, old_gen = lru_gen_from_seq(lrugen->min_seq[type]);
@@ -4085,7 +4086,9 @@ static bool inc_min_seq(struct lruvec *lruvec, int type, int swappiness)
 					   lrugen->protected[hist][type][tier] + delta);
 			}
 
-			if (!--remaining)
+			trace_android_vh_mglru_inc_min_seq(lruvec, type, swappiness,
+						      remaining, &stop);
+			if (!--remaining || stop)
 				return false;
 		}
 	}
@@ -4100,6 +4103,7 @@ static bool try_to_inc_min_seq(struct lruvec *lruvec, int swappiness)
 {
 	int gen, type, zone;
 	bool success = false;
+	bool skip = false;
 	struct lru_gen_folio *lrugen = &lruvec->lrugen;
 	DEFINE_MIN_SEQ(lruvec);
 
@@ -4121,8 +4125,10 @@ next:
 		;
 	}
 
+	trace_android_vh_mglru_skip_min_seq_balance(lruvec, swappiness, &skip);
+
 	/* see the comment on lru_gen_folio */
-	if (swappiness && swappiness <= MAX_SWAPPINESS) {
+	if (!skip && swappiness && swappiness <= MAX_SWAPPINESS) {
 		unsigned long seq = lrugen->max_seq - MIN_NR_GENS;
 
 		if (min_seq[LRU_GEN_ANON] > seq && min_seq[LRU_GEN_FILE] < seq)
@@ -4743,12 +4749,19 @@ static int scan_folios(struct lruvec *lruvec, struct scan_control *sc,
 	int isolated = 0;
 	int skipped = 0;
 	int remaining = MAX_LRU_BATCH;
+	bool force_scan = false;
+	bool skip_scan = false;
+	int swappiness = get_swappiness(lruvec, sc);
 	struct lru_gen_folio *lrugen = &lruvec->lrugen;
 	struct mem_cgroup *memcg = lruvec_memcg(lruvec);
 
 	VM_WARN_ON_ONCE(!list_empty(list));
 
-	if (get_nr_gens(lruvec, type) == MIN_NR_GENS)
+	trace_android_vh_mglru_scan_folios(lruvec, sc->priority, type, swappiness,
+					   &force_scan, &skip_scan);
+	if (skip_scan)
+		return 0;
+	if (!force_scan && get_nr_gens(lruvec, type) == MIN_NR_GENS)
 		return 0;
 
 	gen = lru_gen_from_seq(lrugen->min_seq[type]);
@@ -5012,11 +5025,17 @@ static long get_nr_to_scan(struct lruvec *lruvec, struct scan_control *sc, int s
 	DEFINE_MAX_SEQ(lruvec);
 	bool bypass = false;
 	bool young = false;
+	bool force_aging = false;
 
 	if (mem_cgroup_below_min(sc->target_mem_cgroup, memcg))
 		return -1;
 
 	success = should_run_aging(lruvec, max_seq, swappiness, &nr_to_scan);
+	if (!success) {
+		trace_android_vh_mglru_should_run_aging(lruvec, sc->priority, swappiness,
+							  &force_aging);
+		success |= force_aging;
+	}
 
 	/* try to get away with not aging at the default priority */
 	if (!success || sc->priority == DEF_PRIORITY) {

@@ -255,7 +255,7 @@ static int __init register_moveable_regions(void)
 {
 	struct memblock_region *reg;
 	struct device_node *np;
-	int i = 0, ret = 0, idx = 0;
+	int i = 0, ret = 0, idx;
 
 	for_each_mem_region(reg) {
 		if (i >= PKVM_NR_MOVEABLE_REGS)
@@ -290,6 +290,7 @@ static int __init register_moveable_regions(void)
 	for_each_compatible_node(np, NULL, PKVM_DEVICE_ASSIGN_COMPAT) {
 		struct of_phandle_args args;
 
+		idx = 0;
 		while (!of_parse_phandle_with_fixed_args(np, "devices", 1, idx, &args)) {
 			idx++;
 			ret = register_moveable_fdt_resource(args.np, PKVM_MREG_ASSIGN_MMIO);
@@ -732,7 +733,7 @@ static int pkvm_init_devices(void)
 
 	dev_sz = PAGE_ALIGN(size_mul(sizeof(struct pkvm_device), dev_cnt));
 
-	dev_base = alloc_pages_exact(dev_sz, GFP_KERNEL_ACCOUNT);
+	dev_base = alloc_pages_exact(dev_sz, GFP_KERNEL_ACCOUNT | __GFP_ZERO);
 
 	if (!dev_base)
 		return -ENOMEM;
@@ -1501,7 +1502,6 @@ static unsigned long mod_direct_hyp_base;
 
 unsigned long pkvm_el2_mod_kern_va(unsigned long addr)
 {
-#ifdef CONFIG_PKVM_STACKTRACE
 	struct pkvm_el2_module *mod;
 
 	/* Fast lookup into the direct range */
@@ -1519,7 +1519,7 @@ unsigned long pkvm_el2_mod_kern_va(unsigned long addr)
 			return (unsigned long)mod->sections.start +
 				(addr - hyp_va);
 	}
-#endif
+
 	return 0;
 }
 

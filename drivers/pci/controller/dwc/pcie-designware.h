@@ -361,6 +361,8 @@ struct dw_pcie_host_ops {
 struct dw_pcie_rp {
 	bool			has_msi_ctrl:1;
 	bool			cfg0_io_shared:1;
+	/* use struct { members; } if more bitfield additions need to be ignored */
+	ANDROID_KABI_IGNORE(1, bool keep_rp_msi_en:1);
 	u64			cfg0_base;
 	void __iomem		*va_cfg0_base;
 	u32			cfg0_size;

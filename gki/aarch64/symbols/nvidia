@@ -57,6 +57,7 @@
   atomic_notifier_chain_unregister
   attribute_container_register
   attribute_container_unregister
+  audio_graph_parse_of
   autoremove_wake_function
   __auxiliary_device_add
   auxiliary_device_init
@@ -1438,6 +1439,7 @@
   gpio_free
   gpio_request
   gpio_to_desc
+  graph_util_card_probe
   gre_add_protocol
   gre_del_protocol
   gro_cells_destroy
@@ -3127,6 +3129,11 @@
   simple_strtol
   simple_strtoul
   simple_strtoull
+  simple_util_dai_init
+  simple_util_hw_params
+  simple_util_remove
+  simple_util_shutdown
+  simple_util_startup
   simple_write_to_buffer
   single_open
   single_open_size
@@ -3640,6 +3647,7 @@
   trace_event_raw_init
   trace_event_reg
   trace_handle_return
+  __traceiter_android_vh_audio_graph_dai_link_name
   __traceiter_android_vh_gzvm_destroy_vm_post_process
   __traceiter_android_vh_gzvm_handle_demand_page_post
   __traceiter_android_vh_gzvm_handle_demand_page_pre
@@ -3652,6 +3660,7 @@
   __traceiter_sk_data_ready
   __traceiter_xdp_exception
   trace_output_call
+  __tracepoint_android_vh_audio_graph_dai_link_name
   __tracepoint_android_vh_gzvm_destroy_vm_post_process
   __tracepoint_android_vh_gzvm_handle_demand_page_post
   __tracepoint_android_vh_gzvm_handle_demand_page_pre
@@ -3661,7 +3670,10 @@
   __tracepoint_mmap_lock_acquire_returned
   __tracepoint_mmap_lock_released
   __tracepoint_mmap_lock_start_locking
+  tracepoint_probe_register
+  tracepoint_probe_unregister
   __tracepoint_sk_data_ready
+  tracepoint_srcu
   __tracepoint_xdp_exception
   trace_print_array_seq
   trace_print_bitmask_seq

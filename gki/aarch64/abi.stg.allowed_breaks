@@ -343,3 +343,6 @@ type 'struct fscrypt_master_key' changed
   3 members ('siphash_key_t mk_ino_hash_key' .. 'bool mk_present') changed
     offset changed by -4032
 
+type 'struct dw_pcie_rp' changed
+  member 'union { bool keep_rp_msi_en:1; unsigned char __kabi_ignored1; }' was added
+

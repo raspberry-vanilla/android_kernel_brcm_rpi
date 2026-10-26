@@ -96,6 +96,21 @@ DECLARE_HOOK(android_vh_mglru_aging_bypass,
 	TP_PROTO(struct lruvec *lruvec, unsigned long max_seq,
 	int swappiness, bool *bypass, bool *young),
 	TP_ARGS(lruvec, max_seq, swappiness, bypass, young));
+DECLARE_HOOK(android_vh_mglru_should_run_aging,
+	TP_PROTO(struct lruvec *lruvec, int priority, int swappiness,
+	bool *force_aging),
+	TP_ARGS(lruvec, priority, swappiness, force_aging));
+DECLARE_HOOK(android_vh_mglru_scan_folios,
+	TP_PROTO(struct lruvec *lruvec, int priority, int type,
+	int swappiness, bool *force_scan, bool *skip_scan),
+	TP_ARGS(lruvec, priority, type, swappiness, force_scan, skip_scan));
+DECLARE_HOOK(android_vh_mglru_inc_min_seq,
+	TP_PROTO(struct lruvec *lruvec, int type, int swappiness,
+	int remaining, bool *stop),
+	TP_ARGS(lruvec, type, swappiness, remaining, stop));
+DECLARE_HOOK(android_vh_mglru_skip_min_seq_balance,
+	TP_PROTO(struct lruvec *lruvec, int swappiness, bool *skip),
+	TP_ARGS(lruvec, swappiness, skip));
 DECLARE_HOOK(android_vh_shrink_node_memcgs_bypass,
 	TP_PROTO(u64 *ext, struct mem_cgroup_reclaim_cookie *partial,
 	unsigned long nr_to_reclaim, unsigned long nr_reclaimed,

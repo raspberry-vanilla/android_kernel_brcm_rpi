@@ -9,6 +9,18 @@
 
 #include <trace/hooks/vendor_hooks.h>
 
+struct device;
+struct device_node;
+
+/*
+ * Override the generated audio graph DAI link name. The endpoint is the
+ * CPU endpoint for a DPCM FE, or the codec endpoint for other links.
+ * A replacement name must remain valid for the lifetime of the card.
+ */
+DECLARE_HOOK(android_vh_audio_graph_dai_link_name,
+	TP_PROTO(struct device *dev, struct device_node *ep, const char **name),
+	TP_ARGS(dev, ep, name));
+
 /*
  * This hook allows the vendor driver to tell the kernel:
  * "Don't allocate a buffer for this stream."

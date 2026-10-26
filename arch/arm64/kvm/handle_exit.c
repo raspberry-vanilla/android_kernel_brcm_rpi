@@ -559,7 +559,7 @@ void __noreturn __cold nvhe_hyp_panic_handler(u64 esr, u64 spsr,
 		/* All hyp bugs, including warnings, are treated as fatal. */
 		if (!is_protected_kvm_enabled() ||
 		    IS_ENABLED(CONFIG_PKVM_DISABLE_STAGE2_ON_PANIC)) {
-			struct bug_entry *bug = find_bug(elr_in_kimg);
+			struct bug_entry *bug = find_bug(panic_addr + kaslr_off);
 
 			if (bug)
 				bug_get_file_line(bug, &file, &line);

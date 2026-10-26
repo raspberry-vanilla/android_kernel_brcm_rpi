@@ -339,13 +339,13 @@ impl InnerThread {
         }
     }
 
-    fn push_return_work(&mut self, reply: u32) {
+    fn push_return_work(&mut self, reply: u32) -> PushWorkRes {
         if let Ok(work) = ListArc::try_from_arc(self.return_work.clone()) {
             work.set_error_code(reply);
-            // Not notifying: Reply to current thread.
-            let _ = self.push_work(work);
+            self.push_work(work)
         } else {
             pr_warn_ratelimited!("Thread return work is already in use.\n");
+            PushWorkRes::Ok
         }
     }
 
@@ -505,7 +505,12 @@ impl Thread {
     }
 
     #[inline(never)]
-    pub(crate) fn debug_print(self: &Arc<Self>, m: &SeqFile, print_all: bool) -> Result<()> {
+    pub(crate) fn debug_print(
+        self: &Arc<Self>,
+        m: &SeqFile,
+        print_all: bool,
+        hashed: bool,
+    ) -> Result {
         let inner = self.inner.lock();
 
         if print_all || inner.current_transaction.is_some() || !inner.work_list.is_empty() {
@@ -533,7 +538,7 @@ impl Thread {
         }
 
         for work in &inner.work_list {
-            work.debug_print(m, "    ", "    pending transaction ")?;
+            work.debug_print(m, "    ", "    pending transaction ", hashed)?;
         }
         Ok(())
     }
@@ -719,8 +724,12 @@ impl Thread {
     pub(crate) fn push_work_if_looper(&self, work: DLArc<dyn DeliverToRead>) -> BinderResult {
         let mut inner = self.inner.lock();
         if inner.is_looper() && !inner.is_dead {
-            // Not notifying: Reply to current thread.
-            let _ = inner.push_work(work);
+            // Not notifying work_condvar: Reply to current thread.
+            let res = inner.push_work(work);
+            drop(inner);
+            if matches!(res, PushWorkRes::OkNotifyPoll) {
+                self.process.notify_poll(false);
+            }
             Ok(())
         } else {
             drop(inner);
@@ -733,7 +742,11 @@ impl Thread {
     }
 
     pub(crate) fn push_return_work(&self, reply: u32) {
-        self.inner.lock().push_return_work(reply);
+        // Not notifying work_condvar: Reply to current thread.
+        let res = self.inner.lock().push_return_work(reply);
+        if matches!(res, PushWorkRes::OkNotifyPoll) {
+            self.process.notify_poll(false);
+        }
     }
 
     pub(crate) fn pop_work_even_if_deferred(&self) -> Option<DLArc<dyn DeliverToRead>> {
@@ -1567,14 +1580,15 @@ impl Thread {
             let process = orig.from.process.clone();
             let allow_fds = orig.flags & TF_ACCEPT_FDS != 0;
             let reply = Transaction::new_reply(self, process, info, allow_fds)?;
-            {
-                let mut inner = self.inner.lock();
-                if info.flags & TF_DEFER_COMPLETE != 0 {
-                    // The flag is set. Perform a deferred push so that `read` can wait for the
-                    // next incoming transaction without a userspace roundtrip.
-                    inner.push_work_deferred(completion);
-                } else {
-                    let _ = inner.push_work(completion);
+            if info.flags & TF_DEFER_COMPLETE != 0 {
+                // The flag is set. Perform a deferred push so that `read` can wait for the
+                // next incoming transaction without a userspace roundtrip.
+                self.inner.lock().push_work_deferred(completion);
+            } else {
+                // Not notifying work_condvar: Reply to current thread.
+                let res = self.inner.lock().push_work(completion);
+                if matches!(res, PushWorkRes::OkNotifyPoll) {
+                    self.process.notify_poll(false);
                 }
             }
             orig.from.deliver_reply(Ok(reply), &orig, None);
@@ -1619,10 +1633,15 @@ impl Thread {
         let list_completion =
             DTRWrap::arc_try_new(DeliverCode::new(code, self.process.task.pid()))?;
         let completion = list_completion.clone_arc();
-        // Not notifying: Reply to current thread.
-        let _ = self.inner.lock().push_work(list_completion);
+        // Not notifying work_condvar: Reply to current thread.
+        let res = self.inner.lock().push_work(list_completion);
         match transaction.submit(info) {
-            Ok(()) => Ok(()),
+            Ok(()) => {
+                if matches!(res, PushWorkRes::OkNotifyPoll) {
+                    self.process.notify_poll(false);
+                }
+                Ok(())
+            }
             Err(err) => {
                 completion.skip();
                 Err(err)
@@ -1927,7 +1946,7 @@ impl DeliverToRead for ThreadError {
         false
     }
 
-    fn debug_print(&self, m: &SeqFile, prefix: &str, _tprefix: &str) -> Result<()> {
+    fn debug_print(&self, m: &SeqFile, prefix: &str, _tprefix: &str, _hashed: bool) -> Result {
         seq_print!(
             m,
             "{}transaction error: {}\n",

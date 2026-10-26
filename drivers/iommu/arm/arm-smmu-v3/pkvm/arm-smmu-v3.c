@@ -698,7 +698,7 @@ static int smmu_alloc_domain(struct kvm_hyp_iommu_domain *domain, int type)
 {
 	struct hyp_arm_smmu_v3_domain *smmu_domain;
 
-	if (type >= KVM_ARM_SMMU_DOMAIN_MAX)
+	if (type < 0 || type >= KVM_ARM_SMMU_DOMAIN_MAX)
 		return -EINVAL;
 
 	smmu_domain = hyp_alloc(sizeof(*smmu_domain));

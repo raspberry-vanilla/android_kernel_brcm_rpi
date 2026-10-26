@@ -541,7 +541,9 @@ static int kvm_vfio_pviommu(struct kvm_device *dev, long attr,
 		ret = kvm_vfio_pviommu_get_info(dev, &info);
 		if (ret)
 			return ret;
-		return copy_to_user(arg, &info, usize);
+		if (copy_to_user(arg, &info, sizeof(info)))
+			return -EFAULT;
+		return 0;
 	}
 	return -ENXIO;
 }

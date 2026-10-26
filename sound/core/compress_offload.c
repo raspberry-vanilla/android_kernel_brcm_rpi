@@ -483,12 +483,12 @@ static int
 snd_compr_get_codec_caps(struct snd_compr_stream *stream, unsigned long arg)
 {
 	int retval;
-	struct snd_compr_codec_caps *caps __free(kfree) = NULL;
 
 	if (!stream->ops->get_codec_caps)
 		return -ENXIO;
 
-	caps = kzalloc(sizeof(*caps), GFP_KERNEL);
+	struct snd_compr_codec_caps *caps __free(kfree) =
+		kzalloc(sizeof(*caps), GFP_KERNEL);
 	if (!caps)
 		return -ENOMEM;
 
@@ -616,7 +616,6 @@ snd_compress_check_input(struct snd_compr_stream *stream, struct snd_compr_param
 static int
 snd_compr_set_params(struct snd_compr_stream *stream, unsigned long arg)
 {
-	struct snd_compr_params *params __free(kfree) = NULL;
 	int retval;
 
 	if (stream->runtime->state == SNDRV_PCM_STATE_OPEN || stream->next_track) {
@@ -624,7 +623,9 @@ snd_compr_set_params(struct snd_compr_stream *stream, unsigned long arg)
 		 * we should allow parameter change only when stream has been
 		 * opened not in other cases
 		 */
-		params = memdup_user((void __user *)arg, sizeof(*params));
+		struct snd_compr_params *params __free(kfree) =
+			memdup_user((void __user *)arg, sizeof(*params));
+
 		if (IS_ERR(params))
 			return PTR_ERR(params);
 
@@ -656,13 +657,13 @@ snd_compr_set_params(struct snd_compr_stream *stream, unsigned long arg)
 static int
 snd_compr_get_params(struct snd_compr_stream *stream, unsigned long arg)
 {
-	struct snd_codec *params __free(kfree) = NULL;
 	int retval;
 
 	if (!stream->ops->get_params)
 		return -EBADFD;
 
-	params = kzalloc(sizeof(*params), GFP_KERNEL);
+	struct snd_codec *params __free(kfree) =
+		kzalloc(sizeof(*params), GFP_KERNEL);
 	if (!params)
 		return -ENOMEM;
 	retval = stream->ops->get_params(stream, params);
@@ -1063,12 +1064,13 @@ cleanup:
 
 static int snd_compr_task_create(struct snd_compr_stream *stream, unsigned long arg)
 {
-	struct snd_compr_task *task __free(kfree) = NULL;
 	int retval;
 
 	if (stream->runtime->state != SNDRV_PCM_STATE_SETUP)
 		return -EPERM;
-	task = memdup_user((void __user *)arg, sizeof(*task));
+
+	struct snd_compr_task *task __free(kfree) =
+		memdup_user((void __user *)arg, sizeof(*task));
 	if (IS_ERR(task))
 		return PTR_ERR(task);
 	retval = snd_compr_task_new(stream, task);
@@ -1124,12 +1126,13 @@ static int snd_compr_task_start(struct snd_compr_stream *stream, struct snd_comp
 
 static int snd_compr_task_start_ioctl(struct snd_compr_stream *stream, unsigned long arg)
 {
-	struct snd_compr_task *task __free(kfree) = NULL;
 	int retval;
 
 	if (stream->runtime->state != SNDRV_PCM_STATE_SETUP)
 		return -EPERM;
-	task = memdup_user((void __user *)arg, sizeof(*task));
+
+	struct snd_compr_task *task __free(kfree) =
+		memdup_user((void __user *)arg, sizeof(*task));
 	if (IS_ERR(task))
 		return PTR_ERR(task);
 	retval = snd_compr_task_start(stream, task);
@@ -1215,12 +1218,13 @@ static int snd_compr_task_status(struct snd_compr_stream *stream,
 
 static int snd_compr_task_status_ioctl(struct snd_compr_stream *stream, unsigned long arg)
 {
-	struct snd_compr_task_status *status __free(kfree) = NULL;
 	int retval;
 
 	if (stream->runtime->state != SNDRV_PCM_STATE_SETUP)
 		return -EPERM;
-	status = memdup_user((void __user *)arg, sizeof(*status));
+
+	struct snd_compr_task_status *status __free(kfree) =
+		memdup_user((void __user *)arg, sizeof(*status));
 	if (IS_ERR(status))
 		return PTR_ERR(status);
 	retval = snd_compr_task_status(stream, status);
