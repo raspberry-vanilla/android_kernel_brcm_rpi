@@ -1951,12 +1951,13 @@ static void macb_tx_restart(struct macb_queue *queue)
 
 	spin_lock(&bp->lock);
 	macb_writel(bp, NCR, macb_readl(bp, NCR) | MACB_BIT(TSTART));
-	/* Flush the PCIe posted-write queue so the TSTART doorbell
-	 * reliably reaches the MAC.  Without this, the write can sit
-	 * in the fabric and the MAC never advances, causing a silent
-	 * TX stall.
+	/* On PCIe-attached parts, flush the posted-write queue so the
+	 * TSTART doorbell reliably reaches the MAC.  Without this the
+	 * write can sit in the fabric and the MAC never advances,
+	 * causing a silent TX stall.
 	 */
-	(void)macb_readl(bp, NCR);
+	if (bp->caps & MACB_CAPS_PCIE_POSTED_WRITES)
+		(void)macb_readl(bp, NCR);
 	spin_unlock(&bp->lock);
 
 out_tx_ptr_unlock:
@@ -2001,24 +2002,31 @@ static int macb_tx_poll(struct napi_struct *napi, int budget)
 	if (work_done < budget && napi_complete_done(napi, work_done)) {
 		queue_writel(queue, IER, MACB_BIT(TCOMP));
 
-		/* TCOMP events that fire while the interrupt is masked do
-		 * not re-fire when IER is re-enabled.  Catch this two ways
-		 * to avoid losing a wakeup:
+		/* TCOMP events that fire while masked don't re-fire when
+		 * IER is re-enabled (HW errata), so check in software.
+		 * macb_tx_complete_pending() inspects the descriptor at
+		 * tx_tail; the rmb() in there orders prior CPU writes but
+		 * does not retire in-flight peripheral DMA writes that
+		 * may still be racing back to memory on PCIe-attached
+		 * parts.
 		 *
-		 *   (1) Read ISR -- catches completions the hardware flagged
-		 *       but that we did not see as an interrupt.  The MMIO
-		 *       read doubles as a PCIe read barrier, flushing any
-		 *       in-flight descriptor TX_USED DMA writes into memory.
-		 *   (2) macb_tx_complete_pending() inspects the ring after
-		 *       that flush, catching a descriptor whose TX_USED is
-		 *       now visible as a result of the barrier.
+		 * Read a side-effect-free MMIO register (IMR, the
+		 * read-only mask mirror) to act as a PCIe read barrier
+		 * for prior peripheral DMA writes.  After this read, any
+		 * in-flight TX_USED descriptor update has retired and
+		 * macb_tx_complete_pending() will observe it.
 		 *
-		 * This can race with the interrupt handler taking the same
-		 * path if an interrupt fires just after the IER write;
-		 * rescheduling NAPI in that case is harmless.
+		 * Note: an earlier form of this block read ISR directly
+		 * to also sample a latched TCOMP bit, but that is
+		 * destructive on silicon where MACB_CAPS_ISR_CLEAR_ON_WRITE
+		 * is not set (raspberrypi_rp1_config among others): the
+		 * read clears every set bit, and a masked check silently
+		 * consumes RCOMP / ROVR / TXUBR bits the IRQ handler is
+		 * expected to process in one pass.  IMR is non-destructive
+		 * on both read-clear and W1C silicon.
 		 */
-		if ((queue_readl(queue, ISR) & MACB_BIT(TCOMP)) ||
-		    macb_tx_complete_pending(queue)) {
+		(void)queue_readl(queue, IMR);
+		if (macb_tx_complete_pending(queue)) {
 			queue_writel(queue, IDR, MACB_BIT(TCOMP));
 			if (bp->caps & MACB_CAPS_ISR_CLEAR_ON_WRITE)
 				queue_writel(queue, ISR, MACB_BIT(TCOMP));
@@ -2067,6 +2075,16 @@ static void macb_tx_stall_watchdog(struct work_struct *work)
 	if (!netif_running(bp->dev))
 		return;
 
+	/* No carrier => no completion is possible.  Skip the stall
+	 * check (otherwise queue->tx_head can advance from kernel-
+	 * queued packets between macb_open() and link autoneg
+	 * completion while tx_tail stays unchanged, tripping a false
+	 * positive), but keep the watchdog ticking so it picks up
+	 * once carrier comes up.
+	 */
+	if (!netif_carrier_ok(bp->dev))
+		goto reschedule;
+
 	spin_lock_irqsave(&queue->tx_ptr_lock, flags);
 	cur_tail = queue->tx_tail;
 	cur_head = queue->tx_head;
@@ -2076,13 +2094,14 @@ static void macb_tx_stall_watchdog(struct work_struct *work)
 	spin_unlock_irqrestore(&queue->tx_ptr_lock, flags);
 
 	if (stalled) {
-		netdev_warn_once(bp->dev,
-				 "TX stall detected on queue %u (tail=%u head=%u); re-kicking TSTART\n",
-				 (unsigned int)(queue - bp->queues),
-				 cur_tail, cur_head);
+		pr_warn_ratelimited("%s: TX stall detected on queue %u (tail=%u head=%u); re-kicking TSTART\n",
+				    netdev_name(bp->dev),
+				    (unsigned int)(queue - bp->queues),
+				    cur_tail, cur_head);
 		macb_tx_restart(queue);
 	}
 
+reschedule:
 	schedule_delayed_work(&queue->tx_stall_watchdog_work,
 			      msecs_to_jiffies(MACB_TX_STALL_INTERVAL_MS));
 }
@@ -2702,10 +2721,12 @@ static netdev_tx_t macb_start_xmit(struct sk_buff *skb, struct net_device *dev)
 		queue->tx_pending = 1;
 
 	macb_writel(bp, NCR, macb_readl(bp, NCR) | MACB_BIT(TSTART));
-	/* Flush the PCIe posted-write queue; see the comment in
-	 * macb_tx_restart() for the reasoning.
+	/* Flush PCIe posted-write queue; see comment in macb_tx_restart().
+	 * Also flushes the preceding macb_tx_lpi_wake() NCR write and the
+	 * TSR-read tx_pending breadcrumb above.
 	 */
-	(void)macb_readl(bp, NCR);
+	if (bp->caps & MACB_CAPS_PCIE_POSTED_WRITES)
+		(void)macb_readl(bp, NCR);
 	spin_unlock(&bp->lock);
 
 	if (CIRC_SPACE(queue->tx_head, queue->tx_tail, bp->tx_ring_size) < 1)
@@ -5810,6 +5831,7 @@ static const struct macb_config raspberrypi_rp1_config = {
 	.caps = MACB_CAPS_GIGABIT_MODE_AVAILABLE | MACB_CAPS_CLK_HW_CHG |
 		MACB_CAPS_JUMBO |
 		MACB_CAPS_GEM_HAS_PTP |
+		MACB_CAPS_PCIE_POSTED_WRITES |
 		MACB_CAPS_EEE,
 	.dma_burst_length = 16,
 	.clk_init = macb_clk_init,
