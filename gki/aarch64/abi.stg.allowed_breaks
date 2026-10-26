@@ -31,3 +31,23 @@ type 'struct net_device_ops' changed
   member 'u64 __kabi_reserved1' was removed
   member 'union { const struct apf_ops* apf_ops; struct { u64 __kabi_reserved1; }; union { }; }' was added
 
+function symbol changed from 'void alt_cb_patch_nops(struct alt_instr*, __le32*, __le32*, int)' {__kvm_nvhe_alt_cb_patch_nops} to 'void __kvm_nvhe_alt_cb_patch_nops(struct alt_instr*, __le32*, __le32*, int)'
+  full name changed from alt_cb_patch_nops to __kvm_nvhe_alt_cb_patch_nops
+
+function symbol changed from 'void kvm_patch_physvirt_offset(struct alt_instr*, __le32*, __le32*, int)' {__kvm_nvhe_kvm_patch_physvirt_offset} to 'void __kvm_nvhe_kvm_patch_physvirt_offset(struct alt_instr*, __le32*, __le32*, int)'
+  full name changed from kvm_patch_physvirt_offset to __kvm_nvhe_kvm_patch_physvirt_offset
+
+function symbol changed from 'void kvm_update_va_mask(struct alt_instr*, __le32*, __le32*, int)' {__kvm_nvhe_kvm_update_va_mask} to 'void __kvm_nvhe_kvm_update_va_mask(struct alt_instr*, __le32*, __le32*, int)'
+  full name changed from kvm_update_va_mask to __kvm_nvhe_kvm_update_va_mask
+
+function symbol changed from 'caches_clean_inval_pou' to 'void caches_clean_inval_pou(unsigned long, unsigned long)'
+  full name caches_clean_inval_pou was added
+  type 'void(unsigned long, unsigned long)' was added
+
+variable symbol changed from 'u64 jiffies_64' {jiffies} to 'volatile unsigned long jiffies'
+  full name changed from jiffies_64 to jiffies
+  type changed from 'u64' = '__u64' = 'unsigned long long' to 'volatile unsigned long'
+    qualifier volatile added
+    underlying type changed from 'u64' = '__u64' = 'unsigned long long' to 'unsigned long'
+      resolved type changed from 'unsigned long long' to 'unsigned long'
+

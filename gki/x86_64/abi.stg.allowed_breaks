@@ -16,3 +16,22 @@ type 'struct net_device_ops' changed
   member 'u64 __kabi_reserved1' was removed
   member 'union { const struct apf_ops* apf_ops; struct { u64 __kabi_reserved1; }; union { }; }' was added
 
+function symbol changed from '__SCT__tp_func_dma_fence_emit' to 'int __SCT__tp_func_dma_fence_emit(void*, struct dma_fence*)'
+  full name __SCT__tp_func_dma_fence_emit was added
+  type 'int(void*, struct dma_fence*)' was added
+
+function symbol changed from '__SCT__tp_func_gpu_mem_total' to 'int __SCT__tp_func_gpu_mem_total(void*, uint32_t, uint32_t, uint64_t)'
+  full name __SCT__tp_func_gpu_mem_total was added
+  type 'int(void*, uint32_t, uint32_t, uint64_t)' was added
+
+function symbol changed from '__SCT__tp_func_xdp_exception' to 'int __SCT__tp_func_xdp_exception(void*, const struct net_device*, const struct bpf_prog*, u32)'
+  full name __SCT__tp_func_xdp_exception was added
+  type 'int(void*, const struct net_device*, const struct bpf_prog*, u32)' was added
+
+variable symbol changed from 'u64 jiffies_64' {jiffies} to 'volatile unsigned long jiffies'
+  full name changed from jiffies_64 to jiffies
+  type changed from 'u64' = '__u64' = 'unsigned long long' to 'volatile unsigned long'
+    qualifier volatile added
+    underlying type changed from 'u64' = '__u64' = 'unsigned long long' to 'unsigned long'
+      resolved type changed from 'unsigned long long' to 'unsigned long'
+
