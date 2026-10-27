@@ -529,6 +529,7 @@
   module_put
   __msecs_to_jiffies
   msleep
+  mtree_load
   __mutex_init
   mutex_is_locked
   mutex_lock
@@ -2137,6 +2138,7 @@
   __device_set_driver_override
   platform_device_add
   platform_device_alloc
+  platform_device_del
   wait_for_completion_interruptible_timeout
 
 # required by slimbus.ko

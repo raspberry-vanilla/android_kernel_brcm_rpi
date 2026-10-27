@@ -210,7 +210,7 @@ v3d_clean_caches(struct v3d_dev *v3d)
 	if (v3d->ver < V3D_GEN_71) {
 		if (wait_for(!(V3D_CORE_READ(core, V3D_CTL_L2TCACTL) &
 			       V3D_L2TCACTL_L2TFLS), 100)) {
-			DRM_ERROR("Timeout waiting for L2T clean\n");
+			drm_err(dev, "Timeout waiting for L2T clean\n");
 		}
 	}
 
