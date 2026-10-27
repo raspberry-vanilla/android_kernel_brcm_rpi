@@ -326099,6 +326099,15 @@ elf_symbol {
   full_name: "netif_carrier_on"
 }
 elf_symbol {
+  id: 0x6e7cbb53
+  name: "netif_close"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xa96418e5
+  type_id: 0x1c31d966
+  full_name: "netif_close"
+}
+elf_symbol {
   id: 0x3ce8e22e
   name: "netif_device_attach"
   is_defined: true
@@ -326133,6 +326142,15 @@ elf_symbol {
   crc: 0x5aaf1010
   type_id: 0x1704b71f
   full_name: "netif_napi_set_irq_locked"
+}
+elf_symbol {
+  id: 0x685cee38
+  name: "netif_open"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0xa5880549
+  type_id: 0x913618b5
+  full_name: "netif_open"
 }
 elf_symbol {
   id: 0x5bdcd401
@@ -326178,6 +326196,15 @@ elf_symbol {
   crc: 0x4ffdf37a
   type_id: 0x1604193e
   full_name: "netif_schedule_queue"
+}
+elf_symbol {
+  id: 0x8f3b6967
+  name: "netif_set_mtu"
+  is_defined: true
+  symbol_type: FUNCTION
+  crc: 0x0201acaf
+  type_id: 0x90b5e896
+  full_name: "netif_set_mtu"
 }
 elf_symbol {
   id: 0xe40f93df
@@ -343928,15 +343955,18 @@ interface {
   symbol_id: 0x873a0741
   symbol_id: 0x0e4b2c83
   symbol_id: 0x3a4c076b
+  symbol_id: 0x6e7cbb53
   symbol_id: 0x3ce8e22e
   symbol_id: 0xa03599a6
   symbol_id: 0xeb191edf
   symbol_id: 0x888336c7
+  symbol_id: 0x685cee38
   symbol_id: 0x5bdcd401
   symbol_id: 0xf4d035ba
   symbol_id: 0x410cb094
   symbol_id: 0x6692f232
   symbol_id: 0xac772e2b
+  symbol_id: 0x8f3b6967
   symbol_id: 0xe40f93df
   symbol_id: 0x4c1d5834
   symbol_id: 0xf16a1d9f

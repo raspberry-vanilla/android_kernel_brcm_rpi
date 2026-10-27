@@ -966,6 +966,9 @@
   netdev_increment_features
   netdev_lower_state_changed
   netdev_pick_tx
+  netif_close
+  netif_open
+  netif_set_mtu
   register_netdev
   vlan_uses_dev
   vlan_vid_add
