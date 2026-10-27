@@ -1658,6 +1658,7 @@ _RPI_OVERLAY_OUTS = [
     "arch/arm64/boot/dts/overlays/seeed-can-fd-hat-v2.dtbo",
     "arch/arm64/boot/dts/overlays/sh1106-spi.dtbo",
     "arch/arm64/boot/dts/overlays/si446x-spi0.dtbo",
+    "arch/arm64/boot/dts/overlays/sixfab_m1m.dtbo",
     "arch/arm64/boot/dts/overlays/smi-dev.dtbo",
     "arch/arm64/boot/dts/overlays/smi-nand.dtbo",
     "arch/arm64/boot/dts/overlays/smi.dtbo",
