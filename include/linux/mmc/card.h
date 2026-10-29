@@ -387,7 +387,7 @@ struct mmc_card {
 
 	struct workqueue_struct *complete_wq;	/* Private workqueue */
 
-	unsigned int		max_posted_writes; /* command queue posted write limit */
+	int			max_posted_writes; /* command queue posted write limit */
 
 	ANDROID_KABI_RESERVE(1);
 	ANDROID_KABI_RESERVE(2);

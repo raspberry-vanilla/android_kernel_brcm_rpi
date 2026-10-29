@@ -1505,8 +1505,6 @@ static int macb_tx_complete(struct macb_queue *queue, int budget)
 				  packets, bytes);
 
 	queue->tx_tail = tail;
-	if (packets)
-		queue->tx_stall_tail_moved = true;
 	if (__netif_subqueue_stopped(bp->dev, queue_index) &&
 	    CIRC_CNT(queue->tx_head, queue->tx_tail,
 		     bp->tx_ring_size) <= MACB_TX_WAKEUP_THRESH(bp))
@@ -2002,30 +2000,16 @@ static int macb_tx_poll(struct napi_struct *napi, int budget)
 	if (work_done < budget && napi_complete_done(napi, work_done)) {
 		queue_writel(queue, IER, MACB_BIT(TCOMP));
 
-		/* TCOMP events that fire while masked don't re-fire when
-		 * IER is re-enabled (HW errata), so check in software.
-		 * macb_tx_complete_pending() inspects the descriptor at
-		 * tx_tail; the rmb() in there orders prior CPU writes but
-		 * does not retire in-flight peripheral DMA writes that
-		 * may still be racing back to memory on PCIe-attached
-		 * parts.
-		 *
-		 * Read a side-effect-free MMIO register (IMR, the
-		 * read-only mask mirror) to act as a PCIe read barrier
-		 * for prior peripheral DMA writes.  After this read, any
-		 * in-flight TX_USED descriptor update has retired and
-		 * macb_tx_complete_pending() will observe it.
-		 *
-		 * Note: an earlier form of this block read ISR directly
-		 * to also sample a latched TCOMP bit, but that is
-		 * destructive on silicon where MACB_CAPS_ISR_CLEAR_ON_WRITE
-		 * is not set (raspberrypi_rp1_config among others): the
-		 * read clears every set bit, and a masked check silently
-		 * consumes RCOMP / ROVR / TXUBR bits the IRQ handler is
-		 * expected to process in one pass.  IMR is non-destructive
-		 * on both read-clear and W1C silicon.
+		/* Packet completions only seem to propagate to raise
+		 * interrupts when interrupts are enabled at the time, so if
+		 * packets were sent while interrupts were disabled,
+		 * they will not cause another interrupt to be generated when
+		 * interrupts are re-enabled.
+		 * Check for this case here to avoid losing a wakeup. This can
+		 * potentially race with the interrupt handler doing the same
+		 * actions if an interrupt is raised just after enabling them,
+		 * but this should be harmless.
 		 */
-		(void)queue_readl(queue, IMR);
 		if (macb_tx_complete_pending(queue)) {
 			queue_writel(queue, IDR, MACB_BIT(TCOMP));
 			if (bp->caps & MACB_CAPS_ISR_CLEAR_ON_WRITE)
@@ -2036,74 +2020,6 @@ static int macb_tx_poll(struct napi_struct *napi, int budget)
 	}
 
 	return work_done;
-}
-
-#define MACB_TX_STALL_INTERVAL_MS	1000
-
-/* TX stall watchdog.
- *
- * Defence-in-depth against lost TCOMP interrupts.  macb already has a
- * recovery chain (tx_pending -> txubr_pending -> macb_tx_restart())
- * that fires on TCOMP; if TCOMP itself is lost the TX ring stalls
- * silently until something else kicks TSTART.  This watchdog runs
- * once per second per queue and calls macb_tx_restart() if the ring
- * is non-empty and tx_tail has not advanced since the previous tick.
- *
- * Movement is tracked via the tx_stall_tail_moved boolean rather
- * than by snapshotting tx_tail.  Per-queue ring indices are bounded
- * (and reused), so a snapshot comparison can false-positive when the
- * index happens to land on the same value between two ticks under
- * sustained load.  The boolean is set by macb_tx_complete() whenever
- * tx_tail advances and cleared by this watchdog after each tick;
- * both writes are under tx_ptr_lock, so no atomic is required.
- *
- * macb_tx_restart() already checks the hardware's TBQP against the
- * driver's head index before re-asserting TSTART, so on a healthy
- * ring this is a no-op at the hardware level.  The watchdog only
- * adds the missing trigger.
- */
-static void macb_tx_stall_watchdog(struct work_struct *work)
-{
-	struct macb_queue *queue = container_of(to_delayed_work(work),
-						struct macb_queue,
-						tx_stall_watchdog_work);
-	struct macb *bp = queue->bp;
-	unsigned int cur_tail, cur_head;
-	bool stalled = false;
-	unsigned long flags;
-
-	if (!netif_running(bp->dev))
-		return;
-
-	/* No carrier => no completion is possible.  Skip the stall
-	 * check (otherwise queue->tx_head can advance from kernel-
-	 * queued packets between macb_open() and link autoneg
-	 * completion while tx_tail stays unchanged, tripping a false
-	 * positive), but keep the watchdog ticking so it picks up
-	 * once carrier comes up.
-	 */
-	if (!netif_carrier_ok(bp->dev))
-		goto reschedule;
-
-	spin_lock_irqsave(&queue->tx_ptr_lock, flags);
-	cur_tail = queue->tx_tail;
-	cur_head = queue->tx_head;
-	if (cur_head != cur_tail && !queue->tx_stall_tail_moved)
-		stalled = true;
-	queue->tx_stall_tail_moved = false;
-	spin_unlock_irqrestore(&queue->tx_ptr_lock, flags);
-
-	if (stalled) {
-		pr_warn_ratelimited("%s: TX stall detected on queue %u (tail=%u head=%u); re-kicking TSTART\n",
-				    netdev_name(bp->dev),
-				    (unsigned int)(queue - bp->queues),
-				    cur_tail, cur_head);
-		macb_tx_restart(queue);
-	}
-
-reschedule:
-	schedule_delayed_work(&queue->tx_stall_watchdog_work,
-			      msecs_to_jiffies(MACB_TX_STALL_INTERVAL_MS));
 }
 
 static void macb_hresp_error_task(struct work_struct *work)
@@ -3374,9 +3290,6 @@ static int macb_open(struct net_device *dev)
 	for (q = 0, queue = bp->queues; q < bp->num_queues; ++q, ++queue) {
 		napi_enable(&queue->napi_rx);
 		napi_enable(&queue->napi_tx);
-		queue->tx_stall_tail_moved = true;
-		schedule_delayed_work(&queue->tx_stall_watchdog_work,
-				      msecs_to_jiffies(MACB_TX_STALL_INTERVAL_MS));
 	}
 
 	macb_init_hw(bp);
@@ -3423,7 +3336,6 @@ static int macb_close(struct net_device *dev)
 	for (q = 0, queue = bp->queues; q < bp->num_queues; ++q, ++queue) {
 		napi_disable(&queue->napi_rx);
 		napi_disable(&queue->napi_tx);
-		cancel_delayed_work_sync(&queue->tx_stall_watchdog_work);
 		netdev_tx_reset_queue(netdev_get_tx_queue(dev, q));
 	}
 
@@ -4770,6 +4682,13 @@ static int macb_setup_tc(struct net_device *dev, enum tc_setup_type type,
 	}
 }
 
+static void macb_tx_timeout(struct net_device *dev, unsigned int q)
+{
+	struct macb *bp = netdev_priv(dev);
+
+	macb_tx_restart(&bp->queues[q]);
+}
+
 static const struct net_device_ops macb_netdev_ops = {
 	.ndo_open		= macb_open,
 	.ndo_stop		= macb_close,
@@ -4788,6 +4707,7 @@ static const struct net_device_ops macb_netdev_ops = {
 	.ndo_hwtstamp_set	= macb_hwtstamp_set,
 	.ndo_hwtstamp_get	= macb_hwtstamp_get,
 	.ndo_setup_tc		= macb_setup_tc,
+	.ndo_tx_timeout		= macb_tx_timeout,
 };
 
 /* Configure peripheral capabilities according to device tree
@@ -5022,8 +4942,6 @@ static int macb_init(struct platform_device *pdev)
 		}
 
 		INIT_WORK(&queue->tx_error_task, macb_tx_error_task);
-		INIT_DELAYED_WORK(&queue->tx_stall_watchdog_work,
-				  macb_tx_stall_watchdog);
 		q++;
 	}
 
