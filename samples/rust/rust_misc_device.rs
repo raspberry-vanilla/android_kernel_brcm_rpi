@@ -137,7 +137,7 @@ impl kernel::InPlaceModule for RustMiscDeviceModule {
         };
 
         try_pin_init!(Self {
-            _miscdev <- MiscDeviceRegistration::register(options),
+            _miscdev <- MiscDeviceRegistration::register(options, try_pin_init!(RustMiscDevice {})),
         })
     }
 }
@@ -147,8 +147,13 @@ struct Inner {
     buffer: KVVec<u8>,
 }
 
+/// Data shared by all open files for the same instance of this miscdevice.
+#[pin_data]
+struct RustMiscDevice {}
+
+/// Data that is stored per file for this miscdevice.
 #[pin_data(PinnedDrop)]
-struct RustMiscDevice {
+struct RustMiscDeviceFile {
     #[pin]
     inner: Mutex<Inner>,
     dev: ARef<Device>,
@@ -156,16 +161,16 @@ struct RustMiscDevice {
 
 #[vtable]
 impl MiscDevice for RustMiscDevice {
-    type Ptr = Pin<KBox<Self>>;
+    type File = Pin<KBox<RustMiscDeviceFile>>;
 
-    fn open(_file: &File, misc: &MiscDeviceRegistration<Self>) -> Result<Pin<KBox<Self>>> {
+    fn open(_file: &File, misc: &MiscDeviceRegistration<Self>) -> Result<Self::File> {
         let dev = ARef::from(misc.device());
 
         dev_info!(dev, "Opening Rust Misc Device Sample\n");
 
         KBox::try_pin_init(
             try_pin_init! {
-                RustMiscDevice {
+                RustMiscDeviceFile {
                     inner <- new_mutex!(Inner {
                         value: 0_i32,
                         buffer: KVVec::new(),
@@ -177,7 +182,7 @@ impl MiscDevice for RustMiscDevice {
         )
     }
 
-    fn read_iter(mut kiocb: Kiocb<'_, Self::Ptr>, iov: &mut IovIterDest<'_>) -> Result<usize> {
+    fn read_iter(mut kiocb: Kiocb<'_, Self::File>, iov: &mut IovIterDest<'_>) -> Result<usize> {
         let me = kiocb.file();
         dev_info!(me.dev, "Reading from Rust Misc Device Sample\n");
 
@@ -188,7 +193,7 @@ impl MiscDevice for RustMiscDevice {
         Ok(read)
     }
 
-    fn write_iter(mut kiocb: Kiocb<'_, Self::Ptr>, iov: &mut IovIterSource<'_>) -> Result<usize> {
+    fn write_iter(mut kiocb: Kiocb<'_, Self::File>, iov: &mut IovIterSource<'_>) -> Result<usize> {
         let me = kiocb.file();
         dev_info!(me.dev, "Writing to Rust Misc Device Sample\n");
 
@@ -204,7 +209,7 @@ impl MiscDevice for RustMiscDevice {
         Ok(len)
     }
 
-    fn ioctl(me: Pin<&RustMiscDevice>, _file: &File, cmd: u32, arg: usize) -> Result<isize> {
+    fn ioctl(me: Pin<&RustMiscDeviceFile>, _file: &File, cmd: u32, arg: usize) -> Result<isize> {
         dev_info!(me.dev, "IOCTLing Rust Misc Device Sample\n");
 
         // Treat the ioctl argument as a user pointer.
@@ -226,13 +231,13 @@ impl MiscDevice for RustMiscDevice {
 }
 
 #[pinned_drop]
-impl PinnedDrop for RustMiscDevice {
+impl PinnedDrop for RustMiscDeviceFile {
     fn drop(self: Pin<&mut Self>) {
         dev_info!(self.dev, "Exiting the Rust Misc Device Sample\n");
     }
 }
 
-impl RustMiscDevice {
+impl RustMiscDeviceFile {
     fn set_value(&self, mut reader: UserSliceReader) -> Result<isize> {
         let new_value = reader.read::<i32>()?;
         let mut guard = self.inner.lock();

@@ -708,6 +708,7 @@ static void __copy_vcpu_state(const struct kvm_vcpu *from_vcpu,
 	copy_sysreg(TFSRE0_EL1);
 
 	copy_sysreg(SCTLR_EL1);
+	copy_sysreg(SCTLR2_EL1);
 	copy_sysreg(ACTLR_EL1);
 	copy_sysreg(CPACR_EL1);
 	copy_sysreg(ZCR_EL1);
@@ -731,6 +732,8 @@ static void __copy_vcpu_state(const struct kvm_vcpu *from_vcpu,
 
 	copy_sysreg(PIR_EL1);
 	copy_sysreg(PIRE0_EL1);
+	copy_sysreg(POR_EL1);
+	copy_sysreg(POR_EL0);
 }
 
 static void __sync_hyp_vcpu(struct pkvm_hyp_vcpu *hyp_vcpu)

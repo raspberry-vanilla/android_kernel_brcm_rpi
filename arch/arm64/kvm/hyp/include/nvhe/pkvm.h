@@ -114,7 +114,7 @@ struct pkvm_hyp_vm {
 	struct pkvm_hyp_vcpu *vcpus[];
 };
 
-struct ffa_mem_transfer *__pkvm_get_vm_ffa_transfer(u16 handle);
+struct ffa_mem_transfer *__pkvm_get_vm_ffa_transfer(u64 handle);
 
 static inline struct pkvm_hyp_vm *
 pkvm_hyp_vcpu_to_hyp_vm(struct pkvm_hyp_vcpu *hyp_vcpu)

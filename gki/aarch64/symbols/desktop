@@ -227,6 +227,7 @@
   device_get_next_child_node
   device_initialize
   device_link_add
+  device_link_del
   device_link_remove
   device_match_of_node
   device_node_to_regmap
@@ -272,6 +273,7 @@
   devm_gpiod_get
   devm_gpiod_get_optional
   devm_gpiod_put
+  devm_hwmon_device_register_with_groups
   devm_iio_device_alloc
   __devm_iio_device_register
   devm_input_allocate_device
@@ -331,12 +333,14 @@
   __devm_spi_alloc_controller
   devm_spi_mem_dirmap_create
   devm_spi_register_controller
+  devm_thermal_add_hwmon_sysfs
   devm_thermal_of_zone_register
   devm_watchdog_register_device
   _dev_notice
   dev_pm_clear_wake_irq
   dev_pm_domain_attach
   dev_pm_domain_attach_by_id
+  dev_pm_domain_attach_by_name
   dev_pm_domain_detach
   dev_pm_opp_adjust_voltage
   dev_pm_opp_clear_config
@@ -410,12 +414,15 @@
   drm_atomic_bridge_chain_pre_enable
   drm_atomic_get_connector_state
   drm_atomic_get_crtc_state
+  drm_atomic_get_new_bridge_state
   drm_atomic_get_new_connector_for_encoder
   drm_atomic_get_new_private_obj_state
   drm_atomic_get_old_private_obj_state
   drm_atomic_get_private_obj_state
   drm_atomic_helper_bridge_destroy_state
+  __drm_atomic_helper_bridge_duplicate_state
   drm_atomic_helper_bridge_duplicate_state
+  __drm_atomic_helper_bridge_reset
   drm_atomic_helper_bridge_reset
   drm_atomic_helper_check
   drm_atomic_helper_check_plane_state
@@ -423,6 +430,7 @@
   drm_atomic_helper_commit_tail_rpm
   drm_atomic_helper_connector_destroy_state
   drm_atomic_helper_connector_duplicate_state
+  __drm_atomic_helper_connector_reset
   drm_atomic_helper_connector_reset
   __drm_atomic_helper_crtc_destroy_state
   __drm_atomic_helper_crtc_duplicate_state
@@ -448,13 +456,18 @@
   drm_color_ctm_s31_32_to_qm_n
   drm_compat_ioctl
   drm_connector_attach_encoder
+  drm_connector_attach_max_bpc_property
   drm_connector_cec_phys_addr_invalidate
   drm_connector_cec_phys_addr_set
+  drm_connector_cleanup
   drm_connector_dynamic_register
+  drm_connector_init
   drm_connector_list_iter_begin
   drm_connector_list_iter_end
   drm_connector_list_iter_next
+  drm_connector_register
   drm_connector_set_panel_orientation
+  drm_connector_set_path_property
   drm_connector_unregister
   drm_crtc_add_crc_entry
   drm_crtc_cleanup
@@ -480,6 +493,7 @@
   drm_dev_put
   drm_dev_register
   drm_dev_unregister
+  drm_display_info_set_bus_formats
   drm_display_mode_from_cea_vic
   drm_display_mode_from_videomode
   drm_display_mode_to_videomode
@@ -545,6 +559,7 @@
   drm_mode_set_name
   drm_modeset_unlock
   drm_mode_vrefresh
+  drm_object_attach_property
   drm_object_property_set_value
   drm_of_component_match_add
   drm_open
@@ -567,9 +582,11 @@
   drm_prime_sg_to_page_array
   drm_printf
   __drm_printfn_dbg
+  drm_property_create_enum
   drm_read
   drm_release
   drm_simple_encoder_init
+  drm_sysfs_connector_property_event
   drm_universal_plane_init
   drm_vblank_init
   drm_vblank_work_init
@@ -858,6 +875,7 @@
   kvfree_call_rcu
   __kvmalloc_node_noprof
   kvmemdup
+  kvm_iommu_register_driver
   led_classdev_register_ext
   led_classdev_unregister
   led_get_color_name
@@ -1122,6 +1140,10 @@
   pinctrl_utils_free_map
   pinctrl_utils_reserve_map
   pin_user_pages_remote
+  __pkvm_load_el2_module
+  __pkvm_register_el2_call
+  platform_device_add
+  platform_device_alloc
   platform_device_put
   platform_device_register_full
   platform_device_unregister

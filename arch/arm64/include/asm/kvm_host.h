@@ -413,6 +413,8 @@ struct kvm_arch {
 #define KVM_ARCH_FLAG_WRITABLE_IMP_ID_REGS		10
 	/* Guest has bought into the MMIO guard extension */
 #define KVM_ARCH_FLAG_MMIO_GUARD			11
+	/* No further ID register changes possible */
+#define KVM_ARCH_FLAG_ID_REGS_FINAL			12
 	unsigned long flags;
 
 	/* VM-wide vCPU feature set */
@@ -1332,6 +1334,9 @@ struct kvm_vcpu_arch {
 #else
 #define vcpu_has_ptrauth(vcpu)		false
 #endif
+
+#define kvm_id_regs_final(kvm)						\
+	test_bit(KVM_ARCH_FLAG_ID_REGS_FINAL, &(kvm)->arch.flags)
 
 #define vcpu_on_unsupported_cpu(vcpu)					\
 	vcpu_get_flag(vcpu, ON_UNSUPPORTED_CPU)

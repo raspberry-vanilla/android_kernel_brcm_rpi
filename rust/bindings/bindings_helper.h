@@ -53,6 +53,7 @@
 #include <linux/device/faux.h>
 #include <linux/dma-buf.h>
 #include <linux/dma-direction.h>
+#include <linux/dma-heap.h>
 #include <linux/dma-mapping.h>
 #include <linux/errname.h>
 #include <linux/ethtool.h>

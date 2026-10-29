@@ -44,7 +44,10 @@ impl InPlaceModule for WrapFdModule {
         };
 
         try_pin_init!(Self {
-            miscdev <- kernel::miscdevice::MiscDeviceRegistration::register(options),
+            miscdev <- kernel::miscdevice::MiscDeviceRegistration::register(
+                options,
+                Ok(WrapFdDevice),
+            ),
         })
     }
 }

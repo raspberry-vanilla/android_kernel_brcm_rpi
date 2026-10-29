@@ -1238,6 +1238,7 @@
   __traceiter_android_vh_ufs_send_uic_command
   __traceiter_android_vh_unreserve_highatomic_bypass
   __traceiter_android_vh_update_topology_flags_workfn
+  __traceiter_android_vh_use_amu_fie
   __traceiter_block_rq_insert
   __traceiter_cpu_frequency_limits
   __traceiter_cpu_idle
@@ -1414,6 +1415,7 @@
   __tracepoint_android_vh_ufs_send_uic_command
   __tracepoint_android_vh_unreserve_highatomic_bypass
   __tracepoint_android_vh_update_topology_flags_workfn
+  __tracepoint_android_vh_use_amu_fie
   __tracepoint_block_rq_insert
   __tracepoint_cpu_frequency_limits
   __tracepoint_cpu_idle

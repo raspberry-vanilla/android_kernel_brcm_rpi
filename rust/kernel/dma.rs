@@ -189,6 +189,11 @@ impl DmaMask {
 pub struct Attrs(u32);
 
 impl Attrs {
+    /// Create `Attrs` from its raw representation.
+    pub(crate) fn from_raw(raw: crate::ffi::c_ulong) -> Self {
+        Self(raw as u32)
+    }
+
     /// Get the raw representation of this attribute.
     pub(crate) fn as_raw(self) -> crate::ffi::c_ulong {
         self.0 as crate::ffi::c_ulong

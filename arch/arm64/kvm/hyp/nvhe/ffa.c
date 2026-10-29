@@ -665,17 +665,19 @@ static int do_ffa_rxtx_guest_map(struct kvm_cpu_context *ctxt, struct pkvm_hyp_v
 	hyp_spin_lock(&kvm_ffa_hyp_lock);
 	ffa_buf = ffa_get_buffers(hyp_vcpu);
 	if (ffa_buf->tx) {
+		hyp_spin_unlock(&kvm_ffa_hyp_lock);
 		ret = -EACCES;
-		goto out_unlock;
+		goto out_err_with_rx;
 	}
 
 	ffa_buf->tx = (void *)tx_va;
 	ffa_buf->rx = (void *)rx_va;
 	ffa_buf->tx_ipa = tx;
 	ffa_buf->rx_ipa = rx;
-out_unlock:
 	hyp_spin_unlock(&kvm_ffa_hyp_lock);
-	return ret;
+	return 0;
+out_err_with_rx:
+	WARN_ON(__pkvm_guest_unshare_hyp_page(pkvm_hyp_vcpu_to_hyp_vm(hyp_vcpu), rx));
 out_err_with_tx:
 	WARN_ON(__pkvm_guest_unshare_hyp_page(pkvm_hyp_vcpu_to_hyp_vm(hyp_vcpu), tx));
 out_err:
@@ -951,8 +953,11 @@ static void do_ffa_mem_frag_tx(struct arm_smccc_1_2_regs *res,
 
 	ret = ffa_host_share_ranges(buf, nr_ranges, is_lend);
 	if (ret) {
-		struct ffa_mem_transfer *transfer = __pkvm_get_vm_ffa_transfer(host_handle);
-		WARN_ON(transfer);
+		if (__pkvm_get_vm_ffa_transfer(host_handle)) {
+			/* The handle is a guest's; the host may not reclaim it */
+			ret = FFA_RET_DENIED;
+			goto out_unlock;
+		}
 
 		/*
 		 * We're effectively aborting the transaction, so we need
@@ -1234,10 +1239,11 @@ static void do_ffa_mem_reclaim(struct arm_smccc_1_2_regs *res,
 
 		goto out_reclaim;
 	} else {
-		transfer = __pkvm_get_vm_ffa_transfer(handle);
-
-		/* Prevent the host from replicating a transfer handle used by the guest */
-		WARN_ON(transfer);
+		if (__pkvm_get_vm_ffa_transfer(handle)) {
+			/* The handle is a guest's; the host may not reclaim it */
+			ret = FFA_RET_DENIED;
+			goto out_unlock;
+		}
 
 		if (pkvm_ffa_unmap_on_lend()) {
 			entry = ffa_host_get_handle(handle);

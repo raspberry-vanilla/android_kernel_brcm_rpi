@@ -155,6 +155,7 @@
   devm_gpiochip_add_data_with_key
   devm_gpiod_get
   devm_gpiod_get_optional
+  devm_hwmon_device_register_with_groups
   devm_ioremap
   devm_ioremap_resource
   devm_ioremap_wc
@@ -204,7 +205,7 @@
   devm_snd_soc_register_card
   devm_snd_soc_register_component
   __devm_spi_alloc_controller
-  devm_spi_register_controller
+  devm_thermal_add_hwmon_sysfs
   devm_thermal_of_zone_register
   devm_watchdog_register_device
   _dev_notice
@@ -874,6 +875,8 @@
   spi_controller_resume
   spi_controller_suspend
   spi_finalize_current_transfer
+  spi_register_controller
+  spi_unregister_controller
   sprintf
   sscanf
   __stack_chk_fail
@@ -2231,6 +2234,9 @@
 # required by snd-soc-wsa881x.ko
   gpiod_is_active_low
 
+# required by snd-soc-wsa884x.ko
+  devm_hwmon_device_register_with_info
+
 # required by socinfo.ko
   add_device_randomness
   soc_device_register
@@ -2252,6 +2258,7 @@
   of_property_read_variable_u16_array
 
 # required by spi-geni-qcom.ko
+  devm_spi_register_controller
   geni_se_clk_freq_match
   geni_se_rx_init_dma
   geni_se_tx_init_dma
@@ -2268,8 +2275,6 @@
   dmam_pool_create
   icc_disable
   icc_enable
-  spi_register_controller
-  spi_unregister_controller
 
 # required by spi-qup.ko
   cache_line_size
