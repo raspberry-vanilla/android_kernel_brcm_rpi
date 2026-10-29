@@ -20,7 +20,7 @@ bool arch_is_gunyah_guest(void)
 	uuid_t uuid;
 	u32 *up;
 
-	arm_smccc_1_1_invoke(ARM_SMCCC_VENDOR_HYP_CALL_UID_FUNC_ID, &res);
+	arm_smccc_1_1_smc(ARM_SMCCC_VENDOR_HYP_CALL_UID_FUNC_ID, &res);
 
 	up = (u32 *)&uuid.b[0];
 	up[0] = lower_32_bits(res.a0);

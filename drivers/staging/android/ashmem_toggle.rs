@@ -20,7 +20,7 @@ fn kstrtobool(kstr: &CStr) -> Result<bool> {
     Ok(res)
 }
 
-pub(crate) trait AshmemToggle {
+pub(crate) trait AshmemToggle: Sync + 'static {
     const NAME: &'static CStr;
     fn set(enabled: bool) -> Result<()>;
     fn get() -> bool;
@@ -31,7 +31,10 @@ pub(crate) struct AshmemToggleMisc<T>(PhantomData<T>);
 impl<T: AshmemToggle> AshmemToggleMisc<T> {
     pub(crate) fn new() -> Result<Pin<KBox<MiscDeviceRegistration<AshmemToggleMisc<T>>>>> {
         KBox::pin_init(
-            MiscDeviceRegistration::register(MiscDeviceOptions { name: T::NAME }),
+            MiscDeviceRegistration::register(
+                MiscDeviceOptions { name: T::NAME },
+                AshmemToggleMisc(PhantomData),
+            ),
             GFP_KERNEL,
         )
     }
@@ -39,11 +42,11 @@ impl<T: AshmemToggle> AshmemToggleMisc<T> {
 
 #[vtable]
 impl<T: AshmemToggle> MiscDevice for AshmemToggleMisc<T> {
-    type Ptr = ();
+    type File = ();
     fn open(_: &File, _: &MiscDeviceRegistration<Self>) -> Result<()> {
         Ok(())
     }
-    fn read_iter(mut kiocb: Kiocb<'_, Self::Ptr>, iov: &mut IovIter) -> Result<usize> {
+    fn read_iter(mut kiocb: Kiocb<'_, Self::File>, iov: &mut IovIter) -> Result<usize> {
         if kiocb.ki_pos() != 0 {
             return Ok(0);
         }
@@ -58,7 +61,7 @@ impl<T: AshmemToggle> MiscDevice for AshmemToggleMisc<T> {
         *kiocb.ki_pos_mut() = 2;
         Ok(2)
     }
-    fn write_iter(_kiocb: Kiocb<'_, Self::Ptr>, iov: &mut IovIter) -> Result<usize> {
+    fn write_iter(_kiocb: Kiocb<'_, Self::File>, iov: &mut IovIter) -> Result<usize> {
         let mut data = [0; 16];
         let len = iov.copy_from_iter(&mut data[..15]);
         data[len] = 0;

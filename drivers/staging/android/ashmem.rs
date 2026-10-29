@@ -96,7 +96,7 @@ module! {
 }
 
 struct AshmemModule {
-    _misc: Pin<KBox<MiscDeviceRegistration<Ashmem>>>,
+    _misc: Pin<KBox<MiscDeviceRegistration<AshmemMisc>>>,
     _toggle_unpin: Pin<KBox<MiscDeviceRegistration<AshmemToggleMisc<AshmemToggleShrinker>>>>,
     _toggle_read: Pin<KBox<MiscDeviceRegistration<AshmemToggleMisc<AshmemToggleRead>>>>,
     _toggle_exec: Pin<KBox<MiscDeviceRegistration<AshmemToggleMisc<AshmemToggleExec>>>>,
@@ -116,9 +116,12 @@ impl kernel::Module for AshmemModule {
         ashmem_range::set_shrinker_enabled(true)?;
 
         let ashmem_miscdevice_registration = KBox::pin_init(
-            MiscDeviceRegistration::register(MiscDeviceOptions {
-                name: c_str!("ashmem"),
-            }),
+            MiscDeviceRegistration::register(
+                MiscDeviceOptions {
+                    name: c_str!("ashmem"),
+                },
+                AshmemMisc,
+            ),
             GFP_KERNEL,
         )?;
         let ashmem_miscdevice_ptr = ashmem_miscdevice_registration.as_raw();
@@ -152,11 +155,13 @@ struct AshmemInner {
     area: Area,
 }
 
-#[vtable]
-impl MiscDevice for Ashmem {
-    type Ptr = Pin<KBox<Self>>;
+struct AshmemMisc;
 
-    fn open(_: &File, _: &MiscDeviceRegistration<Ashmem>) -> Result<Pin<KBox<Self>>> {
+#[vtable]
+impl MiscDevice for AshmemMisc {
+    type File = Pin<KBox<Ashmem>>;
+
+    fn open(_: &File, _: &MiscDeviceRegistration<Self>) -> Result<Self::File> {
         KBox::try_pin_init(
             try_pin_init! {
                 Ashmem {
@@ -239,7 +244,7 @@ impl MiscDevice for Ashmem {
         Ok(ret)
     }
 
-    fn read_iter(mut kiocb: Kiocb<'_, Self::Ptr>, iov: &mut IovIter) -> Result<usize> {
+    fn read_iter(mut kiocb: Kiocb<'_, Self::File>, iov: &mut IovIter) -> Result<usize> {
         let me = kiocb.private_data();
         let asma_file = {
             let asma = me.inner.lock();
@@ -698,7 +703,7 @@ unsafe fn get_ashmem_area<'a>(file: *mut bindings::file) -> Result<&'a Ashmem, E
     let private = unsafe { (*file).private_data };
     // SAFETY: Since this is an ashmem file, we know the type of the struct and can reference it
     // safely.
-    let ashmem = unsafe { <<Ashmem as MiscDevice>::Ptr as ForeignOwnable>::borrow(private) };
+    let ashmem = unsafe { <<AshmemMisc as MiscDevice>::File as ForeignOwnable>::borrow(private) };
     Ok(ashmem.get_ref())
 }
 
