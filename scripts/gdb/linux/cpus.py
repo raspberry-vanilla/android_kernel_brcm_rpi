@@ -185,7 +185,7 @@ def get_current_task(cpu):
             var_ptr = gdb.parse_and_eval("&current_task")
             return per_cpu(var_ptr, cpu).dereference()
     elif utils.is_target_arch("aarch64"):
-        current_task_addr = gdb.parse_and_eval("(unsigned long)$SP_EL0")
+        current_task_addr = gdb.parse_and_eval("(unsigned long)$TPIDRRO_EL0")
         if (current_task_addr >> 63) != 0:
             current_task = current_task_addr.cast(task_ptr_type)
             return current_task.dereference()

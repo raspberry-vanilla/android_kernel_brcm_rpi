@@ -147,8 +147,9 @@ impl SGTable {
         unsafe { &*ptr.cast() }
     }
 
+    /// Obtain the raw `struct sg_table *`.
     #[inline]
-    fn as_raw(&self) -> *mut bindings::sg_table {
+    pub fn as_raw(&self) -> *mut bindings::sg_table {
         self.inner.0.get()
     }
 

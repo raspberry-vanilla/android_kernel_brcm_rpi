@@ -4306,11 +4306,14 @@ void kiocb_invalidate_post_direct_write(struct kiocb *iocb, size_t count)
 {
 	struct address_space *mapping = iocb->ki_filp->f_mapping;
 
-	if (mapping->nrpages &&
-	    invalidate_inode_pages2_range(mapping,
-			iocb->ki_pos >> PAGE_SHIFT,
-			(iocb->ki_pos + count - 1) >> PAGE_SHIFT))
-		dio_warn_stale_pagecache(iocb->ki_filp);
+	if (mapping->nrpages) {
+		if (invalidate_inode_pages2_range(mapping,
+				iocb->ki_pos >> PAGE_SHIFT,
+				(iocb->ki_pos + count - 1) >> PAGE_SHIFT))
+			dio_warn_stale_pagecache(iocb->ki_filp);
+	} else {
+		cleancache_invalidate_inode(mapping);
+	}
 }
 
 ssize_t
@@ -4758,7 +4761,7 @@ static inline bool can_do_cachestat(struct file *f)
 {
 	if (f->f_mode & FMODE_WRITE)
 		return true;
-	if (inode_owner_or_capable(file_mnt_idmap(f), file_inode(f)))
+	if (file_owner_or_capable(f))
 		return true;
 	return file_permission(f, MAY_WRITE) == 0;
 }

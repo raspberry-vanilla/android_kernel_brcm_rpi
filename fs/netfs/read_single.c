@@ -102,6 +102,7 @@ static int netfs_single_dispatch_read(struct netfs_io_request *rreq)
 	subreq->io_iter	= rreq->buffer.iter;
 
 	netfs_queue_read(rreq, subreq);
+	trace_netfs_sreq(subreq, netfs_sreq_trace_added);
 
 	netfs_single_cache_prepare_read(rreq, subreq);
 	switch (subreq->source) {

@@ -65,7 +65,9 @@
   mutex_lock
   mutex_unlock
   nr_cpu_ids
+  of_find_compatible_node
   of_platform_populate
+  of_property_read_variable_u32_array
   param_ops_bool
   param_ops_int
   pcpu_alloc_noprof
@@ -154,10 +156,10 @@
   arm_smccc_1_2_smc
   arm_smccc_get_version
   bus_register_notifier
+  bus_unregister_notifier
   __cpu_present_mask
   irq_dispose_mapping
   kmemdup_noprof
-  of_find_compatible_node
   _raw_read_lock
   _raw_read_unlock
   _raw_write_lock
@@ -174,6 +176,7 @@
   xa_load
 
 # required by pkvm-dma-buf-heap.ko
+  of_address_to_resource
   pkvm_enable_smc_forwarding
   __pkvm_load_el2_module
   __pkvm_register_el2_call
@@ -202,7 +205,6 @@
   of_irq_find_parent
   __of_parse_phandle_with_args
   of_property_read_u32_index
-  of_property_read_variable_u32_array
   panic
   request_threaded_irq
   set_user_nice

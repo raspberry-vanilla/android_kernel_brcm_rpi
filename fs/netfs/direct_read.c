@@ -69,6 +69,7 @@ static void netfs_dispatch_unbuffered_reads(struct netfs_io_request *rreq)
 		subreq->len	= size;
 
 		netfs_queue_read(rreq, subreq);
+		trace_netfs_sreq(subreq, netfs_sreq_trace_added);
 
 		netfs_stat(&netfs_n_rh_download);
 		if (rreq->netfs_ops->prepare_read) {

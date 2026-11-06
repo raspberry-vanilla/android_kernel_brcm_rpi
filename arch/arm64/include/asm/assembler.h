@@ -591,7 +591,7 @@ alternative_else_nop_endif
  * Return the current task_struct.
  */
 	.macro	get_current_task, rd
-	mrs	\rd, sp_el0
+	mrs	\rd, tpidrro_el0
 	.endm
 
 /*

@@ -36,10 +36,7 @@
 	.endr
 	.endm
 
-	.macro kernel_ventry, el:req, ht:req, regsize:req, label:req
-	.align 7
-.Lventry_start\@:
-	.if	\el == 0
+	.macro kernel_ventry_el0, ht:req, regsize:req, label:req
 	/*
 	 * This must be the first instruction of the EL0 vector entries. It is
 	 * skipped by the trampoline vectors, to trigger the cleanup.
@@ -47,14 +44,17 @@
 	b	.Lskip_tramp_vectors_cleanup\@
 	.if	\regsize == 64
 	mrs	x30, tpidrro_el0
-	msr	tpidrro_el0, xzr
 	.else
 	mov	x30, xzr
 	.endif
 .Lskip_tramp_vectors_cleanup\@:
-	.endif
-
 	sub	sp, sp, #PT_REGS_SIZE
+	b	el0\ht\()_\regsize\()_\label
+	.endm
+
+	.macro kernel_ventry_el1h, regsize:req, label:req
+	sub	sp, sp, #PT_REGS_SIZE
+
 	/*
 	 * Test whether the SP has overflowed, without corrupting a GPR.
 	 * Task and IRQ stacks are aligned so that SP & (1 << THREAD_SHIFT)
@@ -62,41 +62,34 @@
 	 */
 	add	sp, sp, x0			// sp' = sp + x0
 	sub	x0, sp, x0			// x0' = sp' - x0 = (sp + x0) - x0 = sp
-	tbnz	x0, #THREAD_SHIFT, 0f
+	tbnz	x0, #THREAD_SHIFT, __bad_stack
 	sub	x0, sp, x0			// x0'' = sp' - x0' = (sp + x0) - sp = x0
 	sub	sp, sp, x0			// sp'' = sp' - x0 = (sp + x0) - x0 = sp
-	b	el\el\ht\()_\regsize\()_\label
+	b	el1h_\regsize\()_\label
+	.endm
 
-0:
-	/*
-	 * Either we've just detected an overflow, or we've taken an exception
-	 * while on the overflow stack. Either way, we won't return to
-	 * userspace, and can clobber EL0 registers to free up GPRs.
-	 */
+	.macro kernel_ventry_el1t, regsize:req, label:req
+	msr	spsel, #0			// Stay on the overflow stack
+	sub	sp, sp, #PT_REGS_SIZE
+	b	el1t_\regsize\()_\label
+	.endm
 
-	/* Stash the original SP (minus PT_REGS_SIZE) in tpidr_el0. */
-	msr	tpidr_el0, x0
+	.macro kernel_ventry_el1, ht:req, regsize:req, label:req
+	.ifc	\ht, h
+	kernel_ventry_el1h	\regsize, \label
+	.else
+	kernel_ventry_el1t	\regsize, \label
+	.endif
+	.endm
 
-	/* Recover the original x0 value and stash it in tpidrro_el0 */
-	sub	x0, sp, x0
-	msr	tpidrro_el0, x0
-
-	/* Switch to the overflow stack */
-	adr_this_cpu sp, overflow_stack + OVERFLOW_STACK_SIZE, x0
-
-	/*
-	 * Check whether we were already on the overflow stack. This may happen
-	 * after panic() re-enables interrupts.
-	 */
-	mrs	x0, tpidr_el0			// sp of interrupted context
-	sub	x0, sp, x0			// delta with top of overflow stack
-	tst	x0, #~(OVERFLOW_STACK_SIZE - 1)	// within range?
-	b.ne	__bad_stack			// no? -> bad stack pointer
-
-	/* We were already on the overflow stack. Restore sp/x0 and carry on. */
-	sub	sp, sp, x0
-	mrs	x0, tpidrro_el0
-	b	el\el\ht\()_\regsize\()_\label
+	.macro kernel_ventry, el:req, ht:req, regsize:req, label:req
+	.align 7
+.Lventry_start\@:
+	.if	\el == 0
+	kernel_ventry_el0	\ht, \regsize, \label
+	.else
+	kernel_ventry_el1	\ht, \regsize, \label
+	.endif
 .org .Lventry_start\@ + 128	// Did we overflow the ventry slot?
 	.endm
 
@@ -221,7 +214,9 @@ alternative_cb_end
 	clear_gp_regs
 	mrs	x21, sp_el0
 	ldr_this_cpu	tsk, __entry_task, x20
-	msr	sp_el0, tsk
+	msr	tpidrro_el0, tsk
+	adr_this_cpu	x19, overflow_stack + OVERFLOW_STACK_SIZE, x20
+	msr	sp_el0, x19
 
 	/*
 	 * Ensure MDSCR_EL1.SS is clear, since we can unmask debug exceptions
@@ -364,9 +359,12 @@ alternative_else_nop_endif
 	.if	\el == 0
 	ldr	x23, [sp, #S_SP]		// load return stack pointer
 	msr	sp_el0, x23
+	msr	tpidrro_el0, xzr
 	tst	x22, #PSR_MODE32_BIT		// native task?
 	b.eq	3f
 
+	ldr	x0, [tsk, #THREAD_TP_VALUE]
+	msr	tpidrro_el0, x0
 #ifdef CONFIG_ARM64_ERRATUM_845719
 alternative_if ARM64_WORKAROUND_845719
 #ifdef CONFIG_PID_IN_CONTEXTIDR
@@ -540,22 +538,24 @@ SYM_CODE_END(vectors)
 
 SYM_CODE_START_LOCAL(__bad_stack)
 	/*
-	 * We detected an overflow in kernel_ventry, which switched to the
-	 * overflow stack. Stash the exception regs, and head to our overflow
-	 * handler.
+	 * We detected an overflow in kernel_ventry.
+	 * Restore SP and X0.
 	 */
+	sub	x0, sp, x0
+	sub	sp, sp, x0
+	add	sp, sp, #PT_REGS_SIZE
 
-	/* Restore the original x0 value */
-	mrs	x0, tpidrro_el0
+	/* Switch to the overflow stack */
+	msr	spsel, #0
 
-	/*
-	 * Store the original GPRs to the new stack. The orginal SP (minus
-	 * PT_REGS_SIZE) was stashed in tpidr_el0 by kernel_ventry.
-	 */
+	/* Stash the exception regs */
 	sub	sp, sp, #PT_REGS_SIZE
 	kernel_entry 1
-	mrs	x0, tpidr_el0
-	add	x0, x0, #PT_REGS_SIZE
+
+	/* Fix-up the saved SP */
+	msr	spsel, #1
+	mov	x0, sp
+	msr	spsel, #0
 	str	x0, [sp, #S_SP]
 
 	/* Stash the regs for handle_bad_stack */
@@ -841,7 +841,7 @@ SYM_FUNC_START(cpu_switch_to)
 	ldp	x29, x9, [x8], #16
 	ldr	lr, [x8]
 	mov	sp, x9
-	msr	sp_el0, x1
+	msr	tpidrro_el0, x1
 	ptrauth_keys_install_kernel x1, x8, x9, x10
 	scs_save x0
 	scs_load_current
@@ -1029,11 +1029,11 @@ SYM_CODE_START(__sdei_asm_handler)
 
 	/*
 	 * We may have interrupted userspace, or a guest, or exit-from or
-	 * return-to either of these. We can't trust sp_el0, restore it.
+	 * return-to either of these. We can't trust tpidrro_el0, restore it.
 	 */
-	mrs	x28, sp_el0
+	mrs	x28, tpidrro_el0
 	ldr_this_cpu	dst=x0, sym=__entry_task, tmp=x1
-	msr	sp_el0, x0
+	msr	tpidrro_el0, x0
 
 	/* If we interrupted the kernel point to the previous stack/frame. */
 	and     x0, x3, #0xc
@@ -1049,7 +1049,7 @@ SYM_CODE_START(__sdei_asm_handler)
 	mov	x1, x19
 	bl	__sdei_handler
 
-	msr	sp_el0, x28
+	msr	tpidrro_el0, x28
 	/* restore regs >x17 that we clobbered */
 	mov	x4, x19         // keep x4 for __sdei_asm_exit_trampoline
 	ldp	x28, x29, [x4, #SDEI_EVENT_INTREGS + 16 * 14]

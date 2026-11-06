@@ -35,7 +35,7 @@ pub struct Flags(u32);
 
 impl Flags {
     /// Get the raw representation of this flag.
-    pub(crate) fn as_raw(self) -> u32 {
+    pub fn as_raw(self) -> u32 {
         self.0
     }
 

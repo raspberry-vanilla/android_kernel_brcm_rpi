@@ -179,7 +179,6 @@ struct task_struct init_task __aligned(L1_CACHE_BYTES) = {
 #endif
 	.blocked_donor = NULL,
 #ifdef CONFIG_SCHED_PROXY_EXEC
-	.migration_node = LIST_HEAD_INIT(init_task.migration_node),
 	.blocked_head = LIST_HEAD_INIT(init_task.blocked_head),
 	.blocked_node = LIST_HEAD_INIT(init_task.blocked_node),
 	.blocked_activation_node = LIST_HEAD_INIT(init_task.blocked_activation_node),

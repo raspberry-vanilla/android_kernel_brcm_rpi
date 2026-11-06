@@ -17,6 +17,7 @@ struct task_struct;
 #include <asm/memory.h>
 #include <asm/stack_pointer.h>
 #include <asm/types.h>
+#include <linux/android_kabi.h>
 
 /*
  * low level task data that entry.S needs immediate access to.
@@ -43,6 +44,9 @@ struct thread_info {
 	void			*scs_sp;
 #endif
 	u32			cpu;
+
+	ANDROID_KABI_RESERVE(1);
+	ANDROID_KABI_RESERVE(2);
 };
 
 #define thread_saved_pc(tsk)	\

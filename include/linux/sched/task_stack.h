@@ -86,13 +86,7 @@ void exit_task_stack_account(struct task_struct *tsk);
 #define task_stack_end_corrupted(task) \
 		(*(end_of_stack(task)) != STACK_END_MAGIC)
 
-static inline int object_is_on_stack(const void *obj)
-{
-	void *stack = task_stack_page(current);
-
-	obj = kasan_reset_tag(obj);
-	return (obj >= stack) && (obj < (stack + THREAD_SIZE));
-}
+extern int object_is_on_stack(const void *obj);
 
 extern void thread_stack_cache_init(void);
 

@@ -3167,10 +3167,6 @@ void kvm_arch_flush_shadow_memslot(struct kvm *kvm,
 	gpa_t gpa = slot->base_gfn << PAGE_SHIFT;
 	phys_addr_t size = slot->npages << PAGE_SHIFT;
 
-	/* Stage-2 is managed by hyp in protected mode. */
-	if (is_protected_kvm_enabled())
-		return;
-
 	write_lock(&kvm->mmu_lock);
 	kvm_stage2_unmap_range(&kvm->arch.mmu, gpa, size, true);
 	kvm_nested_s2_unmap(kvm, true);

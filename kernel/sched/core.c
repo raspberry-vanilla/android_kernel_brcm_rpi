@@ -3978,8 +3978,7 @@ static inline void proxy_set_task_cpu(struct task_struct *p, int cpu)
 	p->wake_cpu = wake_cpu;
 }
 
-static void do_activate_blocked_waiter(struct rq *target_rq, struct task_struct *owner,
-				       struct task_struct *p, int en_flags)
+static void do_activate_blocked_waiter(struct rq *target_rq, struct task_struct *p, int en_flags)
 {
 	unsigned int state;
 	struct rq_flags rf;
@@ -4014,13 +4013,12 @@ static void do_activate_blocked_waiter(struct rq *target_rq, struct task_struct 
 
 		scoped_guard (raw_spinlock, &p->blocked_lock) {
 			/*
-			 * Again, if activation is delayed, its possible
-			 * the task has been woken and is no longer
-			 * blocked_on or blocked on a different mutex
-			 * so double check we're still blocked on
-			 * the owner who is activating us.
+			 * Again, if activation is delayed, it's possible the
+			 * task has been woken and is no longer blocked_on,
+			 * but went back to sleep, so double check blocked_on
+			 * before activating onto the owner's rq
 			 */
-			if (task_blocked_on_owner(p) != owner)
+			if (!task_is_blocked(p))
 				return;
 		}
 
@@ -4124,7 +4122,7 @@ static void activate_blocked_waiters(struct rq *target_rq,
 			__proxy_remove_from_sleeping_owner(owner, p);
 			raw_spin_unlock_irqrestore(&owner->blocked_lock, flags);
 
-			do_activate_blocked_waiter(target_rq, owner, p, en_flags);
+			do_activate_blocked_waiter(target_rq, p, en_flags);
 			trace_sched_pe_activate_blocked_entity(owner, p);
 
 			raw_spin_lock_irqsave(&p->blocked_lock, flags);
@@ -4202,6 +4200,12 @@ void move_queued_task_locked(struct rq *src_rq, struct rq *dst_rq, struct task_s
 		struct task_struct *owner = NULL;
 
 		if (!task_queued_on_rq(src_rq, task) || task_current_donor(src_rq, task))
+			break;
+		/*
+		 * Never move a task that is running on src_rq (e.g. rq->curr
+		 * acting as the execution context for a different donor).
+		 */
+		if (task_on_cpu(src_rq, task))
 			break;
 
 		if (task_is_blocked(task))

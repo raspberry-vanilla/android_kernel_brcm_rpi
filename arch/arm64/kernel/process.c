@@ -256,17 +256,8 @@ static void tls_thread_flush(void)
 	if (system_supports_tpidr2())
 		write_sysreg_s(0, SYS_TPIDR2_EL0);
 
-	if (is_compat_task()) {
+	if (is_compat_task())
 		current->thread.uw.tp_value = 0;
-
-		/*
-		 * We need to ensure ordering between the shadow state and the
-		 * hardware state, so that we don't corrupt the hardware state
-		 * with a stale shadow state during context switch.
-		 */
-		barrier();
-		write_sysreg(0, tpidrro_el0);
-	}
 }
 
 static void flush_tagged_addr_state(void)
@@ -531,11 +522,6 @@ static void tls_thread_switch(struct task_struct *next)
 {
 	tls_preserve_current_state();
 
-	if (is_compat_thread(task_thread_info(next)))
-		write_sysreg(next->thread.uw.tp_value, tpidrro_el0);
-	else
-		write_sysreg(0, tpidrro_el0);
-
 	write_sysreg(*task_user_tls(next), tpidr_el0);
 	if (system_supports_tpidr2())
 		write_sysreg_s(next->thread.tpidr2_el0, SYS_TPIDR2_EL0);
@@ -565,8 +551,9 @@ static void ssbs_thread_switch(struct task_struct *next)
 }
 
 /*
- * We store our current task in sp_el0, which is clobbered by userspace. Keep a
- * shadow copy so that we can restore this upon entry from userspace.
+ * We store our current task in tpidrro_el0, which is clobbered when returning
+ * to userspace. Keep a shadow copy so that we can restore this upon entry from
+ * userspace.
  *
  * This is *only* for exception entry from EL0, and is not valid until we
  * __switch_to() a user task.

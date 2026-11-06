@@ -2031,6 +2031,7 @@
   nvmem_cell_read
   nvmem_register
   nvmem_unregister
+  object_is_on_stack
   of_alias_get_id
   of_clk_add_hw_provider
   of_clk_del_provider

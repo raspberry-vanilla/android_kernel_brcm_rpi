@@ -809,7 +809,8 @@ static void cfg80211_pmsr_process_abort(struct wireless_dev *wdev)
 
 void cfg80211_pmsr_free_wk(struct wiphy *wiphy, struct wiphy_work *work)
 {
-	struct wireless_dev *wdev = pmsr_wk_to_wdev(work);
+	struct wireless_dev *wdev = container_of(work, struct wireless_dev,
+						 pmsr_free_wk);
 
 	cfg80211_pmsr_process_abort(wdev);
 }
@@ -826,7 +827,7 @@ void cfg80211_pmsr_wdev_down(struct wireless_dev *wdev)
 	}
 	spin_unlock_bh(&wdev->pmsr_lock);
 
-	wiphy_work_cancel(wdev->wiphy, wdev_to_pmsr_wk(wdev));
+	wiphy_work_cancel(wdev->wiphy, &wdev->pmsr_free_wk);
 	if (found)
 		cfg80211_pmsr_process_abort(wdev);
 
@@ -841,7 +842,7 @@ void cfg80211_release_pmsr(struct wireless_dev *wdev, u32 portid)
 	list_for_each_entry(req, &wdev->pmsr_list, list) {
 		if (req->nl_portid == portid) {
 			req->nl_portid = 0;
-			wiphy_work_queue(wdev->wiphy, wdev_to_pmsr_wk(wdev));
+			wiphy_work_queue(wdev->wiphy, &wdev->pmsr_free_wk);
 		}
 	}
 	spin_unlock_bh(&wdev->pmsr_lock);

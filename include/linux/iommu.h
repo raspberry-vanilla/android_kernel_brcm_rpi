@@ -172,7 +172,6 @@ enum iommu_domain_cookie_type {
 	IOMMU_COOKIE_NONE,
 	IOMMU_COOKIE_DMA_IOVA,
 	IOMMU_COOKIE_DMA_MSI,
-	IOMMU_COOKIE_FAULT_HANDLER,
 	IOMMU_COOKIE_SVA,
 	IOMMU_COOKIE_IOMMUFD,
 };
@@ -230,15 +229,15 @@ struct iommu_domain {
 	unsigned long pgsize_bitmap;	/* Bitmap of page sizes in use */
 	struct iommu_domain_geometry geometry;
 	int (*iopf_handler)(struct iopf_group *group);
+	struct {
+		iommu_fault_handler_t handler;
+		void *handler_token;
+	};
 
 	union { /* cookie */
 		struct iommu_dma_cookie *iova_cookie;
 		struct iommu_dma_msi_cookie *msi_cookie;
 		struct iommufd_hw_pagetable *iommufd_hwpt;
-		struct {
-			iommu_fault_handler_t handler;
-			void *handler_token;
-		};
 		struct {	/* IOMMU_DOMAIN_SVA */
 			struct mm_struct *mm;
 			int users;

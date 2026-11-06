@@ -249,7 +249,11 @@ static struct page *binder_page_lookup(struct binder_alloc *alloc,
 					       &page, NULL);
 	mmap_read_unlock(mm);
 
-	return npages > 0 ? page : NULL;
+	if (npages <= 0)
+		return NULL;
+
+	put_page(page);
+	return page;
 }
 
 static int binder_page_insert(struct binder_alloc *alloc,

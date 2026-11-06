@@ -14,11 +14,11 @@ struct task_struct;
  */
 static __always_inline struct task_struct *get_current(void)
 {
-	unsigned long sp_el0;
+	unsigned long tpidrro_el0;
 
-	asm ("mrs %0, sp_el0" : "=r" (sp_el0));
+	asm ("mrs %0, tpidrro_el0" : "=r" (tpidrro_el0));
 
-	return (struct task_struct *)sp_el0;
+	return (struct task_struct *)tpidrro_el0;
 }
 
 #define current get_current()

@@ -357,7 +357,7 @@ static int add_master_key_user(struct fscrypt_master_key *mk)
 		return err;
 	}
 
-	mk_user = kzalloc(sizeof(*mk_user), GFP_KERNEL);
+	mk_user = kzalloc_obj(*mk_user);
 	if (!mk_user) {
 		key_put(quota_key);
 		return -ENOMEM;

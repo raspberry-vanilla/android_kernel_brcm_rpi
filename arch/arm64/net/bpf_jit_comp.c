@@ -1579,7 +1579,7 @@ emit_cond_jmp:
 		if (insn->src_reg == 0 && insn->imm == BPF_FUNC_get_smp_processor_id) {
 			cpu_offset = offsetof(struct thread_info, cpu);
 
-			emit(A64_MRS_SP_EL0(tmp), ctx);
+			emit(A64_MRS_TPIDRRO_EL0(tmp), ctx);
 			if (is_lsi_offset(cpu_offset, 2)) {
 				emit(A64_LDR32I(r0, tmp, cpu_offset), ctx);
 			} else {
@@ -1592,7 +1592,7 @@ emit_cond_jmp:
 		/* Implement helper call to bpf_get_current_task/_btf() inline */
 		if (insn->src_reg == 0 && (insn->imm == BPF_FUNC_get_current_task ||
 					   insn->imm == BPF_FUNC_get_current_task_btf)) {
-			emit(A64_MRS_SP_EL0(r0), ctx);
+			emit(A64_MRS_TPIDRRO_EL0(r0), ctx);
 			break;
 		}
 
@@ -2117,7 +2117,7 @@ struct bpf_prog *bpf_int_jit_compile(struct bpf_prog *prog)
 	image_size = extable_offset + extable_size;
 	ro_header = bpf_jit_binary_pack_alloc(image_size, &ro_image_ptr,
 					      sizeof(u64), &header, &image_ptr,
-					      jit_fill_hole);
+					      jit_fill_hole, was_classic);
 	if (!ro_header) {
 		prog = orig_prog;
 		goto out_off;
@@ -2754,7 +2754,7 @@ int arch_bpf_trampoline_size(const struct btf_func_model *m, u32 flags,
 
 void *arch_alloc_bpf_trampoline(unsigned int size)
 {
-	return bpf_prog_pack_alloc(size, jit_fill_hole);
+	return bpf_prog_pack_alloc(size, jit_fill_hole, false);
 }
 
 void arch_free_bpf_trampoline(void *image, unsigned int size)

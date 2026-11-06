@@ -743,8 +743,10 @@ int invalidate_inode_pages2_range(struct address_space *mapping,
 			VM_BUG_ON_FOLIO(!folio_contains(folio, indices[i]), folio);
 			folio_wait_writeback(folio);
 			ret2 = folio_unmap_invalidate(mapping, folio, GFP_KERNEL);
-			if (ret2 < 0)
+			if (ret2 < 0) {
 				ret = ret2;
+				folio_clear_mappedtodisk(folio);
+			}
 			folio_unlock(folio);
 		}
 

@@ -10,6 +10,7 @@
  * shared outside of the drivers/base/ directory.
  *
  */
+#include <linux/android_kabi.h>
 #include <linux/notifier.h>
 
 /**
@@ -117,6 +118,8 @@ struct device_private {
 	char *deferred_probe_reason;
 	struct device *device;
 	u8 dead:1;
+
+	ANDROID_BACKPORT_RESERVE(0);
 };
 #define to_device_private_parent(obj)	\
 	container_of(obj, struct device_private, knode_parent)

@@ -1970,7 +1970,8 @@ static struct task_struct *pick_next_pushable_task(struct rq *rq)
 		return NULL;
 
 	plist_for_each_entry(p, head, pushable_tasks) {
-		if (task_is_pushable(rq, p, 0)) {
+		/* skip tasks that cannot be migrated */
+		if (task_is_pushable(rq, p, 0) && !is_migration_disabled(p)) {
 			push_task = p;
 			break;
 		}

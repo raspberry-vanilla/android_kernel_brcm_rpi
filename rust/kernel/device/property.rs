@@ -126,6 +126,49 @@ impl FwNode {
         Ok(ret as usize)
     }
 
+    /// Returns firmware property `name` string array values in a [`KVec`].
+    pub fn property_read_string_array(&self, name: &CStr) -> Result<KVec<&CStr>> {
+        // SAFETY:
+        // - `self` and `name` are valid by their type invariants.
+        // - Passing a null pointer with `nval == 0` returns the array length.
+        let len = unsafe {
+            bindings::fwnode_property_read_string_array(
+                self.as_raw(),
+                name.as_char_ptr(),
+                ptr::null_mut(),
+                0,
+            )
+        };
+        to_result(len)?;
+        let len = len as usize;
+        if len == 0 {
+            return Ok(KVec::new());
+        }
+
+        let mut ptrs = KVec::with_capacity(len, GFP_KERNEL)?;
+        // SAFETY:
+        // - `self` and `name` are valid by their type invariants.
+        // - `ptrs` has capacity for `len` pointers.
+        let ret = unsafe {
+            bindings::fwnode_property_read_string_array(
+                self.as_raw(),
+                name.as_char_ptr(),
+                ptrs.as_mut_ptr(),
+                len,
+            )
+        };
+        to_result(ret)?;
+        // SAFETY: `ret` elements were initialized (`ret <= len`).
+        unsafe { ptrs.inc_len(ret as usize) };
+
+        let mut res = KVec::with_capacity(ptrs.len(), GFP_KERNEL)?;
+        for ptr in ptrs {
+            // SAFETY: `ptr` is a valid C string for at least the lifetime of `self`.
+            res.push(unsafe { CStr::from_char_ptr(ptr) }, GFP_KERNEL)?;
+        }
+        Ok(res)
+    }
+
     /// Returns firmware property `name` integer array values in a [`KVec`].
     pub fn property_read_array_vec<'fwnode, 'name, T: PropertyInt>(
         &'fwnode self,

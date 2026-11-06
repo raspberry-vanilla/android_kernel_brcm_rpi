@@ -8,7 +8,6 @@
 
 struct ufs_hba_priv {
 	struct ufs_hba hba;
-	bool zwor_sup;
 	/* Serializes AHIT register access between sysfs and the host driver */
 	struct mutex ahit_mutex;
 	/*

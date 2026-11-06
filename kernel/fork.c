@@ -95,6 +95,7 @@
 #include <linux/thread_info.h>
 #include <linux/kstack_erase.h>
 #include <linux/kasan.h>
+#include <linux/randomize_kstack.h>
 #include <linux/scs.h>
 #include <linux/io_uring.h>
 #include <linux/bpf.h>
@@ -2171,7 +2172,6 @@ __latent_entropy struct task_struct *copy_process(
 	p->blocked_on.lock = NULL; /* not blocked yet */
 	p->blocked_donor = NULL; /* nobody is boosting p yet */
 #ifdef CONFIG_SCHED_PROXY_EXEC
-	INIT_LIST_HEAD(&p->migration_node);
 	INIT_LIST_HEAD(&p->blocked_head);
 	INIT_LIST_HEAD(&p->blocked_node);
 	INIT_LIST_HEAD(&p->blocked_activation_node);
@@ -2233,6 +2233,7 @@ __latent_entropy struct task_struct *copy_process(
 	if (retval)
 		goto bad_fork_cleanup_io;
 
+	random_kstack_task_init(p);
 	stackleak_task_init(p);
 
 	if (pid != &init_struct_pid) {
@@ -3348,3 +3349,12 @@ static int __init init_fork_sysctl(void)
 }
 
 subsys_initcall(init_fork_sysctl);
+
+int object_is_on_stack(const void *obj)
+{
+	void *stack = task_stack_page(current);
+
+	obj = kasan_reset_tag(obj);
+	return (obj >= stack) && (obj < (stack + THREAD_SIZE));
+}
+EXPORT_SYMBOL(object_is_on_stack);

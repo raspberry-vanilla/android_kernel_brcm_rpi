@@ -9,6 +9,7 @@
 
 #define SDEI_STACK_SIZE		IRQ_STACK_SIZE
 
+#ifdef CONFIG_ARM_SDE_INTERFACE
 #ifndef __ASSEMBLY__
 
 #include <linux/linkage.h>
@@ -50,4 +51,5 @@ unsigned long sdei_arch_get_entry_point(int conduit);
 #define sdei_arch_get_entry_point(x)	sdei_arch_get_entry_point(x)
 
 #endif /* __ASSEMBLY__ */
+#endif /* CONFIG_ARM_SDE_INTERFACE */
 #endif	/* __ASM_SDEI_H */

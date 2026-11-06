@@ -378,6 +378,7 @@ multi_abi_update(
     targets = [
         ":kernel_aarch64_abi_update",
         ":kernel_x86_64_abi_update",
+        ":kernel_aarch64_microdroid_abi_update",
     ],
 )
 
