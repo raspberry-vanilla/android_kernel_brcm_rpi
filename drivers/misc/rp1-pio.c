@@ -904,7 +904,7 @@ pio_irq_handler_t rp1_pio_irq_get_handler(struct rp1_pio_client *client, uint nu
 	pio_irq_handler_t handler;
 
 	if (num >= pio->irq_count)
-		return false;
+		return NULL;
 
 	irqi = &pio->irqs[num];
 
