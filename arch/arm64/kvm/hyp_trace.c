@@ -817,10 +817,10 @@ static int hyp_trace_raw_open(struct inode *inode, struct file *file)
 		return ret;
 
 	iter = file->private_data;
-	iter->spare = ring_buffer_alloc_read_page(iter->hyp_buffer->trace_buffer,
-						  iter->cpu);
-	if (IS_ERR(iter->spare)) {
-		ret = PTR_ERR(iter->spare);
+	ret = ring_buffer_alloc_read_page(iter->hyp_buffer->trace_buffer,
+					  iter->cpu,
+					  (struct buffer_data_read_page **)&iter->spare);
+	if (ret) {
 		iter->spare = NULL;
 		return ret;
 	}
