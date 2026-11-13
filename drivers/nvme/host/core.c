@@ -3602,6 +3602,8 @@ static int nvme_init_identify(struct nvme_ctrl *ctrl)
 
 	lim = queue_limits_start_update(ctrl->admin_q);
 	nvme_set_ctrl_limits(ctrl, &lim);
+	if (ctrl->quirks & NVME_QUIRK_ADMIN_PAGE_ALIGN)
+		lim.dma_alignment = NVME_CTRL_PAGE_SIZE - 1;
 	ret = queue_limits_commit_update(ctrl->admin_q, &lim);
 	if (ret)
 		goto out_free;
