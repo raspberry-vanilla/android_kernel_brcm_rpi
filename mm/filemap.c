@@ -153,15 +153,6 @@ EXPORT_SYMBOL_GPL(_trace_android_rvh_mapping_shrinkable);
 EXPORT_TRACEPOINT_SYMBOL_GPL(mm_filemap_delete_from_page_cache);
 EXPORT_TRACEPOINT_SYMBOL_GPL(mm_filemap_add_to_page_cache);
 
-static void mapping_set_update(struct xa_state *xas,
-		struct address_space *mapping)
-{
-	if (dax_mapping(mapping) || shmem_mapping(mapping))
-		return;
-	xas_set_update(xas, workingset_update_node);
-	xas_set_lru(xas, &shadow_nodes);
-}
-
 static void page_cache_delete(struct address_space *mapping,
 				   struct folio *folio, void *shadow)
 {
