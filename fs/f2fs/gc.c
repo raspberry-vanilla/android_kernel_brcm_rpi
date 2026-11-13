@@ -1236,23 +1236,12 @@ static int ra_data_block(struct inode *inode, pgoff_t index)
 		.encrypted_page = NULL,
 		.in_list = 0,
 	};
-	int err;
+	int err = 0;
 	bool bypass = false;
 
 	trace_android_rvh_f2fs_ra_data_block_bypass(inode, index, &err, &bypass);
 	if (bypass)
 		return err;
-
-	f2fs_down_read(&F2FS_I(inode)->i_sem);
-	if (f2fs_is_cow_file(inode)) {
-		atomic_inode = igrab(F2FS_I(inode)->atomic_inode);
-		if (!atomic_inode) {
-			f2fs_up_read(&F2FS_I(inode)->i_sem);
-			return -EBUSY;
-		}
-		mapping = atomic_inode->i_mapping;
-	}
-	f2fs_up_read(&F2FS_I(inode)->i_sem);
 
 	f2fs_down_read(&F2FS_I(inode)->i_sem);
 	if (f2fs_is_cow_file(inode)) {
@@ -1316,6 +1305,9 @@ got_it:
 		err = -ENOMEM;
 		goto put_page;
 	}
+
+	if (PageUptodate(fio.encrypted_page))
+		goto put_encrypted_page;
 
 	err = f2fs_submit_page_bio(&fio);
 	if (err)
