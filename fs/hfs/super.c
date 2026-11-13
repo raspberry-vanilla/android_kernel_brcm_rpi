@@ -35,6 +35,7 @@ MODULE_IMPORT_NS("ANDROID_GKI_VFS_internal_I_am_really_a_filesystem_and_am_NOT_a
 
 static int hfs_sync_fs(struct super_block *sb, int wait)
 {
+	is_hfs_cnid_counts_valid(sb);
 	hfs_mdb_commit(sb);
 	return 0;
 }
@@ -65,6 +66,8 @@ static void flush_mdb(struct work_struct *work)
 	spin_lock(&sbi->work_lock);
 	sbi->work_queued = 0;
 	spin_unlock(&sbi->work_lock);
+
+	is_hfs_cnid_counts_valid(sb);
 
 	hfs_mdb_commit(sb);
 }
