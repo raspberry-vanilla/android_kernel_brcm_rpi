@@ -898,7 +898,8 @@ static void vduse_dev_free_coherent(union virtio_map token, size_t size,
 {
 	struct vduse_iova_domain *domain = token.iova_domain;
 
-	vduse_domain_free_coherent(domain, size, vaddr, dma_addr, attrs);
+	vduse_domain_free_coherent(domain, size, dma_addr, attrs);
+	free_pages_exact(vaddr, size);
 }
 
 static bool vduse_dev_need_sync(union virtio_map token, dma_addr_t dma_addr)
