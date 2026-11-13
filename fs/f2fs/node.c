@@ -1678,9 +1678,10 @@ continue_unlock:
 	return last_folio;
 }
 
-static int __write_node_page(struct page *page, bool atomic, bool *submitted,
-				struct writeback_control *wbc, bool do_balance,
-				enum iostat_type io_type, unsigned int *seq_id)
+static int __write_node_page(struct page *page, bool atomic, bool do_fsync,
+				bool *submitted, struct writeback_control *wbc,
+				bool do_balance, enum iostat_type io_type,
+				unsigned int *seq_id)
 {
 	struct f2fs_sb_info *sbi = F2FS_P_SB(page);
 	struct folio *folio = page_folio(page);
@@ -1751,13 +1752,14 @@ static int __write_node_page(struct page *page, bool atomic, bool *submitted,
 		goto redirty_out;
 	}
 
-	if (atomic) {
-		if (!test_opt(sbi, NOBARRIER))
-			fio.op_flags |= REQ_PREFLUSH | REQ_FUA;
-		if (IS_INODE(page))
-			set_dentry_mark(page,
+	if (atomic && !test_opt(sbi, NOBARRIER))
+		fio.op_flags |= REQ_PREFLUSH | REQ_FUA;
+
+	set_dentry_mark(page, false);
+	set_fsync_mark(page, do_fsync);
+	if (IS_INODE(page) && (atomic || is_fsync_dnode(page)))
+		set_dentry_mark(page,
 				f2fs_need_dentry_mark(sbi, ino_of_node(page)));
-	}
 
 	/* should add to global list before clearing PAGECACHE status */
 	if (f2fs_in_warm_node_list(sbi, folio)) {
@@ -1817,7 +1819,7 @@ int f2fs_move_node_page(struct page *node_page, int gc_type)
 			goto out_page;
 		}
 
-		if (__write_node_page(node_page, false, NULL,
+		if (__write_node_page(node_page, false, false, NULL,
 					&wbc, false, FS_GC_NODE_IO, NULL)) {
 			err = -EAGAIN;
 			unlock_page(node_page);
@@ -1865,6 +1867,7 @@ retry:
 		for (i = 0; i < nr_folios; i++) {
 			struct folio *folio = fbatch.folios[i];
 			bool submitted = false;
+			bool do_fsync = false;
 
 			if (unlikely(f2fs_cp_error(sbi))) {
 				f2fs_folio_put(last_folio, false);
@@ -1895,11 +1898,8 @@ continue_unlock:
 
 			f2fs_folio_wait_writeback(folio, NODE, true, true);
 
-			set_fsync_mark(&folio->page, 0);
-			set_dentry_mark(&folio->page, 0);
-
 			if (!atomic || folio == last_folio) {
-				set_fsync_mark(&folio->page, 1);
+				do_fsync = true;
 				percpu_counter_inc(&sbi->rf_node_block_count);
 				if (IS_INODE(&folio->page)) {
 					if (is_inode_flag_set(inode,
@@ -1919,8 +1919,9 @@ continue_unlock:
 
 			ret = __write_node_page(&folio->page, atomic &&
 						folio == last_folio,
-						&submitted, wbc, true,
-						FS_NODE_IO, seq_id);
+						do_fsync, &submitted,
+						wbc, true, FS_NODE_IO,
+						seq_id);
 			if (ret) {
 				folio_unlock(folio);
 				f2fs_folio_put(last_folio, false);
@@ -2122,10 +2123,7 @@ write_node:
 			if (!folio_clear_dirty_for_io(folio))
 				goto continue_unlock;
 
-			set_fsync_mark(&folio->page, 0);
-			set_dentry_mark(&folio->page, 0);
-
-			ret = __write_node_page(&folio->page, false, &submitted,
+			ret = __write_node_page(&folio->page, false, false, &submitted,
 						wbc, do_balance, io_type, NULL);
 			if (ret)
 				folio_unlock(folio);
