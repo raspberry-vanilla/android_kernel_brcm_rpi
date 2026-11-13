@@ -1278,6 +1278,7 @@ int erdma_destroy_cq(struct ib_cq *ibcq, struct ib_udata *udata)
 	struct erdma_dev *dev = to_edev(ibcq->device);
 	struct erdma_ucontext *ctx = rdma_udata_to_drv_context(
 		udata, struct erdma_ucontext, ibucontext);
+	unsigned long flags;
 	int err;
 	struct erdma_cmdq_destroy_cq_req req;
 
@@ -1292,6 +1293,13 @@ int erdma_destroy_cq(struct ib_cq *ibcq, struct ib_udata *udata)
 				       "failed to destroy CQ %u: %d\n",
 				       cq->cqn, err);
 
+	xa_lock_irqsave(&dev->cq_xa, flags);
+	__xa_erase(&dev->cq_xa, cq->cqn);
+	xa_unlock_irqrestore(&dev->cq_xa, flags);
+
+	erdma_cq_put(cq);
+	wait_for_completion(&cq->free);
+
 	if (rdma_is_kernel_res(&cq->ibcq.res)) {
 		dma_free_coherent(&dev->pdev->dev, cq->depth << CQE_SHIFT,
 				  cq->kern_cq.qbuf, cq->kern_cq.qbuf_dma_addr);
@@ -1301,8 +1309,6 @@ int erdma_destroy_cq(struct ib_cq *ibcq, struct ib_udata *udata)
 		erdma_unmap_user_dbrecords(ctx, &cq->user_cq.user_dbr_page);
 		put_mtt_entries(dev, &cq->user_cq.qbuf_mem);
 	}
-
-	xa_erase(&dev->cq_xa, cq->cqn);
 
 	return 0;
 }
@@ -1315,6 +1321,7 @@ int erdma_destroy_qp(struct ib_qp *ibqp, struct ib_udata *udata)
 		udata, struct erdma_ucontext, ibucontext);
 	struct erdma_cmdq_destroy_qp_req req;
 	union erdma_mod_qp_params params;
+	unsigned long flags;
 	int err;
 
 	down_write(&qp->state_lock);
@@ -1342,6 +1349,10 @@ int erdma_destroy_qp(struct ib_qp *ibqp, struct ib_udata *udata)
 				       "failed to destroy QP %u: %d\n",
 				       QP_ID(qp), err);
 
+	xa_lock_irqsave(&dev->qp_xa, flags);
+	__xa_erase(&dev->qp_xa, QP_ID(qp));
+	xa_unlock_irqrestore(&dev->qp_xa, flags);
+
 	erdma_qp_put(qp);
 	wait_for_completion(&qp->safe_free);
 
@@ -1355,7 +1366,6 @@ int erdma_destroy_qp(struct ib_qp *ibqp, struct ib_udata *udata)
 
 	if (qp->cep)
 		erdma_cep_put(qp->cep);
-	xa_erase(&dev->qp_xa, QP_ID(qp));
 
 	return 0;
 }
@@ -1932,6 +1942,8 @@ int erdma_create_cq(struct ib_cq *ibcq, const struct ib_cq_init_attr *attr,
 	cq->ibcq.cqe = depth;
 	cq->depth = depth;
 	cq->assoc_eqn = attr->comp_vector + 1;
+	refcount_set(&cq->refcount, 1);
+	init_completion(&cq->free);
 
 	ret = xa_alloc_cyclic(&dev->cq_xa, &cq->cqn, cq,
 			      XA_LIMIT(1, dev->attrs.max_cq - 1),

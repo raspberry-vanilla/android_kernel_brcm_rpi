@@ -544,7 +544,7 @@ static int ublk_validate_params(const struct ublk_device *ub)
 		if (p->max_sectors < PAGE_SECTORS)
 			return -EINVAL;
 
-		if (ublk_dev_is_zoned(ub) && !p->chunk_sectors)
+		if (ublk_dev_is_zoned(ub) && !is_power_of_2(p->chunk_sectors))
 			return -EINVAL;
 	} else
 		return -EINVAL;
@@ -1073,8 +1073,14 @@ static inline void __ublk_complete_rq(struct request *req)
 	 *
 	 * Re-read simply for this unlikely case.
 	 */
-	if (unlikely(unmapped_bytes < io->res))
+	if (unlikely(unmapped_bytes < io->res)) {
+		if (unlikely(!unmapped_bytes)) {
+			res = BLK_STS_IOERR;
+			goto exit;
+		}
+
 		io->res = unmapped_bytes;
+	}
 
 	/*
 	 * Run bio->bi_end_io() with softirqs disabled. If the final fput
