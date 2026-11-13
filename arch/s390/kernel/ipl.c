@@ -21,6 +21,7 @@
 #include <linux/crash_dump.h>
 #include <linux/debug_locks.h>
 #include <linux/vmalloc.h>
+#include <linux/secure_boot.h>
 #include <asm/asm-extable.h>
 #include <asm/machine.h>
 #include <asm/diag.h>
@@ -2502,6 +2503,11 @@ void *ipl_report_finish(struct ipl_report *report)
 	BUG_ON(ptr > buf + report->size);
 out:
 	return buf;
+}
+
+bool arch_get_secureboot(void)
+{
+	return ipl_secure_flag;
 }
 
 int ipl_report_free(struct ipl_report *report)
