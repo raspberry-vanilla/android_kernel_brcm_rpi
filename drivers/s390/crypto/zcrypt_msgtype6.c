@@ -329,7 +329,7 @@ struct type86_fmt2_msg {
 static int xcrb_msg_to_type6cprb_msgx(bool userspace, struct ap_message *ap_msg,
 				      struct ica_xcRB *xcrb,
 				      unsigned int *fcode,
-				      unsigned short **dom)
+				      unsigned int *domain)
 {
 	static struct type6_hdr static_type6_hdrX = {
 		.type		=  0x06,
@@ -413,7 +413,8 @@ static int xcrb_msg_to_type6cprb_msgx(bool userspace, struct ap_message *ap_msg,
 	       sizeof(msg->hdr.function_code));
 
 	*fcode = (msg->hdr.function_code[0] << 8) | msg->hdr.function_code[1];
-	*dom = (unsigned short *)&msg->cprbx.domain;
+	if (domain)
+		*domain = msg->cprbx.domain;
 
 	/* check subfunction, US and AU need special flag with NQAP */
 	if (memcmp(function_code, "US", 2) == 0 ||
@@ -530,7 +531,8 @@ static int xcrb_msg_to_type6_ep11cprb_msgx(bool userspace, struct ap_message *ap
 	else
 		ap_msg->flags |= AP_MSG_FLAG_USAGE;
 
-	*domain = msg->cprbx.target_id;
+	if (domain)
+		*domain = msg->cprbx.target_id;
 
 	return 0;
 }
@@ -1053,7 +1055,7 @@ out:
  */
 int prep_cca_ap_msg(bool userspace, struct ica_xcRB *xcrb,
 		    struct ap_message *ap_msg,
-		    unsigned int *func_code, unsigned short **dom)
+		    unsigned int *func_code, unsigned int *domain)
 {
 	struct ap_response_type *resp_type = &ap_msg->response;
 
@@ -1061,7 +1063,8 @@ int prep_cca_ap_msg(bool userspace, struct ica_xcRB *xcrb,
 	ap_msg->psmid = (((unsigned long)current->pid) << 32) +
 				atomic_inc_return(&zcrypt_step);
 	resp_type->type = CEXXC_RESPONSE_TYPE_XCRB;
-	return xcrb_msg_to_type6cprb_msgx(userspace, ap_msg, xcrb, func_code, dom);
+	return xcrb_msg_to_type6cprb_msgx(userspace, ap_msg,
+					  xcrb, func_code, domain);
 }
 
 /*
@@ -1105,6 +1108,9 @@ static long zcrypt_msgtype6_send_cprb(bool userspace, struct zcrypt_queue *zq,
 		}
 		msg->hdr.fromcardlen1 -= delta;
 	}
+
+	/* update domain field within the CPRB struct */
+	msg->cprbx.domain = AP_QID_QUEUE(zq->queue->qid);
 
 	init_completion(&resp_type->work);
 	rc = ap_queue_message(zq->queue, ap_msg);
@@ -1211,8 +1217,7 @@ static long zcrypt_msgtype6_send_ep11_cprb(bool userspace, struct zcrypt_queue *
 			lfmt = 1; /* length format #1 */
 		}
 		payload_hdr = (struct pld_hdr *)((&msg->pld_lenfmt) + lfmt);
-		payload_hdr->dom_val = (unsigned int)
-					AP_QID_QUEUE(zq->queue->qid);
+		payload_hdr->dom_val = AP_QID_QUEUE(zq->queue->qid);
 	}
 
 	/*
@@ -1245,6 +1250,56 @@ out:
 			 AP_QID_CARD(zq->queue->qid),
 			 AP_QID_QUEUE(zq->queue->qid), rc);
 	return rc;
+}
+
+/**
+ * Prepare a type6 CPRB message for random number generation
+ *
+ * @ap_dev: AP device pointer
+ * @ap_msg: pointer to AP message
+ */
+static inline void rng_type6cprb_msgx(struct ap_message *ap_msg,
+				      unsigned int random_number_length,
+				      unsigned int *domain)
+{
+	struct {
+		struct type6_hdr hdr;
+		struct CPRBX cprbx;
+		char function_code[2];
+		short int rule_length;
+		char rule[8];
+		short int verb_length;
+		short int key_length;
+	} __packed * msg = ap_msg->msg;
+	static struct type6_hdr static_type6_hdrX = {
+		.type		= 0x06,
+		.offset1	= 0x00000058,
+		.agent_id	= {'C', 'A'},
+		.function_code	= {'R', 'L'},
+		.tocardlen1	= sizeof(*msg) - sizeof(msg->hdr),
+		.fromcardlen1	= sizeof(*msg) - sizeof(msg->hdr),
+	};
+	static struct CPRBX local_cprbx = {
+		.cprb_len	= 0x00dc,
+		.cprb_ver_id	= 0x02,
+		.func_id	= {0x54, 0x32},
+		.req_parml	= sizeof(*msg) - sizeof(msg->hdr) -
+				  sizeof(msg->cprbx),
+		.rpl_msgbl	= sizeof(*msg) - sizeof(msg->hdr),
+	};
+
+	msg->hdr = static_type6_hdrX;
+	msg->hdr.fromcardlen2 = random_number_length;
+	msg->cprbx = local_cprbx;
+	msg->cprbx.rpl_datal = random_number_length;
+	memcpy(msg->function_code, msg->hdr.function_code, 0x02);
+	msg->rule_length = 0x0a;
+	memcpy(msg->rule, "RANDOM  ", 8);
+	msg->verb_length = 0x02;
+	msg->key_length = 0x02;
+	ap_msg->len = sizeof(*msg);
+	if (domain)
+		*domain = msg->cprbx.domain;
 }
 
 /*
