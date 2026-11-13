@@ -6147,7 +6147,7 @@ static void shrink_lruvec(struct lruvec *lruvec, struct scan_control *sc)
 			}
 		}
 
-		cond_resched();
+		cond_resched_tasks_rcu_qs();
 
 		trace_android_vh_reclaim_target_lruvec_exit(cgroup_reclaim(sc),
 					sc->nr_reclaimed, nr_reclaimed,
