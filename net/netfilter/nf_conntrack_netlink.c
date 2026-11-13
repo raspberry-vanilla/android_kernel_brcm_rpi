@@ -3395,7 +3395,8 @@ static bool expect_iter_name(struct nf_conntrack_expect *exp, void *data)
 
 	m_help = nfct_help(exp->master);
 
-	helper = rcu_dereference(m_help->helper);
+	helper = rcu_dereference_protected(m_help->helper,
+					   lockdep_is_held(&nf_conntrack_expect_lock));
 	if (!helper)
 		return false;
 
