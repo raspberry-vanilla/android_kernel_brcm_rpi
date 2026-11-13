@@ -452,7 +452,8 @@ static int perf_event__convert_sample_callchain(const struct perf_tool *tool,
 
 	node = cursor->first;
 	for (k = 0; k < cursor->nr && i < PERF_MAX_STACK_DEPTH; k++) {
-		if (machine__kernel_ip(machine, node->ip))
+		if (machine->single_address_space &&
+		    machine__kernel_ip(machine, node->ip))
 			/* kernel IPs were added already */;
 		else if (node->ms.sym && node->ms.sym->inlined)
 			/* we can't handle inlined callchains */;
@@ -2735,7 +2736,7 @@ int cmd_inject(int argc, const char **argv)
 		}
 
 		evlist__for_each_entry(inject.session->evlist, evsel) {
-			if (!evsel__has_dwarf_callchain(evsel)) {
+			if (!evsel__has_dwarf_callchain(evsel) && !evsel__is_dummy_event(evsel)) {
 				pr_err("--convert-callchain requires DWARF call graph.\n");
 				goto out_delete;
 			}
