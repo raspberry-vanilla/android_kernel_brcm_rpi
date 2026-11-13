@@ -659,6 +659,15 @@ static inline void free_mod_tags_mem(void) {}
 
 #endif /* CONFIG_MODULES */
 
+/*
+ * Memory allocation profiling is permanently disabled and cannot be enabled.
+ * Must be called after setup_early_mem_profiling().
+ */
+bool __init mem_alloc_profiling_permanently_disabled(void)
+{
+	return !mem_profiling_support;
+}
+
 /* See: Documentation/mm/allocation-profiling.rst */
 static int __init setup_early_mem_profiling(char *str)
 {
