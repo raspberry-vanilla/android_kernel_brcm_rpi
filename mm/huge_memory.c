@@ -3289,7 +3289,7 @@ static void remap_page(struct folio *folio, unsigned long nr, int flags)
 	if (!folio_test_anon(folio))
 		return;
 	for (;;) {
-		remove_migration_ptes(folio, folio, RMP_LOCKED | flags);
+		remove_migration_ptes(folio, folio, TTU_RMAP_LOCKED | flags);
 		i += folio_nr_pages(folio);
 		if (i >= nr)
 			break;
@@ -3317,23 +3317,6 @@ static void lru_add_split_folio(struct folio *folio, struct folio *new_folio,
 			list_add_tail(&new_folio->lru, &folio->lru);
 		folio_set_lru(new_folio);
 	}
-}
-
-/* Racy check whether the huge page can be split */
-bool can_split_folio(struct folio *folio, int caller_pins, int *pextra_pins)
-{
-	int extra_pins;
-
-	/* Additional pins from page cache */
-	if (folio_test_anon(folio))
-		extra_pins = folio_test_swapcache(folio) ?
-				folio_nr_pages(folio) : 0;
-	else
-		extra_pins = folio_nr_pages(folio);
-	if (pextra_pins)
-		*pextra_pins = extra_pins;
-	return folio_mapcount(folio) == folio_ref_count(folio) - extra_pins -
-					caller_pins;
 }
 
 static bool page_range_has_hwpoisoned(struct page *page, long nr_pages)
@@ -3710,11 +3693,11 @@ static int __folio_split(struct folio *folio, unsigned int new_order,
 	XA_STATE(xas, &folio->mapping->i_pages, folio->index);
 	struct folio *end_folio = folio_next(folio);
 	bool is_anon = folio_test_anon(folio);
+	struct mem_cgroup *memcg, *old_memcg;
 	struct address_space *mapping = NULL;
 	struct anon_vma *anon_vma = NULL;
 	int old_order = folio_order(folio);
 	struct folio *new_folio, *next;
-	int extra_pins;
 	int nr_shmem_dropped = 0;
 	enum ttu_flags ttu_flags = 0;
 	pgoff_t end = 0;
@@ -3726,19 +3709,26 @@ static int __folio_split(struct folio *folio, unsigned int new_order,
 
 	if (folio != page_folio(split_at) || folio != page_folio(lock_at)) {
 		ret = -EINVAL;
-		goto out;
+		goto out_no_memcg;
 	}
 
 	if (new_order >= old_order) {
 		ret = -EINVAL;
-		goto out;
+		goto out_no_memcg;
 	}
 
 	ret = folio_check_splittable(folio, new_order, uniform_split);
 	if (ret) {
 		VM_WARN_ONCE(ret == -EINVAL, "Tried to split an unsplittable folio");
-		goto out;
+		goto out_no_memcg;
 	}
+
+	/*
+	 * switch to folio's memcg as xarray node allocation can happen and
+	 * needs to charge to it.
+	 */
+	memcg = get_mem_cgroup_from_folio(folio);
+	old_memcg = set_active_memcg(memcg);
 
 	if (is_anon) {
 		/*
@@ -3812,7 +3802,7 @@ static int __folio_split(struct folio *folio, unsigned int new_order,
 	 * Racy check if we can split the page, before unmap_folio() will
 	 * split PMDs
 	 */
-	if (!can_split_folio(folio, 1, &extra_pins)) {
+	if (folio_expected_ref_count(folio) != folio_ref_count(folio) - 1) {
 		ret = -EAGAIN;
 		goto out_unlock;
 	}
@@ -3836,7 +3826,10 @@ static int __folio_split(struct folio *folio, unsigned int new_order,
 
 	/* Prevent deferred_split_scan() touching ->_refcount */
 	ds_queue = folio_split_queue_lock(folio);
-	if (folio_ref_freeze(folio, 1 + extra_pins)) {
+	if (folio_ref_freeze(folio,
+			     (folio_test_anon(folio) &&
+			      !folio_test_swapcache(folio) ?
+			      0 : folio_nr_pages(folio)) + 1)) {
 		struct swap_cluster_info *ci = NULL;
 		struct lruvec *lruvec;
 		int expected_refs;
@@ -3905,7 +3898,9 @@ static int __folio_split(struct folio *folio, unsigned int new_order,
 
 			next = folio_next(new_folio);
 
-			expected_refs = folio_expected_ref_count(new_folio) + 1;
+			expected_refs = (folio_test_anon(new_folio) &&
+					 !folio_test_swapcache(new_folio) ?
+					 0 : folio_nr_pages(new_folio)) + 1;
 			folio_ref_unfreeze(new_folio, expected_refs);
 
 			lru_add_split_folio(folio, new_folio, lruvec, list);
@@ -3945,7 +3940,9 @@ static int __folio_split(struct folio *folio, unsigned int new_order,
 		 * Otherwise, a parallel folio_try_get() can grab @folio
 		 * and its caller can see stale page cache entries.
 		 */
-		expected_refs = folio_expected_ref_count(folio) + 1;
+		expected_refs = (folio_test_anon(folio) &&
+				 !folio_test_swapcache(folio) ?
+				 0 : folio_nr_pages(folio)) + 1;
 		folio_ref_unfreeze(folio, expected_refs);
 
 		unlock_page_lruvec(lruvec);
@@ -3966,7 +3963,7 @@ fail:
 		shmem_uncharge(mapping->host, nr_shmem_dropped);
 
 	if (!ret && is_anon)
-		ttu_flags = (enum ttu_flags)RMP_USE_SHARED_ZEROPAGE;
+		ttu_flags = TTU_USE_SHARED_ZEROPAGE;
 	remap_page(folio, 1 << old_order, ttu_flags);
 
 	/*
@@ -4009,6 +4006,10 @@ out_unlock:
 	if (mapping)
 		i_mmap_unlock_read(mapping);
 out:
+	/* restore to caller's old_memcg */
+	set_active_memcg(old_memcg);
+	mem_cgroup_put(memcg);
+out_no_memcg:
 	xas_destroy(&xas);
 	if (old_order == HPAGE_PMD_ORDER)
 		count_vm_event(!ret ? THP_SPLIT_PAGE : THP_SPLIT_PAGE_FAILED);
@@ -4478,7 +4479,7 @@ static int split_huge_pages_pid(int pid, unsigned long vaddr_start,
 		 * can be split or not. So skip the check here.
 		 */
 		if (!folio_test_private(folio) &&
-		    !can_split_folio(folio, 0, NULL))
+		    folio_expected_ref_count(folio) != folio_ref_count(folio))
 			goto next;
 
 		if (!folio_trylock(folio))
