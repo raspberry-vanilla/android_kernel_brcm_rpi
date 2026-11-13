@@ -2104,7 +2104,7 @@ void domain_context_clear_one(struct device_domain_info *info, u8 bus, u8 devfn,
 #ifndef __PKVM_HYP__
 	spin_unlock(&iommu->lock);
 #endif
-	intel_context_flush_no_pasid(info, context, did);
+	intel_context_flush_no_pasid(info, context, did, PCI_DEVID(bus, devfn));
 	context_clear_entry(context);
 #ifdef __PKVM_HYP__
 	spin_unlock(&iommu->lock);
