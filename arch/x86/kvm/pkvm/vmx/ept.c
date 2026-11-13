@@ -454,7 +454,7 @@ static void handle_host_ept_violation_failure(struct kvm_vcpu *vcpu)
 	fault.address = vmcs_readl(GUEST_LINEAR_ADDRESS);
 	fault.exit_qualification = exit_qualification;
 
-	kvm_inject_page_fault(vcpu, &fault);
+	kvm_inject_page_fault(vcpu, &fault, false);
 }
 
 void pkvm_handle_host_ept_violation(struct kvm_vcpu *vcpu)
