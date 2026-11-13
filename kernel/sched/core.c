@@ -6352,7 +6352,7 @@ void sched_tick(void)
 	curr = rq->curr;
 	donor = rq->donor;
 
-	psi_account_irqtime(rq, donor, NULL);
+	psi_account_irqtime(rq, curr, NULL);
 
 	update_rq_clock(rq);
 	trace_android_rvh_tick_entry(rq);
