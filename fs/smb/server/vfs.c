@@ -1271,6 +1271,8 @@ int ksmbd_vfs_kern_path_locked(struct ksmbd_work *work, char *name,
 					   path);
 	if (!err)
 		return 0;
+	if (err != -ENOENT)
+		return err;
 
 	if (caseless) {
 		char *filepath;
