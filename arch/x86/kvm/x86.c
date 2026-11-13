@@ -120,8 +120,12 @@ EXPORT_SYMBOL_FOR_KVM_INTERNAL(kvm_host);
 	((struct kvm_vcpu *)(ctxt)->vcpu)
 #endif /* !__PKVM_HYP__ */
 
+#ifdef __PKVM_HYP__
 /* Enable syscall by default because its emulated by KVM */
 static u64 __read_mostly efer_reserved_bits = ~((u64)EFER_SCE);
+#else
+static u64 __read_mostly efer_reserved_bits;
+#endif
 
 #ifndef __PKVM_HYP__
 #define KVM_EXIT_HYPERCALL_VALID_MASK (1 << KVM_HC_MAP_GPA_RANGE)
@@ -1894,6 +1898,14 @@ static int set_efer(struct kvm_vcpu *vcpu, struct msr_data *msr_info)
 
 	return 0;
 }
+
+#ifndef __PKVM_HYP__
+static void kvm_init_efer_bits(void)
+{
+	/* Enable syscall by default because its emulated by KVM */
+	efer_reserved_bits = ~((u64)EFER_SCE);
+}
+#endif
 
 void kvm_enable_efer_bits(u64 mask)
 {
@@ -10452,6 +10464,8 @@ int kvm_x86_vendor_init(struct kvm_x86_init_ops *ops)
 	if (boot_cpu_has(X86_FEATURE_ARCH_CAPABILITIES))
 		rdmsrq(MSR_IA32_ARCH_CAPABILITIES, kvm_host.arch_capabilities);
 
+	kvm_init_efer_bits();
+
 	r = ops->hardware_setup();
 	if (r != 0)
 		goto out_mmu_exit;
@@ -11565,6 +11579,9 @@ static int vcpu_enter_guest(struct kvm_vcpu *vcpu)
 
 		if (kvm_check_request(KVM_REQ_GET_NESTED_STATE_PAGES, vcpu)) {
 			if (unlikely(!kvm_x86_ops.nested_ops->get_nested_state_pages(vcpu))) {
+				vcpu->run->exit_reason = KVM_EXIT_INTERNAL_ERROR;
+				vcpu->run->internal.suberror = KVM_INTERNAL_ERROR_EMULATION;
+				vcpu->run->internal.ndata = 0;
 				kvm_make_request(KVM_REQ_GET_NESTED_STATE_PAGES, vcpu);
 				r = 0;
 				goto out;
