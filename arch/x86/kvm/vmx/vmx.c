@@ -7344,12 +7344,16 @@ int vmx_handle_exit(struct kvm_vcpu *vcpu, fastpath_t exit_fastpath)
 	 */
 	if (vmx_get_exit_reason(vcpu).bus_lock_detected) {
 #ifndef __PKVM_HYP__ /* The pKVM vcpu doesn't have run page. */
-		if (ret > 0)
+		if (ret > 0) {
 			vcpu->run->exit_reason = KVM_EXIT_X86_BUS_LOCK;
+			ret = 0;
+		}
 
 		vcpu->run->flags |= KVM_RUN_X86_BUS_LOCK;
+#else
+		if (ret > 0)
+			ret = 0;
 #endif
-		return 0;
 	}
 	return ret;
 }
