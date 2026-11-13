@@ -103,6 +103,7 @@
 #define   SVC_I3C_MDATACTRL_TXTRIG_FIFO_NOT_FULL GENMASK(5, 4)
 #define   SVC_I3C_MDATACTRL_RXTRIG_FIFO_NOT_EMPTY 0
 #define   SVC_I3C_MDATACTRL_RXCOUNT(x) FIELD_GET(GENMASK(28, 24), (x))
+#define   SVC_I3C_MDATACTRL_TXCOUNT(x) FIELD_GET(GENMASK(20, 16), (x))
 #define   SVC_I3C_MDATACTRL_TXFULL BIT(30)
 #define   SVC_I3C_MDATACTRL_RXEMPTY BIT(31)
 
@@ -600,10 +601,18 @@ static irqreturn_t svc_i3c_master_irq_handler(int irq, void *dev_id)
 	/* Clear the interrupt status */
 	writel(SVC_I3C_MINT_SLVSTART, master->regs + SVC_I3C_MSTATUS);
 
-	/* Ignore the false event */
-	if (svc_has_quirk(master, SVC_I3C_QUIRK_FALSE_SLVSTART) &&
-	    !SVC_I3C_MSTATUS_STATE_SLVREQ(active))
-		return IRQ_HANDLED;
+	if (svc_has_quirk(master, SVC_I3C_QUIRK_FALSE_SLVSTART)) {
+		/*
+		 * Re-read MSTATUS to obtain the latest state and avoid
+		 * missing an IBI that arrives after MSTATUS is latched
+		 * but before SLVSTART is cleared.
+		 */
+		active = readl(master->regs + SVC_I3C_MSTATUS);
+
+		/* Ignore the false event */
+		if (!SVC_I3C_MSTATUS_STATE_SLVREQ(active))
+			return IRQ_HANDLED;
+	}
 
 	svc_i3c_master_disable_interrupts(master);
 
@@ -929,7 +938,7 @@ static int svc_i3c_master_do_daa_locked(struct svc_i3c_master *master,
 					u8 *addrs, unsigned int *count)
 {
 	u64 prov_id[SVC_I3C_MAX_DEVS] = {}, nacking_prov_id = 0;
-	unsigned int dev_nb = 0, last_addr = 0, dyn_addr;
+	unsigned int dev_nb = 0, last_addr = 0, dyn_addr = 0;
 	u32 reg;
 	int ret, i;
 
@@ -984,10 +993,11 @@ static int svc_i3c_master_do_daa_locked(struct svc_i3c_master *master,
 			 * filling within a few hundred nanoseconds, which is significantly
 			 * faster compared to the 64 SCL clock cycles.
 			 */
-			dyn_addr = i3c_master_get_free_addr(&master->base, last_addr + 1);
-			if (dyn_addr < 0)
-				return -ENOSPC;
+			ret = i3c_master_get_free_addr(&master->base, last_addr + 1);
+			if (ret < 0)
+				break;
 
+			dyn_addr = ret;
 			writel(dyn_addr, master->regs + SVC_I3C_MWDATAB);
 
 			/*
@@ -1277,14 +1287,19 @@ static int svc_i3c_master_xfer(struct svc_i3c_master *master,
 		 * FIFO start filling as soon as possible after EmitStartAddr.
 		 */
 		if (svc_has_quirk(master, SVC_I3C_QUIRK_FIFO_EMPTY) && !rnw && xfer_len) {
-			u32 end = xfer_len > SVC_I3C_FIFO_SIZE ? 0 : SVC_I3C_MWDATAB_END;
-			u32 len = min_t(u32, xfer_len, SVC_I3C_FIFO_SIZE);
+			u32 space, end, len;
 
-			writesb(master->regs + SVC_I3C_MWDATAB1, out, len - 1);
-			/* Mark END bit if this is the last byte */
-			writel(out[len - 1] | end, master->regs + SVC_I3C_MWDATAB);
-			xfer_len -= len;
-			out += len;
+			reg = readl(master->regs + SVC_I3C_MDATACTRL);
+			space = SVC_I3C_FIFO_SIZE - SVC_I3C_MDATACTRL_TXCOUNT(reg);
+			if (space) {
+				end = xfer_len > space ? 0 : SVC_I3C_MWDATAB_END;
+				len = min_t(u32, xfer_len, space);
+				writesb(master->regs + SVC_I3C_MWDATAB1, out, len - 1);
+				/* Mark END bit if this is the last byte */
+				writel(out[len - 1] | end, master->regs + SVC_I3C_MWDATAB);
+				xfer_len -= len;
+				out += len;
+			}
 		}
 
 		ret = readl_poll_timeout(master->regs + SVC_I3C_MSTATUS, reg,
