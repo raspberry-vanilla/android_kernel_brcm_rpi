@@ -1445,6 +1445,8 @@ static int snd_pcm_pre_start(struct snd_pcm_substream *substream,
 	bool no_buffer = false;
 	if (runtime->state != SNDRV_PCM_STATE_PREPARED)
 		return -EBADFD;
+	if (atomic_read(&runtime->buffer_accessing) < 0)
+		return -EBADFD; /* during hw_params, hw_free or prepare */
 
 	trace_android_vh_snd_pcm_check_no_buffer(substream, &no_buffer);
 
