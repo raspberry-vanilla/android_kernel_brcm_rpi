@@ -38,6 +38,7 @@
 #include <linux/compat.h>
 #include <linux/rculist.h>
 #include <linux/capability.h>
+#include <linux/seqlock.h>
 #include <net/busy_poll.h>
 
 #include <trace/hooks/fs.h>
@@ -144,15 +145,15 @@
  *   NULL            - scan active, no spill yet.
  *   pointer to epi  - scan active with spilled items (LIFO).
  *
- * Encoded in epi->next:
+ * Encoded in epi->ovflist_next:
  *   EP_UNACTIVE_PTR - epi is not on ovflist.
  *   otherwise       - next epi on ovflist (NULL at tail).
  *
  * ep_start_scan() flips "not scanning" to "scanning" and splices
- * rdllist into a caller-local txlist. ep_done_scan() drains ovflist
+ * rdllist into a caller-local scan_batch. ep_done_scan() drains ovflist
  * back to rdllist (list_add head-insert reverses LIFO to FIFO),
  * flips back to "not scanning", and re-splices any items the caller
- * left in txlist (e.g., level-triggered re-queues).
+ * left in scan_batch (e.g., level-triggered re-queues).
  *
  *
  * Removal paths
@@ -263,14 +264,16 @@ struct epitem {
 		struct rcu_head rcu;
 	};
 
-	/* List header used to link this structure to the eventpoll ready list */
+	/* Link on the owning eventpoll's ready list (ep->rdllist). */
 	struct list_head rdllink;
 
 	/*
-	 * Works together "struct eventpoll"->ovflist in keeping the
-	 * single linked chain of items.
+	 * Link on the owning eventpoll's scan-overflow list (ep->ovflist),
+	 * EP_UNACTIVE_PTR when not linked. See epi_on_ovflist() /
+	 * epi_clear_ovflist() and the "Ready-list state machine" section
+	 * in the top-of-file banner.
 	 */
-	struct epitem *next;
+	struct epitem *ovflist_next;
 
 	/* The file descriptor information this item refers to */
 	struct epoll_filefd ffd;
@@ -323,6 +326,9 @@ struct eventpoll {
 
 	/* Lock which protects rdllist and ovflist */
 	spinlock_t lock;
+
+	/* Protect switching between rdllist and ovflist */
+	seqcount_spinlock_t seq;
 
 	/* RB tree root used to store monitored fd structs */
 	struct rb_root_cached rbr;
@@ -509,6 +515,43 @@ static inline struct epitem *ep_item_from_wait(wait_queue_entry_t *p)
 	return container_of(p, struct eppoll_entry, wait)->base;
 }
 
+/*
+ * Ready-list / ovflist state (see "Ready-list state machine" in the
+ * top-of-file banner for the full state machine). EP_UNACTIVE_PTR is
+ * the sentinel; these wrappers name each transition and each test so
+ * call sites do not need to know the sentinel's value.
+ */
+
+/* True iff @ep is between ep_enter_scan() and ep_exit_scan(). */
+static inline bool ep_is_scanning(struct eventpoll *ep)
+{
+	return READ_ONCE(ep->ovflist) != EP_UNACTIVE_PTR;
+}
+
+/* Called by ep_start_scan(): divert ep_poll_callback() to ovflist. */
+static inline void ep_enter_scan(struct eventpoll *ep)
+{
+	WRITE_ONCE(ep->ovflist, NULL);
+}
+
+/* Called by ep_done_scan(): redirect ep_poll_callback() back to rdllist. */
+static inline void ep_exit_scan(struct eventpoll *ep)
+{
+	WRITE_ONCE(ep->ovflist, EP_UNACTIVE_PTR);
+}
+
+/* True iff @epi is currently linked on its ep's ovflist. */
+static inline bool epi_on_ovflist(const struct epitem *epi)
+{
+	return epi->ovflist_next != EP_UNACTIVE_PTR;
+}
+
+/* Mark @epi as not on any ovflist (init and post-drain). */
+static inline void epi_clear_ovflist(struct epitem *epi)
+{
+	epi->ovflist_next = EP_UNACTIVE_PTR;
+}
+
 /**
  * ep_events_available - Checks if ready events might be available.
  *
@@ -519,8 +562,10 @@ static inline struct epitem *ep_item_from_wait(wait_queue_entry_t *p)
  */
 static inline int ep_events_available(struct eventpoll *ep)
 {
-	return !list_empty_careful(&ep->rdllist) ||
-		READ_ONCE(ep->ovflist) != EP_UNACTIVE_PTR;
+	unsigned int seq = read_seqcount_begin(&ep->seq);
+
+	return !list_empty_careful(&ep->rdllist) || ep_is_scanning(ep) ||
+		read_seqcount_retry(&ep->seq, seq);
 }
 
 #ifdef CONFIG_NET_RX_BUSY_POLL
@@ -860,7 +905,7 @@ static inline void ep_pm_stay_awake_rcu(struct epitem *epi)
  * ep->mutex needs to be held because we could be hit by
  * eventpoll_release_file() and epoll_ctl().
  */
-static void ep_start_scan(struct eventpoll *ep, struct list_head *txlist)
+static void ep_start_scan(struct eventpoll *ep, struct list_head *scan_batch)
 {
 	/*
 	 * Steal the ready list, and re-init the original one to the
@@ -872,13 +917,17 @@ static void ep_start_scan(struct eventpoll *ep, struct list_head *txlist)
 	 */
 	lockdep_assert_irqs_enabled();
 	spin_lock_irq(&ep->lock);
-	list_splice_init(&ep->rdllist, txlist);
-	WRITE_ONCE(ep->ovflist, NULL);
+	write_seqcount_begin(&ep->seq);
+
+	list_splice_init(&ep->rdllist, scan_batch);
+	ep_enter_scan(ep);
+
+	write_seqcount_end(&ep->seq);
 	spin_unlock_irq(&ep->lock);
 }
 
 static void ep_done_scan(struct eventpoll *ep,
-			 struct list_head *txlist)
+			 struct list_head *scan_batch)
 {
 	struct epitem *epi, *nepi;
 
@@ -888,34 +937,35 @@ static void ep_done_scan(struct eventpoll *ep,
 	 * other events might have been queued by the poll callback.
 	 * We re-insert them inside the main ready-list here.
 	 */
-	for (nepi = READ_ONCE(ep->ovflist); (epi = nepi) != NULL;
-	     nepi = epi->next, epi->next = EP_UNACTIVE_PTR) {
+	for (nepi = READ_ONCE(ep->ovflist); (epi = nepi) != NULL; ) {
+		nepi = epi->ovflist_next;
+		epi_clear_ovflist(epi);
 		/*
-		 * We need to check if the item is already in the list.
-		 * During the "sproc" callback execution time, items are
-		 * queued into ->ovflist but the "txlist" might already
-		 * contain them, and the list_splice() below takes care of them.
+		 * Skip items that the caller already returned via @scan_batch
+		 * -- the list_splice() below takes care of those.
 		 */
 		if (!ep_is_linked(epi)) {
 			/*
-			 * ->ovflist is LIFO, so we have to reverse it in order
-			 * to keep in FIFO.
+			 * ovflist is LIFO; list_add() head-insert here
+			 * reverses the iteration order into FIFO.
 			 */
 			list_add(&epi->rdllink, &ep->rdllist);
 			ep_pm_stay_awake(epi);
 		}
 	}
-	/*
-	 * We need to set back ep->ovflist to EP_UNACTIVE_PTR, so that after
-	 * releasing the lock, events will be queued in the normal way inside
-	 * ep->rdllist.
-	 */
-	WRITE_ONCE(ep->ovflist, EP_UNACTIVE_PTR);
+
+	write_seqcount_begin(&ep->seq);
+
+	/* Back out of scan mode; callbacks target ep->rdllist again. */
+	ep_exit_scan(ep);
 
 	/*
-	 * Quickly re-inject items left on "txlist".
+	 * Quickly re-inject items left on "scan_batch".
 	 */
-	list_splice(txlist, &ep->rdllist);
+	list_splice(scan_batch, &ep->rdllist);
+
+	write_seqcount_end(&ep->seq);
+
 	__pm_relax(ep->ws);
 
 	if (!list_empty(&ep->rdllist)) {
@@ -1142,7 +1192,7 @@ static __poll_t ep_item_poll(const struct epitem *epi, poll_table *pt, int depth
 static __poll_t __ep_eventpoll_poll(struct file *file, poll_table *wait, int depth)
 {
 	struct eventpoll *ep = file->private_data;
-	LIST_HEAD(txlist);
+	LIST_HEAD(scan_batch);
 	struct epitem *epi, *tmp;
 	poll_table pt;
 	__poll_t res = 0;
@@ -1157,8 +1207,8 @@ static __poll_t __ep_eventpoll_poll(struct file *file, poll_table *wait, int dep
 	 * the ready list.
 	 */
 	mutex_lock_nested(&ep->mtx, depth);
-	ep_start_scan(ep, &txlist);
-	list_for_each_entry_safe(epi, tmp, &txlist, rdllink) {
+	ep_start_scan(ep, &scan_batch);
+	list_for_each_entry_safe(epi, tmp, &scan_batch, rdllink) {
 		if (ep_item_poll(epi, &pt, depth + 1)) {
 			res = EPOLLIN | EPOLLRDNORM;
 			break;
@@ -1172,7 +1222,7 @@ static __poll_t __ep_eventpoll_poll(struct file *file, poll_table *wait, int dep
 			list_del_init(&epi->rdllink);
 		}
 	}
-	ep_done_scan(ep, &txlist);
+	ep_done_scan(ep, &scan_batch);
 	mutex_unlock(&ep->mtx);
 	return res;
 }
@@ -1300,11 +1350,12 @@ static int ep_alloc(struct eventpoll **pep)
 
 	mutex_init(&ep->mtx);
 	spin_lock_init(&ep->lock);
+	seqcount_spinlock_init(&ep->seq, &ep->lock);
 	init_waitqueue_head(&ep->wq);
 	init_waitqueue_head(&ep->poll_wait);
 	INIT_LIST_HEAD(&ep->rdllist);
 	ep->rbr = RB_ROOT_CACHED;
-	ep->ovflist = EP_UNACTIVE_PTR;
+	ep->ovflist = EP_UNACTIVE_PTR;	/* not scanning */
 	ep->user = get_current_user();
 	refcount_set(&ep->refcount, 1);
 
@@ -1428,9 +1479,9 @@ static int ep_poll_callback(wait_queue_entry_t *wait, unsigned mode, int sync, v
 	 * semantics). All the events that happen during that period of time are
 	 * chained in ep->ovflist and requeued later on.
 	 */
-	if (READ_ONCE(ep->ovflist) != EP_UNACTIVE_PTR) {
-		if (epi->next == EP_UNACTIVE_PTR) {
-			epi->next = READ_ONCE(ep->ovflist);
+	if (ep_is_scanning(ep)) {
+		if (!epi_on_ovflist(epi)) {
+			epi->ovflist_next = READ_ONCE(ep->ovflist);
 			WRITE_ONCE(ep->ovflist, epi);
 			ep_pm_stay_awake_rcu(epi);
 		}
@@ -1711,6 +1762,87 @@ allocate:
 }
 
 /*
+ * Charge the user's epoll_watches quota, allocate a fresh epitem for
+ * @tfile/@fd, and initialize its fields. The returned item is not yet
+ * linked into any data structure; the caller must install it via
+ * ep_register_epitem() (which takes over on success) or kmem_cache_free()
+ * it and decrement epoll_watches on its own.
+ *
+ * Returns ERR_PTR(-ENOSPC) if the quota is exceeded, ERR_PTR(-ENOMEM)
+ * if the slab allocation fails.
+ */
+static struct epitem *ep_alloc_epitem(struct eventpoll *ep,
+				      const struct epoll_event *event,
+				      struct file *tfile, int fd)
+{
+	struct epitem *epi;
+
+	if (unlikely(percpu_counter_compare(&ep->user->epoll_watches,
+					    max_user_watches) >= 0))
+		return ERR_PTR(-ENOSPC);
+	percpu_counter_inc(&ep->user->epoll_watches);
+
+	epi = kmem_cache_zalloc(epi_cache, GFP_KERNEL);
+	if (unlikely(!epi)) {
+		percpu_counter_dec(&ep->user->epoll_watches);
+		return ERR_PTR(-ENOMEM);
+	}
+
+	INIT_LIST_HEAD(&epi->rdllink);
+	epi->ep = ep;
+	ep_set_ffd(&epi->ffd, tfile, fd);
+	epi->event = *event;
+	epi_clear_ovflist(epi);
+
+	return epi;
+}
+
+/*
+ * Install @epi into its target file's f_ep hlist and into @ep's rbtree,
+ * taking one additional reference on @ep for the lifetime of the item.
+ *
+ * If @tep is non-NULL, the target file is itself an eventpoll; we hold
+ * tep->mtx at subclass 1 across the attach + rbtree insert to serialize
+ * with the target side. RB tree ops are protected by @ep->mtx, which
+ * the caller already holds.
+ *
+ * On failure the epi is freed and the epoll_watches counter decremented,
+ * matching ep_alloc_epitem()'s allocation. After this returns
+ * successfully, ep_insert()'s later error paths use ep_remove() for
+ * unwind; that cannot drop @ep's refcount to zero because the ep file
+ * itself still holds the original reference.
+ */
+static int ep_register_epitem(struct eventpoll *ep, struct epitem *epi,
+			      struct eventpoll *tep, int full_check)
+{
+	struct file *tfile = epi->ffd.file;
+	int error;
+
+	if (tep)
+		mutex_lock_nested(&tep->mtx, 1);
+
+	error = ep_attach_file(tfile, epi);
+	if (unlikely(error)) {
+		if (tep)
+			mutex_unlock(&tep->mtx);
+		kmem_cache_free(epi_cache, epi);
+		percpu_counter_dec(&ep->user->epoll_watches);
+		return error;
+	}
+
+	if (full_check && !tep)
+		list_file(tfile);
+
+	ep_rbtree_insert(ep, epi);
+
+	if (tep)
+		mutex_unlock(&tep->mtx);
+
+	ep_get(ep);
+	return 0;
+}
+
+/*
  * Must be called with "mtx" held.
  */
 static int ep_insert(struct eventpoll *ep, const struct epoll_event *event,
@@ -1727,52 +1859,15 @@ static int ep_insert(struct eventpoll *ep, const struct epoll_event *event,
 
 	lockdep_assert_irqs_enabled();
 
-	if (unlikely(percpu_counter_compare(&ep->user->epoll_watches,
-					    max_user_watches) >= 0))
-		return -ENOSPC;
-	percpu_counter_inc(&ep->user->epoll_watches);
+	epi = ep_alloc_epitem(ep, event, tfile, fd);
+	if (IS_ERR(epi))
+		return PTR_ERR(epi);
 
-	if (!(epi = kmem_cache_zalloc(epi_cache, GFP_KERNEL))) {
-		percpu_counter_dec(&ep->user->epoll_watches);
-		return -ENOMEM;
-	}
+	error = ep_register_epitem(ep, epi, tep, full_check);
+	if (error)
+		return error;
 
-	/* Item initialization follow here ... */
-	INIT_LIST_HEAD(&epi->rdllink);
-	epi->ep = ep;
-	ep_set_ffd(&epi->ffd, tfile, fd);
-	epi->event = *event;
-	epi->next = EP_UNACTIVE_PTR;
-
-	if (tep)
-		mutex_lock_nested(&tep->mtx, 1);
-	/* Add the current item to the list of active epoll hook for this file */
-	if (unlikely(ep_attach_file(tfile, epi) < 0)) {
-		if (tep)
-			mutex_unlock(&tep->mtx);
-		kmem_cache_free(epi_cache, epi);
-		percpu_counter_dec(&ep->user->epoll_watches);
-		return -ENOMEM;
-	}
-
-	if (full_check && !tep)
-		list_file(tfile);
-
-	/*
-	 * Add the current item to the RB tree. All RB tree operations are
-	 * protected by "mtx", and ep_insert() is called with "mtx" held.
-	 */
-	ep_rbtree_insert(ep, epi);
-	if (tep)
-		mutex_unlock(&tep->mtx);
-
-	/*
-	 * ep_remove() calls in the later error paths can't lead to
-	 * ep_free() as the ep file itself still holds an ep reference.
-	 */
-	ep_get(ep);
-
-	/* now check if we've created too many backpaths */
+	/* Reject the insert if the new link would create too many back-paths. */
 	if (unlikely(full_check && reverse_path_check())) {
 		ep_remove(ep, epi);
 		return -EINVAL;
@@ -1799,28 +1894,21 @@ static int ep_insert(struct eventpoll *ep, const struct epoll_event *event,
 	 */
 	revents = ep_item_poll(epi, &epq.pt, 1);
 
-	/*
-	 * We have to check if something went wrong during the poll wait queue
-	 * install process. Namely an allocation for a wait queue failed due
-	 * high memory pressure.
-	 */
+	/* ep_ptable_queue_proc() signals allocation failure by clearing epq.epi. */
 	if (unlikely(!epq.epi)) {
 		ep_remove(ep, epi);
 		return -ENOMEM;
 	}
 
-	/* We have to drop the new item inside our item list to keep track of it */
+	/* Drop the new item onto the ready list if it is already ready. */
 	spin_lock_irq(&ep->lock);
 
-	/* record NAPI ID of new item if present */
 	ep_set_busy_poll_napi_id(epi);
 
-	/* If the file is already "ready" we drop it inside the ready list */
 	if (revents && !ep_is_linked(epi)) {
 		list_add_tail(&epi->rdllink, &ep->rdllist);
 		ep_pm_stay_awake(epi);
 
-		/* Notify waiting tasks that events are available */
 		if (waitqueue_active(&ep->wq))
 			wake_up(&ep->wq);
 		if (waitqueue_active(&ep->poll_wait))
@@ -1912,11 +2000,87 @@ static int ep_modify(struct eventpoll *ep, struct epitem *epi,
 	return 0;
 }
 
+/*
+ * Attempt to deliver one event for @epi into @*uevents.
+ *
+ * Returns 1 if an event was delivered (with *uevents advanced to the
+ * next slot), 0 if the re-poll reported no caller-requested events
+ * (@epi drops out of the ready list; a future callback will re-add
+ * it), or -EFAULT if copy_to_user() faulted (in which case @epi is
+ * re-inserted at the head of @scan_batch so ep_done_scan() merges it
+ * back to rdllist for the next attempt).
+ *
+ * PM bookkeeping and level-triggered re-queue are handled here.
+ * Caller holds ep->mtx and the scan is active.
+ */
+static int ep_deliver_event(struct eventpoll *ep, struct epitem *epi,
+			    poll_table *pt,
+			    struct epoll_event __user **uevents,
+			    struct list_head *scan_batch)
+{
+	struct epoll_event __user *next;
+	struct wakeup_source *ws;
+	__poll_t revents;
+
+	/*
+	 * Activate ep->ws before deactivating epi->ws to prevent
+	 * triggering auto-suspend here (in case we reactivate epi->ws
+	 * below).  Rearranging to delay the deactivation would let
+	 * epi->ws drift out of sync with ep_is_linked().
+	 */
+	ws = ep_wakeup_source(epi);
+	if (ws) {
+		if (ws->active)
+			__pm_stay_awake(ep->ws);
+		__pm_relax(ws);
+	}
+
+	list_del_init(&epi->rdllink);
+
+	/*
+	 * Re-poll under ep->mtx so userspace cannot change the item
+	 * out from under us. If no caller-requested events remain,
+	 * @epi stays off the ready list; the poll callback will
+	 * re-queue it when events next appear.
+	 */
+	revents = ep_item_poll(epi, pt, 1);
+	if (!revents)
+		return 0;
+
+	next = epoll_put_uevent(revents, epi->event.data, *uevents);
+	if (!next) {
+		/*
+		 * copy_to_user() faulted: put the item back so
+		 * ep_done_scan() splices it onto rdllist for the next
+		 * attempt.
+		 */
+		list_add(&epi->rdllink, scan_batch);
+		ep_pm_stay_awake(epi);
+		return -EFAULT;
+	}
+	*uevents = next;
+
+	if (epi->event.events & EPOLLONESHOT) {
+		epi->event.events &= EP_PRIVATE_BITS;
+	} else if (!(epi->event.events & EPOLLET)) {
+		/*
+		 * Level-triggered: re-queue so the next epoll_wait()
+		 * rechecks availability. We are the sole writer to
+		 * rdllist here -- epoll_ctl() callers are locked out
+		 * by ep->mtx, and the poll callback queues to ovflist
+		 * during scans.
+		 */
+		list_add_tail(&epi->rdllink, &ep->rdllist);
+		ep_pm_stay_awake(epi);
+	}
+	return 1;
+}
+
 static int ep_send_events(struct eventpoll *ep,
 			  struct epoll_event __user *events, int maxevents)
 {
 	struct epitem *epi, *tmp;
-	LIST_HEAD(txlist);
+	LIST_HEAD(scan_batch);
 	poll_table pt;
 	int res = 0;
 
@@ -1931,74 +2095,28 @@ static int ep_send_events(struct eventpoll *ep,
 	init_poll_funcptr(&pt, NULL);
 
 	mutex_lock(&ep->mtx);
-	ep_start_scan(ep, &txlist);
+	ep_start_scan(ep, &scan_batch);
 
 	/*
-	 * We can loop without lock because we are passed a task private list.
-	 * Items cannot vanish during the loop we are holding ep->mtx.
+	 * We can loop without lock because we are passed a task-private
+	 * scan_batch; items cannot vanish while we hold ep->mtx.
 	 */
-	list_for_each_entry_safe(epi, tmp, &txlist, rdllink) {
-		struct wakeup_source *ws;
-		__poll_t revents;
+	list_for_each_entry_safe(epi, tmp, &scan_batch, rdllink) {
+		int delivered;
 
 		if (res >= maxevents)
 			break;
 
-		/*
-		 * Activate ep->ws before deactivating epi->ws to prevent
-		 * triggering auto-suspend here (in case we reactive epi->ws
-		 * below).
-		 *
-		 * This could be rearranged to delay the deactivation of epi->ws
-		 * instead, but then epi->ws would temporarily be out of sync
-		 * with ep_is_linked().
-		 */
-		ws = ep_wakeup_source(epi);
-		if (ws) {
-			if (ws->active)
-				__pm_stay_awake(ep->ws);
-			__pm_relax(ws);
-		}
-
-		list_del_init(&epi->rdllink);
-
-		/*
-		 * If the event mask intersect the caller-requested one,
-		 * deliver the event to userspace. Again, we are holding ep->mtx,
-		 * so no operations coming from userspace can change the item.
-		 */
-		revents = ep_item_poll(epi, &pt, 1);
-		if (!revents)
-			continue;
-
-		events = epoll_put_uevent(revents, epi->event.data, events);
-		if (!events) {
-			list_add(&epi->rdllink, &txlist);
-			ep_pm_stay_awake(epi);
+		delivered = ep_deliver_event(ep, epi, &pt, &events, &scan_batch);
+		if (delivered < 0) {
 			if (!res)
-				res = -EFAULT;
+				res = delivered;
 			break;
 		}
-		res++;
-		if (epi->event.events & EPOLLONESHOT)
-			epi->event.events &= EP_PRIVATE_BITS;
-		else if (!(epi->event.events & EPOLLET)) {
-			/*
-			 * If this file has been added with Level
-			 * Trigger mode, we need to insert back inside
-			 * the ready list, so that the next call to
-			 * epoll_wait() will check again the events
-			 * availability. At this point, no one can insert
-			 * into ep->rdllist besides us. The epoll_ctl()
-			 * callers are locked out by
-			 * ep_send_events() holding "mtx" and the
-			 * poll callback will queue them in ep->ovflist.
-			 */
-			list_add_tail(&epi->rdllink, &ep->rdllist);
-			ep_pm_stay_awake(epi);
-		}
+		res += delivered;
 	}
-	ep_done_scan(ep, &txlist);
+
+	ep_done_scan(ep, &scan_batch);
 	mutex_unlock(&ep->mtx);
 
 	return res;
