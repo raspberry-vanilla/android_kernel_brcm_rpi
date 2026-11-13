@@ -30,8 +30,6 @@ struct iso_conn {
 	spinlock_t	lock;
 	struct sock	*sk;
 
-	struct delayed_work	timeout_work;
-
 	struct sk_buff	*rx_skb;
 	__u32		rx_len;
 	__u16		tx_sn;
@@ -55,6 +53,7 @@ static void iso_sock_kill(struct sock *sk);
 enum {
 	BT_SK_BIG_SYNC,
 	BT_SK_PA_SYNC,
+	BT_SK_KILLED,
 };
 
 struct iso_pinfo {
@@ -73,6 +72,7 @@ struct iso_pinfo {
 	__u8			base_len;
 	__u8			base[BASE_MAX_LENGTH];
 	struct iso_conn		*conn;
+	struct delayed_work	timeout_work;
 };
 
 static struct bt_iso_qos default_qos;
@@ -107,9 +107,6 @@ static void iso_conn_free(struct kref *ref)
 		conn->hcon->iso_data = NULL;
 		hci_conn_drop(conn->hcon);
 	}
-
-	/* Ensure no more work items will run since hci_conn has been dropped */
-	disable_delayed_work_sync(&conn->timeout_work);
 
 	kfree_skb(conn->rx_skb);
 
@@ -151,48 +148,45 @@ static struct sock *iso_sock_hold(struct iso_conn *conn)
 
 static void iso_sock_timeout(struct work_struct *work)
 {
-	struct iso_conn *conn = container_of(work, struct iso_conn,
-					     timeout_work.work);
-	struct sock *sk;
-
-	conn = iso_conn_hold_unless_zero(conn);
-	if (!conn)
-		return;
-
-	iso_conn_lock(conn);
-	sk = iso_sock_hold(conn);
-	iso_conn_unlock(conn);
-	iso_conn_put(conn);
-
-	if (!sk)
-		return;
+	struct iso_pinfo *pi = container_of(work, struct iso_pinfo,
+					    timeout_work.work);
+	struct sock *sk = &pi->bt.sk;
 
 	BT_DBG("sock %p state %d", sk, sk->sk_state);
 
 	lock_sock(sk);
-	sk->sk_err = ETIMEDOUT;
-	sk->sk_state_change(sk);
+	if (!sock_flag(sk, SOCK_ZAPPED)) {
+		sk->sk_err = ETIMEDOUT;
+		sk->sk_state_change(sk);
+	}
 	release_sock(sk);
-	sock_put(sk);
 }
 
 static void iso_sock_set_timer(struct sock *sk, long timeout)
 {
+	lockdep_assert(lockdep_sock_is_held(sk));
+
+	cancel_delayed_work(&iso_pi(sk)->timeout_work);
+
 	if (!iso_pi(sk)->conn)
 		return;
 
 	BT_DBG("sock %p state %d timeout %ld", sk, sk->sk_state, timeout);
-	cancel_delayed_work(&iso_pi(sk)->conn->timeout_work);
-	schedule_delayed_work(&iso_pi(sk)->conn->timeout_work, timeout);
+	schedule_delayed_work(&iso_pi(sk)->timeout_work, timeout);
 }
 
 static void iso_sock_clear_timer(struct sock *sk)
 {
-	if (!iso_pi(sk)->conn)
-		return;
+	BT_DBG("sock %p state %d", sk, sk->sk_state);
+	cancel_delayed_work(&iso_pi(sk)->timeout_work);
+}
+
+static void iso_sock_disable_timer(struct sock *sk)
+{
+	lockdep_assert(!lockdep_sock_is_held(sk));
 
 	BT_DBG("sock %p state %d", sk, sk->sk_state);
-	cancel_delayed_work(&iso_pi(sk)->conn->timeout_work);
+	disable_delayed_work_sync(&iso_pi(sk)->timeout_work);
 }
 
 /* ---- ISO connections ---- */
@@ -217,7 +211,6 @@ static struct iso_conn *iso_conn_add(struct hci_conn *hcon)
 
 	kref_init(&conn->ref);
 	spin_lock_init(&conn->lock);
-	INIT_DELAYED_WORK(&conn->timeout_work, iso_sock_timeout);
 
 	hcon->iso_data = conn;
 	conn->hcon = hcon;
@@ -282,10 +275,12 @@ static void iso_conn_del(struct hci_conn *hcon, int err)
 		return;
 	}
 
+	iso_sock_disable_timer(sk);
+
 	lock_sock(sk);
-	iso_sock_clear_timer(sk);
 	iso_chan_del(sk, err);
 	release_sock(sk);
+	iso_sock_kill(sk);
 	sock_put(sk);
 }
 
@@ -764,9 +759,15 @@ static void iso_sock_cleanup_listen(struct sock *parent)
  */
 static void iso_sock_kill(struct sock *sk)
 {
+	iso_sock_disable_timer(sk);
+
+	lock_sock(sk);
+
 	if (!sock_flag(sk, SOCK_ZAPPED) || sk->sk_socket ||
-	    sock_flag(sk, SOCK_DEAD))
+	    test_bit(BT_SK_KILLED, &iso_pi(sk)->flags)) {
+		release_sock(sk);
 		return;
+	}
 
 	BT_DBG("sk %p state %d", sk, sk->sk_state);
 
@@ -780,6 +781,9 @@ static void iso_sock_kill(struct sock *sk)
 	/* Kill poor orphan */
 	bt_sock_unlink(&iso_sk_list, sk);
 	sock_set_flag(sk, SOCK_DEAD);
+	set_bit(BT_SK_KILLED, &iso_pi(sk)->flags);
+
+	release_sock(sk);
 	sock_put(sk);
 }
 
@@ -811,6 +815,7 @@ static void iso_sock_disconn(struct sock *sk)
 	sk->sk_state = BT_DISCONN;
 	iso_conn_lock(iso_pi(sk)->conn);
 	hci_conn_drop(iso_pi(sk)->conn->hcon);
+	iso_pi(sk)->conn->hcon->iso_data = NULL;
 	iso_pi(sk)->conn->hcon = NULL;
 	iso_conn_unlock(iso_pi(sk)->conn);
 }
@@ -854,11 +859,11 @@ static void __iso_sock_close(struct sock *sk)
 /* Must be called on unlocked socket. */
 static void iso_sock_close(struct sock *sk)
 {
+	iso_sock_disable_timer(sk);
+
 	lock_sock(sk);
-	iso_sock_clear_timer(sk);
 	__iso_sock_close(sk);
 	release_sock(sk);
-	iso_sock_kill(sk);
 }
 
 static void iso_sock_init(struct sock *sk, struct sock *parent)
@@ -924,6 +929,8 @@ static struct sock *iso_sock_alloc(struct net *net, struct socket *sock,
 
 	iso_pi(sk)->qos = default_qos;
 	iso_pi(sk)->sync_handle = -1;
+
+	INIT_DELAYED_WORK(&iso_pi(sk)->timeout_work, iso_sock_timeout);
 
 	bt_sock_link(&iso_sk_list, sk);
 	return sk;
@@ -1013,14 +1020,14 @@ static int iso_sock_bind_pa_sk(struct sock *sk, struct sockaddr_iso *sa,
 		goto done;
 	}
 
-	iso_pi(sk)->bc_num_bis = sa->iso_bc->bc_num_bis;
-
-	for (int i = 0; i < iso_pi(sk)->bc_num_bis; i++)
+	for (int i = 0; i < sa->iso_bc->bc_num_bis; i++)
 		if (sa->iso_bc->bc_bis[i] < 0x01 ||
 		    sa->iso_bc->bc_bis[i] > 0x1f) {
 			err = -EINVAL;
 			goto done;
 		}
+
+	iso_pi(sk)->bc_num_bis = sa->iso_bc->bc_num_bis;
 
 	memcpy(iso_pi(sk)->bc_bis, sa->iso_bc->bc_bis,
 	       iso_pi(sk)->bc_num_bis);
@@ -1635,7 +1642,7 @@ static bool check_bcast_qos(struct bt_iso_qos *qos)
 		return false;
 
 	if (!qos->bcast.timeout)
-		qos->bcast.sync_timeout = BT_ISO_SYNC_TIMEOUT;
+		qos->bcast.timeout = BT_ISO_SYNC_TIMEOUT;
 
 	if (qos->bcast.timeout < 0x000a || qos->bcast.timeout > 0x4000)
 		return false;
@@ -1866,8 +1873,16 @@ static int iso_sock_release(struct socket *sock)
 		release_sock(sk);
 	}
 
+	/* Make sure sk is valid even if iso_conn_del() is concurrent */
+	sock_hold(sk);
+
+	lock_sock(sk);
 	sock_orphan(sk);
+	release_sock(sk);
+
 	iso_sock_kill(sk);
+
+	sock_put(sk);
 	return err;
 }
 
