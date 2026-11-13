@@ -109,6 +109,7 @@ static struct quirk_entry *quirks;
  *	2		balance_performance
  *	3		balance_power
  *	4		power
+ *	5		custom (for raw EPP values)
  */
 enum energy_perf_value_index {
 	EPP_INDEX_DEFAULT = 0,
@@ -116,6 +117,8 @@ enum energy_perf_value_index {
 	EPP_INDEX_BALANCE_PERFORMANCE,
 	EPP_INDEX_BALANCE_POWERSAVE,
 	EPP_INDEX_POWERSAVE,
+	EPP_INDEX_CUSTOM,
+	EPP_INDEX_MAX,
 };
 
 static const char * const energy_perf_strings[] = {
@@ -124,7 +127,9 @@ static const char * const energy_perf_strings[] = {
 	[EPP_INDEX_BALANCE_PERFORMANCE] = "balance_performance",
 	[EPP_INDEX_BALANCE_POWERSAVE] = "balance_power",
 	[EPP_INDEX_POWERSAVE] = "power",
+	[EPP_INDEX_CUSTOM] = "custom",
 };
+static_assert(ARRAY_SIZE(energy_perf_strings) == EPP_INDEX_MAX);
 
 static unsigned int epp_values[] = {
 	[EPP_INDEX_DEFAULT] = 0,
@@ -132,7 +137,8 @@ static unsigned int epp_values[] = {
 	[EPP_INDEX_BALANCE_PERFORMANCE] = AMD_CPPC_EPP_BALANCE_PERFORMANCE,
 	[EPP_INDEX_BALANCE_POWERSAVE] = AMD_CPPC_EPP_BALANCE_POWERSAVE,
 	[EPP_INDEX_POWERSAVE] = AMD_CPPC_EPP_POWERSAVE,
- };
+};
+static_assert(ARRAY_SIZE(epp_values) == EPP_INDEX_MAX - 1);
 
 typedef int (*cppc_mode_transition_fn)(int);
 
@@ -188,7 +194,7 @@ static inline int get_mode_idx_from_str(const char *str, size_t size)
 {
 	int i;
 
-	for (i=0; i < AMD_PSTATE_MAX; i++) {
+	for (i = 0; i < AMD_PSTATE_MAX; i++) {
 		if (!strncmp(str, amd_pstate_mode_string[i], size))
 			return i;
 	}
@@ -1349,6 +1355,7 @@ static ssize_t store_energy_performance_preference(struct cpufreq_policy *policy
 {
 	struct amd_cpudata *cpudata = policy->driver_data;
 	ssize_t ret;
+	bool raw_epp = false;
 	u8 epp;
 
 	if (cpudata->dynamic_epp) {
@@ -1356,14 +1363,21 @@ static ssize_t store_energy_performance_preference(struct cpufreq_policy *policy
 		return -EBUSY;
 	}
 
-	ret = sysfs_match_string(energy_perf_strings, buf);
-	if (ret < 0)
-		return -EINVAL;
-
-	if (ret)
-		epp = epp_values[ret];
-	else
-		epp = amd_pstate_get_balanced_epp(policy);
+	/*
+	 * if the value matches a number, use that, otherwise see if
+	 * matches an index in the energy_perf_strings array
+	 */
+	ret = kstrtou8(buf, 0, &epp);
+	raw_epp = !ret;
+	if (ret) {
+		ret = sysfs_match_string(energy_perf_strings, buf);
+		if (ret < 0 || ret == EPP_INDEX_CUSTOM)
+			return -EINVAL;
+		if (ret)
+			epp = epp_values[ret];
+		else
+			epp = cpudata->epp_default_dc;
+	}
 
 	if (epp > 0 && cpudata->policy == CPUFREQ_POLICY_PERFORMANCE) {
 		pr_debug("EPP cannot be set under performance policy\n");
@@ -1374,7 +1388,9 @@ static ssize_t store_energy_performance_preference(struct cpufreq_policy *policy
 	if (ret)
 		return ret;
 
-	return ret ? ret : count;
+	cpudata->raw_epp = raw_epp;
+
+	return count;
 }
 
 static ssize_t show_energy_performance_preference(struct cpufreq_policy *policy, char *buf)
@@ -1383,6 +1399,9 @@ static ssize_t show_energy_performance_preference(struct cpufreq_policy *policy,
 	u8 preference, epp;
 
 	epp = FIELD_GET(AMD_CPPC_EPP_PERF_MASK, cpudata->cppc_req_cached);
+
+	if (cpudata->raw_epp)
+		return sysfs_emit(buf, "%u\n", epp);
 
 	switch (epp) {
 	case AMD_CPPC_EPP_PERFORMANCE:
@@ -1701,8 +1720,9 @@ static ssize_t dynamic_epp_store(struct device *a, struct device_attribute *b,
 		return -EINVAL;
 	}
 
+	/* Nothing to do */
 	if (dynamic_epp == enabled)
-		return -EINVAL;
+		return count;
 
 	/* reinitialize with desired dynamic EPP value */
 	dynamic_epp = enabled;
@@ -1832,7 +1852,7 @@ static int amd_pstate_epp_cpu_init(struct cpufreq_policy *policy)
 	if (dynamic_epp)
 		ret = amd_pstate_set_dynamic_epp(policy);
 	else
-		ret = amd_pstate_set_epp(policy, amd_pstate_get_balanced_epp(policy));
+		ret = amd_pstate_set_epp(policy, cpudata->epp_default_dc);
 	if (ret)
 		goto free_cpudata1;
 
