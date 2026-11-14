@@ -16,3 +16,8 @@
 #include <uapi/linux/mii.h>
 #include <uapi/linux/ethtool.h>
 #include <uapi/linux/wrapfd.h>
+
+#ifdef CONFIG_ANDROID_WRAPFD
+const size_t RUST_CONST_HELPER_WRAPFD_MAX_NR_MONITORS = WRAPFD_MAX_NR_MONITORS;
+const size_t RUST_CONST_HELPER_WRAPFD_MAX_NR_EVENTS = WRAPFD_MAX_NR_EVENTS;
+#endif

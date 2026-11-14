@@ -580,6 +580,7 @@ encoded manner. The codes are the following:
     sd    soft dirty flag
     mm    mixed map area
     hg    huge page advise flag
+    sp    page table sharing area
     nh    no huge page advise flag
     mg    mergeable advise flag
     bt    arm64 BTI guarded page

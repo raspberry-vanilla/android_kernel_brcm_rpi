@@ -16,6 +16,7 @@
 #include <linux/page_idle.h>
 #include <linux/userfaultfd_k.h>
 #include <linux/hugetlb.h>
+#include <linux/ptshare.h>
 #include <linux/falloc.h>
 #include <linux/fadvise.h>
 #include <linux/sched.h>
@@ -180,6 +181,8 @@ static int madvise_update_vma(vm_flags_t new_flags,
 		return PTR_ERR(vma);
 
 	madv_behavior->vma = vma;
+
+	new_flags = ptshare_sync_vm_flags(vma, new_flags);
 
 	/* vm_flags is protected by the mmap_lock held in write mode. */
 	vma_start_write(vma);
@@ -621,6 +624,9 @@ static long madvise_cold(struct madvise_behavior *madv_behavior)
 	if (!can_madv_lru_vma(vma))
 		return -EINVAL;
 
+	if (vma_is_ptshare_client(vma))
+		return 0;
+
 	lru_add_drain();
 	tlb_gather_mmu(&tlb, madv_behavior->mm);
 	madvise_cold_page_range(&tlb, madv_behavior);
@@ -663,6 +669,9 @@ static long madvise_pageout(struct madvise_behavior *madv_behavior)
 
 	if (!can_madv_lru_vma(vma))
 		return -EINVAL;
+
+	if (vma_is_ptshare_client(vma))
+		return 0;
 
 	/*
 	 * If the VMA belongs to a private file mapping, there can be private
@@ -1101,6 +1110,9 @@ static bool is_valid_guard_vma(struct vm_area_struct *vma, bool allow_locked)
 	 */
 	if (!allow_locked)
 		disallowed |= VM_LOCKED;
+
+	if (vma_is_ptshare_client(vma))
+		return false;
 
 	return !(vma->vm_flags & disallowed);
 }

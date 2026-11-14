@@ -1426,6 +1426,26 @@ config PT_RECLAIM
 
 	  Note: now only empty user PTE page table pages will be reclaimed.
 
+config PTSHARE
+	bool "Page table sharing support"
+	depends on MMU && PER_VMA_LOCK && SPLIT_PTE_PTLOCKS
+	depends on ARCH_HAS_PTSHARE_TLB_INVALIDATION && 64BIT
+	depends on !HUGETLB_PAGE
+	select MMU_NOTIFIER
+	help
+	  Lets the children that a process forks use the PTE tables of its
+	  read-only, regular file mappings created with the MAP_PT_SHARED
+	  mmap() flag, instead of each allocating and faulting in their own
+	  page tables for the same pages. This saves page table memory and
+	  page faults where many processes fork from one parent, as Android
+	  apps do from zygote. Mappings created without MAP_PT_SHARED are not
+	  affected.
+
+	  MAP_PT_SHARED reuses the value of MAP_HUGETLB, so this option is
+	  not available with HugeTLB support.
+
+	  If unsure, say N.
+
 config FIND_NORMAL_PAGE
 	def_bool n
 

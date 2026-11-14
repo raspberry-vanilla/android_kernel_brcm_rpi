@@ -34,6 +34,7 @@
 struct address_space;
 struct futex_private_hash;
 struct mem_cgroup;
+struct ptshare_desc;
 
 typedef struct {
 	unsigned long f;
@@ -535,6 +536,7 @@ FOLIO_MATCH(compound_head, _head_3);
  * @pt_mm:            Used for x86 pgds.
  * @pt_frag_refcount: For fragmented page table tracking. Powerpc only.
  * @pt_share_count:   Used for HugeTLB PMD page table share count.
+ * @pt_ptshare_count: Used for PTSHARE PTE table share count.
  * @_pt_pad_2:        Padding to ensure proper alignment.
  * @ptl:              Lock for the page table.
  * @__page_type:      Same as page->page_type. Unused for page tables.
@@ -563,6 +565,9 @@ struct ptdesc {
 		atomic_t pt_frag_refcount;
 #ifdef CONFIG_HUGETLB_PMD_PAGE_TABLE_SHARING
 		atomic_t pt_share_count;
+#endif
+#ifdef CONFIG_PTSHARE
+		atomic_t pt_ptshare_count;
 #endif
 	};
 
@@ -636,6 +641,17 @@ static inline bool ptdesc_pmd_is_shared(struct ptdesc *ptdesc)
 }
 #else
 static inline void ptdesc_pmd_pts_init(struct ptdesc *ptdesc)
+{
+}
+#endif
+
+#ifdef CONFIG_PTSHARE
+static inline void ptdesc_ptshare_init(struct ptdesc *ptdesc)
+{
+	atomic_set(&ptdesc->pt_ptshare_count, 0);
+}
+#else
+static inline void ptdesc_ptshare_init(struct ptdesc *ptdesc)
 {
 }
 #endif
@@ -919,14 +935,16 @@ struct vm_area_struct {
 	ANDROID_KABI_RESERVE(1);
 	ANDROID_KABI_RESERVE(2);
 
-	/*
-	 * For:
-	 * union {
-	 *         struct ptshare_desc* __vm_ptshare_desc;
-	 *         refcount_t __vm_ptshare_refcount;
-	 * }
-	 */
+#ifdef CONFIG_PTSHARE
+	ANDROID_BACKPORT_USE(1, union {
+		/* For client VMAs: pointer to domain */
+		struct ptshare_desc *__vm_ptshare_desc;
+		/* For shadow VMAs: number of clients */
+		refcount_t __vm_ptshare_refcount;
+	});
+#else
 	ANDROID_BACKPORT_RESERVE(1);
+#endif
 
 	ANDROID_BACKPORT_RESERVE(2);
 } __randomize_layout;
@@ -1247,10 +1265,13 @@ struct mm_struct {
 
 		ANDROID_KABI_RESERVE(1);
 
-		/* For 'struct ptshare_desc* ptshare_desc' */
+#ifdef CONFIG_PTSHARE
+		ANDROID_BACKPORT_USE(1, struct ptshare_desc __rcu *ptshare_desc);
+		ANDROID_BACKPORT_USE(2, refcount_t ptshare_vmas);
+#else
 		ANDROID_BACKPORT_RESERVE(1);
-		/* For 'atomic_t ptshare_vmas' */
 		ANDROID_BACKPORT_RESERVE(2);
+#endif
 		ANDROID_BACKPORT_RESERVE(3);
 		ANDROID_VENDOR_DATA(1);
 	} __randomize_layout;
@@ -1862,6 +1883,9 @@ enum {
 
 #define MMF_TOPDOWN		31	/* mm searches top down by default */
 #define MMF_TOPDOWN_MASK	BIT(MMF_TOPDOWN)
+
+#define MMF_PTSHARE_CREATOR	32	/* mm created its sharing domain */
+#define MMF_PTSHARE_SHADOW	33	/* mm is the shadow MM of a domain */
 
 #define MMF_INIT_LEGACY_MASK	(MMF_DUMPABLE_MASK | MMF_DUMP_FILTER_MASK |\
 				 MMF_DISABLE_THP_MASK | MMF_HAS_MDWE_MASK |\

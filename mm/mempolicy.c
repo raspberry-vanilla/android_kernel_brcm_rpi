@@ -110,6 +110,7 @@
 #include <linux/printk.h>
 #include <linux/swapops.h>
 #include <linux/gcd.h>
+#include <linux/ptshare.h>
 
 #include <asm/tlbflush.h>
 #include <asm/tlb.h>
@@ -861,6 +862,10 @@ static int queue_pages_test_walk(unsigned long start, unsigned long end,
 		(!next || vma->vm_end < next->vm_start)))
 		/* hole at middle or tail of range */
 		return -EFAULT;
+
+	if (vma_is_ptshare_client(vma) &&
+	    (flags & (MPOL_MF_MOVE | MPOL_MF_MOVE_ALL)) == MPOL_MF_MOVE)
+		return 1;
 
 	/*
 	 * Need check MPOL_MF_STRICT to return -EIO if possible

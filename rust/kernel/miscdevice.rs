@@ -19,6 +19,7 @@ use crate::{
     mm::virt::VmaNew,
     prelude::*,
     seq_file::SeqFile,
+    sync::poll::PollTable,
     types::{ForeignOwnable, Opaque},
 };
 use core::{marker::PhantomData, mem::MaybeUninit, ops::Deref, pin::Pin};
@@ -221,6 +222,15 @@ pub trait MiscDevice: Sized + Sync + 'static {
         _m: &SeqFile,
         _file: &File,
     ) {
+        build_error!(VTABLE_DEFAULT_ERROR)
+    }
+
+    /// Poll this miscdevice.
+    fn poll(
+        _device: <Self::File as ForeignOwnable>::Borrowed<'_>,
+        _file: &File,
+        _table: PollTable<'_>,
+    ) -> Result<bindings::__poll_t> {
         build_error!(VTABLE_DEFAULT_ERROR)
     }
 }
@@ -445,6 +455,27 @@ impl<T: MiscDevice> MiscdeviceVTable<T> {
         T::show_fdinfo(device, m, file);
     }
 
+    unsafe extern "C" fn poll(
+        file: *mut bindings::file,
+        poll_table: *mut bindings::poll_table_struct,
+    ) -> bindings::__poll_t {
+        // SAFETY: The poll ioctl call of a file can access the private data.
+        let private = unsafe { (*file).private_data };
+        // SAFETY: Ioctl calls can borrow the private data of the file.
+        let device = unsafe { <T::File as ForeignOwnable>::borrow(private) };
+        // * The file is valid for the duration of this call.
+        // * There is no active fdget_pos region on the file on this thread.
+        let file = unsafe { File::from_raw_file(file) };
+        // SAFETY: `poll_table` is a mutable raw pointer to a valid, initialized `struct
+        // poll_table_struct` per function contract, or a null pointer.
+        let poll_table = unsafe { PollTable::from_raw(poll_table) };
+
+        match T::poll(device, file, poll_table) {
+            Ok(ret) => ret,
+            Err(err) => err.to_errno() as bindings::__poll_t,
+        }
+    }
+
     const VTABLE: bindings::file_operations = bindings::file_operations {
         open: Some(Self::open),
         release: Some(Self::release),
@@ -482,6 +513,7 @@ impl<T: MiscDevice> MiscdeviceVTable<T> {
         } else {
             None
         },
+        poll: if T::HAS_POLL { Some(Self::poll) } else { None },
         // SAFETY: All zeros is a valid value for `bindings::file_operations`.
         ..unsafe { MaybeUninit::zeroed().assume_init() }
     };

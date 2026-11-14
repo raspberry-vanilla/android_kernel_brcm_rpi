@@ -1774,6 +1774,14 @@ config ARCH_HAS_KERNEL_FPU_SUPPORT
 	  Architectures that select this option can run floating-point code in
 	  the kernel, as described in Documentation/core-api/floating-point.rst.
 
+config ARCH_HAS_PTSHARE_TLB_INVALIDATION
+	bool
+	help
+	  An architecture selects this when mm/ptshare.c can broadcast the
+	  TLB invalidations of a PTSHARE shadow MM to every CPU, so that
+	  they also reach the TLB entries of the client processes that map
+	  its page tables. Only arm64 and x86_64 implement this broadcast.
+
 config ARCH_VMLINUX_NEEDS_RELOCS
 	bool
 	help

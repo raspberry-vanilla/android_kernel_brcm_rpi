@@ -203,6 +203,7 @@
 #define ANDROID_KABI_REPLACE(_oldtype, _oldname, _new) _new
 #define ANDROID_KABI_USE(number, _new) _new
 #define ANDROID_KABI_USE2(number, _new1, _new2) _new1; _new2
+#define ANDROID_BACKPORT_USE(number, _new) _new
 
 #endif /* CONFIG_ANDROID_KABI_RESERVE */
 

@@ -92,6 +92,7 @@ int __init pkvm_host_prepare_iommu(void)
 
 	pkvm_sym(intel_iommu_sm) = intel_iommu_sm;
 	pkvm_sym(intel_iommu_superpage) = intel_iommu_superpage;
+	pkvm_sym(intel_iommu_pkvm_use_nested) = intel_iommu_pkvm_use_nested;
 
 	for_each_iommu(iommu, drhd) {
 		struct intel_iommu_info info = {
@@ -327,6 +328,7 @@ int pkvm_alloc_domain(struct device_domain_info *info, struct dmar_domain *domai
 	data->max_addr = domain->max_addr;
 	data->iommu_coherency = domain->iommu_coherency;
 	data->iommu_superpage = domain->iommu_superpage;
+	data->pkvm_nested = domain->pkvm_nested;
 
 	ret = pkvm_hypercall_in(iommu_alloc_domain, &d);
 	if (ret)
@@ -427,6 +429,24 @@ int pkvm_domain_unmap(struct dmar_domain *domain, unsigned long start_pfn, unsig
 	if (ret)
 		pr_err("%s: domain unmap[start_pfn: %lx, last_pfn: %lx] failed (err=%d)\n",
 		       __func__, start_pfn, last_pfn, ret);
+	return ret;
+}
+
+int pkvm_domain_flush(struct dmar_domain *domain, unsigned long start,
+		      unsigned long last, bool ih)
+{
+	u64 pgd_gpa = 0;
+	int ret;
+
+	if (!domain)
+		return -EINVAL;
+
+	pgd_gpa = virt_to_phys(domain->pgd);
+
+	ret = pkvm_hypercall(iommu_domain_flush, pgd_gpa, start, last, ih);
+	if (ret)
+		pr_err("%s: domain[pgd_pa: %llx] flush[start: %lx, last: %lx] failed (err=%d)\n",
+		       __func__, pgd_gpa, start, last, ret);
 	return ret;
 }
 

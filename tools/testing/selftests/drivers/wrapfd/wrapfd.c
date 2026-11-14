@@ -22,6 +22,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <getopt.h>
+#include <poll.h>
 #include <pthread.h>
 #include <signal.h>
 #include <stdbool.h>
@@ -41,6 +42,7 @@
 #include <linux/align.h>
 #include <linux/dma-buf.h>
 #include <linux/dma-heap.h>
+#include <linux/limits.h>
 #include <linux/wrapfd.h>
 #include "../../kselftest_harness.h"
 #include "load_gate.h"
@@ -102,6 +104,16 @@ static inline int wrapfd_rewrap(int wrapfd, int prot)
 	return ioctl(wrapfd, WRAPFD_DEV_IOC_REWRAP, &rewrap);
 }
 
+static inline int wrapfd_repopulate(int dev_fd, int wrapfd, int dmabuf_fd)
+{
+	struct wrapfd_repopulate repopulate = {
+		.wrapfd = wrapfd,
+		.fd = dmabuf_fd,
+	};
+
+	return ioctl(dev_fd, WRAPFD_DEV_IOC_REPOPULATE, &repopulate);
+}
+
 static inline int wrapfd_empty(int wrapfd)
 {
 	return ioctl(wrapfd, WRAPFD_DEV_IOC_EMPTY, NULL);
@@ -115,6 +127,50 @@ static inline int wrapfd_allow_guests(int wrapfd)
 static inline int wrapfd_prohibit_guests(int wrapfd)
 {
 	return ioctl(wrapfd, WRAPFD_DEV_IOC_PROHIBIT_GUESTS, NULL);
+}
+
+static inline int wrapfd_add_monitors(int dev_fd, struct wrapfd_monitor *arr,
+				      __u64 *results, __u64 len)
+{
+	struct wrapfd_add_monitors add_monitors = {
+		.monitors = {
+			.len = len,
+			.arr = (__u64)arr,
+			.results = (__u64)results,
+		},
+	};
+
+	return ioctl(dev_fd, WRAPFD_DEV_IOC_ADD_MONITOR, &add_monitors);
+}
+
+static inline int wrapfd_del_monitors(int dev_fd, struct wrapfd_monitor *arr,
+				      __u64 *results, __u64 len)
+{
+	struct wrapfd_del_monitors del_monitors = {
+		.monitors = {
+			.len = len,
+			.arr = (__u64)arr,
+			.results = (__u64)results,
+		},
+	};
+
+	return ioctl(dev_fd, WRAPFD_DEV_IOC_DEL_MONITOR, &del_monitors);
+}
+
+static inline int wrapfd_query_events(int dev_fd, struct wrapfd_event *arr,
+				      __u64 len, __u64 *count)
+{
+	struct wrapfd_events events = {
+		.len = len,
+		.arr = (__u64)arr,
+	};
+	int ret;
+
+	ret = ioctl(dev_fd, WRAPFD_DEV_IOC_QUERY_EVENTS, &events);
+	if (!ret && count)
+		*count = events.count;
+
+	return ret;
 }
 
 /* test utility functions */
@@ -1222,6 +1278,198 @@ static void test_rewrap_rdonly_file(struct __test_metadata *_metadata,
 	close(wrapfd);
 }
 
+static void test_repopulate(struct __test_metadata *_metadata,
+			    FIXTURE_DATA(wrapfd_tests) *self, int heap_fd,
+			    int fd, int rdonly_fd)
+{
+	size_t large_size = ALIGN(self->size, self->page_size) + self->page_size;
+	struct wrapfd_repopulate repopulate;
+	int small_fd, large_fd;
+	int wrapfd, wrapfd2;
+	unsigned int state;
+	struct stat sb;
+	int status;
+	char *ptr;
+	pid_t pid;
+
+	small_fd = dmabuf_heap_alloc(heap_fd, self->page_size, O_RDWR);
+	ASSERT_TRUE(small_fd >= 0);
+	large_fd = dmabuf_heap_alloc(heap_fd, large_size, O_RDWR);
+	ASSERT_TRUE(large_fd >= 0);
+
+	wrapfd = wrapfd_wrap(self->dev_fd, fd, PROT_READ | PROT_WRITE);
+	ASSERT_TRUE(wrapfd >= 0);
+
+	/* Repopulate ioctl on non-device file descriptors should fail */
+	ASSERT_TRUE(wrapfd_repopulate(-1, wrapfd, fd) < 0 && errno == EBADF);
+	ASSERT_TRUE(wrapfd_repopulate(fd, wrapfd, fd) < 0 && errno == ENOTTY);
+	ASSERT_TRUE(wrapfd_repopulate(wrapfd, wrapfd, fd) < 0 && errno == ENOTTY);
+	ASSERT_TRUE(wrapfd_repopulate(self->fd, wrapfd, fd) < 0 && errno == ENOTTY);
+
+	/* Repopulate with non-wrapfd target file descriptors should fail */
+	ASSERT_TRUE(wrapfd_repopulate(self->dev_fd, -1, fd) < 0 && errno == EBADF);
+	ASSERT_TRUE(wrapfd_repopulate(self->dev_fd, fd, fd) < 0 && errno == EBADF);
+	ASSERT_TRUE(wrapfd_repopulate(self->dev_fd, self->dev_fd, fd) < 0 &&
+		    errno == EBADF);
+	ASSERT_TRUE(wrapfd_repopulate(self->dev_fd, self->fd, fd) < 0 &&
+		    errno == EBADF);
+
+	/* Invalid ioctl parameters */
+	ASSERT_TRUE(ioctl(self->dev_fd, WRAPFD_DEV_IOC_REPOPULATE, NULL) < 0 &&
+		    errno == EFAULT);
+	repopulate = (struct wrapfd_repopulate){
+		.wrapfd = wrapfd,
+		.fd = fd,
+		.reserved = 1,
+	};
+	ASSERT_TRUE(ioctl(self->dev_fd, WRAPFD_DEV_IOC_REPOPULATE, &repopulate) < 0 &&
+		    errno == EINVAL);
+
+	/* Try repopulating unowned non-empty buffer */
+	ASSERT_TRUE(wrapfd_repopulate(self->dev_fd, wrapfd, fd) < 0 &&
+		    errno == EINVAL);
+
+	/* Take buffer ownership */
+	ASSERT_EQ(wrapfd_acquire_ownership(wrapfd), 0);
+
+	/* Try repopulating a mapped buffer */
+	ptr = mmap(NULL, self->size, PROT_READ | PROT_WRITE, MAP_SHARED,
+		   wrapfd, 0);
+	ASSERT_NE(ptr, MAP_FAILED);
+	ASSERT_TRUE(wrapfd_repopulate(self->dev_fd, wrapfd, fd) < 0 &&
+		    errno == EINVAL);
+	ASSERT_EQ(munmap(ptr, self->size), 0);
+
+	/* Try repopulating a non-empty buffer */
+	ASSERT_TRUE(wrapfd_repopulate(self->dev_fd, wrapfd, fd) < 0 &&
+		    errno == EINVAL);
+
+	/* Empty the buffer */
+	ASSERT_EQ(wrapfd_empty(wrapfd), 0);
+	ASSERT_TRUE(wrapfd_get_state(wrapfd, &state) == 0 &&
+		    state == WRAPFD_CONTENT_EMPTY);
+
+	/* Non-owner process cannot repopulate an owned empty buffer */
+	pid = fork();
+	ASSERT_FALSE(pid < 0);
+	if (pid == 0) {
+		if (wrapfd_repopulate(self->dev_fd, wrapfd, fd) < 0 && errno == EBUSY)
+			exit(EXIT_SUCCESS);
+		exit(EXIT_FAILURE);
+	} else {
+		ASSERT_NE(wait(&status), -1);
+		ASSERT_TRUE(WIFEXITED(status));
+		ASSERT_EQ(WEXITSTATUS(status), 0);
+	}
+
+	/* Try repopulating with invalid or incompatible file descriptors */
+	ASSERT_TRUE(wrapfd_repopulate(self->dev_fd, wrapfd, -1) < 0 &&
+		    errno == EBADF);
+	ASSERT_TRUE(wrapfd_repopulate(self->dev_fd, wrapfd, self->fd) < 0 &&
+		    errno == EINVAL);
+	ASSERT_TRUE(wrapfd_repopulate(self->dev_fd, wrapfd, self->dev_fd) < 0 &&
+		    errno == EINVAL);
+	ASSERT_TRUE(wrapfd_repopulate(self->dev_fd, wrapfd, wrapfd) < 0 &&
+		    errno == EINVAL);
+	ASSERT_TRUE(wrapfd_repopulate(self->dev_fd, wrapfd, rdonly_fd) < 0 &&
+		    errno == EACCES);
+	ASSERT_TRUE(wrapfd_get_state(wrapfd, &state) == 0 &&
+		    state == WRAPFD_CONTENT_EMPTY);
+
+	/* Repopulate with a smaller buffer and verify size and bounds */
+	ASSERT_EQ(wrapfd_repopulate(self->dev_fd, wrapfd, small_fd), 0);
+	ASSERT_TRUE(wrapfd_get_state(wrapfd, &state) == 0 &&
+		    state == WRAPFD_CONTENT_RDWR);
+	ASSERT_TRUE(wrapfd_repopulate(self->dev_fd, wrapfd, fd) < 0 &&
+		    errno == EINVAL);
+	ASSERT_EQ(fstat(wrapfd, &sb), 0);
+	ASSERT_EQ(sb.st_size, self->page_size);
+	ASSERT_EQ(lseek(wrapfd, 0, SEEK_END), self->page_size);
+	ASSERT_TRUE(wrapfd_load(wrapfd, self->fd, 0, 0, self->page_size + 1) < 0 &&
+		    errno == EINVAL);
+	ASSERT_EQ(wrapfd_load(wrapfd, self->fd, 0, 0, self->page_size), 0);
+	ASSERT_EQ(cmp_content(_metadata, self, wrapfd, 0, 0, self->page_size), 0);
+
+	/* Empty again and repopulate with a larger buffer */
+	ASSERT_EQ(wrapfd_empty(wrapfd), 0);
+	ASSERT_EQ(wrapfd_repopulate(self->dev_fd, wrapfd, large_fd), 0);
+	ASSERT_TRUE(wrapfd_get_state(wrapfd, &state) == 0 &&
+		    state == WRAPFD_CONTENT_RDWR);
+	ASSERT_EQ(fstat(wrapfd, &sb), 0);
+	ASSERT_EQ(sb.st_size, large_size);
+	ASSERT_EQ(lseek(wrapfd, 0, SEEK_END), large_size);
+	ptr = mmap(NULL, large_size, PROT_READ | PROT_WRITE, MAP_SHARED,
+		   wrapfd, 0);
+	ASSERT_NE(ptr, MAP_FAILED);
+	ASSERT_EQ(poison_region(wrapfd, ptr + large_size - self->page_size,
+				0x5a, self->page_size), 0);
+	ASSERT_EQ(verify_region_poison(wrapfd, ptr + large_size - self->page_size,
+				       0x5a, self->page_size), 0);
+	ASSERT_EQ(munmap(ptr, large_size), 0);
+
+	/* Empty again and repopulate with the original buffer */
+	ASSERT_EQ(wrapfd_empty(wrapfd), 0);
+	ASSERT_EQ(wrapfd_repopulate(self->dev_fd, wrapfd, fd), 0);
+	ASSERT_TRUE(wrapfd_get_state(wrapfd, &state) == 0 &&
+		    state == WRAPFD_CONTENT_RDWR);
+	ASSERT_EQ(fstat(wrapfd, &sb), 0);
+	ASSERT_EQ(sb.st_size, ALIGN(self->size, self->page_size));
+	ASSERT_EQ(load_and_cmp(_metadata, self, wrapfd, 0, 0, self->size), 0);
+
+	/*
+	 * Empty and release buffer ownership: acquiring ownership of an empty
+	 * buffer fails with ENOENT, while repopulating an unowned empty buffer
+	 * succeeds.
+	 */
+	ASSERT_EQ(wrapfd_empty(wrapfd), 0);
+	ASSERT_EQ(wrapfd_release_ownership(wrapfd), 0);
+	ASSERT_TRUE(wrapfd_acquire_ownership(wrapfd) < 0 && errno == ENOENT);
+	ASSERT_EQ(wrapfd_repopulate(self->dev_fd, wrapfd, fd), 0);
+	ASSERT_TRUE(wrapfd_get_state(wrapfd, &state) == 0 &&
+		    state == WRAPFD_CONTENT_RDWR);
+	close(wrapfd);
+
+	/* Test repopulating a read-only wrapfd */
+	wrapfd = wrapfd_wrap(self->dev_fd, rdonly_fd, PROT_READ);
+	ASSERT_TRUE(wrapfd >= 0);
+	ASSERT_EQ(wrapfd_acquire_ownership(wrapfd), 0);
+	ASSERT_EQ(wrapfd_empty(wrapfd), 0);
+
+	/* Repopulate read-only wrapfd with read-only buffer */
+	ASSERT_EQ(wrapfd_repopulate(self->dev_fd, wrapfd, rdonly_fd), 0);
+	ASSERT_TRUE(wrapfd_get_state(wrapfd, &state) == 0 &&
+		    state == WRAPFD_CONTENT_RDONLY);
+	ptr = mmap(NULL, self->size, PROT_READ | PROT_WRITE, MAP_SHARED,
+		   wrapfd, 0);
+	ASSERT_TRUE(ptr == MAP_FAILED && errno == EACCES);
+	ASSERT_TRUE(wrapfd_rewrap(wrapfd, PROT_WRITE) < 0 && errno == EACCES);
+
+	/*
+	 * Repopulate read-only wrapfd with writable buffer: wrapfd remains
+	 * read-only, but can be rewrapped as writable.
+	 */
+	ASSERT_EQ(wrapfd_empty(wrapfd), 0);
+	ASSERT_EQ(wrapfd_repopulate(self->dev_fd, wrapfd, fd), 0);
+	ASSERT_TRUE(wrapfd_get_state(wrapfd, &state) == 0 &&
+		    state == WRAPFD_CONTENT_RDONLY);
+	ptr = mmap(NULL, self->size, PROT_READ | PROT_WRITE, MAP_SHARED,
+		   wrapfd, 0);
+	ASSERT_TRUE(ptr == MAP_FAILED && errno == EACCES);
+	wrapfd2 = wrapfd_rewrap(wrapfd, PROT_WRITE);
+	ASSERT_TRUE(wrapfd2 >= 0);
+	ASSERT_TRUE(wrapfd_get_state(wrapfd2, &state) == 0 &&
+		    state == WRAPFD_CONTENT_RDWR);
+	ASSERT_TRUE(wrapfd_get_state(wrapfd, &state) == 0 &&
+		    state == WRAPFD_CONTENT_EMPTY);
+	close(wrapfd2);
+
+	ASSERT_EQ(wrapfd_release_ownership(wrapfd), 0);
+	close(wrapfd);
+
+	close(large_fd);
+	close(small_fd);
+}
+
 static void test_empty(struct __test_metadata *_metadata,
 		       FIXTURE_DATA(wrapfd_tests) *self, int fd)
 {
@@ -1319,6 +1567,12 @@ static void __test_close_on_exec(struct __test_metadata *_metadata,
 	wrapfd2 = wrapfd_rewrap(wrapfd, PROT_WRITE);
 	ASSERT_TRUE(wrapfd2 >= 0);
 	ASSERT_EQ(close_on_exec, is_close_on_exec(wrapfd2));
+
+	/* Repopulating should update the attribute to match the new content */
+	ASSERT_EQ(set_close_on_exec(fd, !close_on_exec), 0);
+	ASSERT_EQ(wrapfd_repopulate(self->dev_fd, wrapfd, fd), 0);
+	ASSERT_EQ(!close_on_exec, is_close_on_exec(wrapfd));
+	ASSERT_EQ(set_close_on_exec(fd, close_on_exec), 0);
 
 	close(wrapfd2);
 	close(wrapfd);
@@ -1592,8 +1846,542 @@ static void test_prohibit_guests_on_owner_death(struct __test_metadata *_metadat
 	close(wrapfd);
 }
 
+#define POLL_TIMEOUT_MS	5000
+
+enum test_state {
+	POLL_STATE_INIT,
+	POLL_STATE_READY,
+	POLL_STATE_START,
+	POLL_STATE_DONE,
+	POLL_STATE_RESET,
+};
+
+struct poll_thread_ctl {
+	pthread_mutex_t sync_lock;
+	pthread_cond_t sync_cond;
+	enum test_state curr_state;
+	int dev_fd;
+	int poll_ret;
+	short revents;
+	bool exit;
+};
+
+/* Thread synchronization routines */
+static void poll_thread_wait_for_state(struct poll_thread_ctl *poll_ctl, enum test_state state)
+{
+	pthread_mutex_lock(&poll_ctl->sync_lock);
+	while (poll_ctl->curr_state != state)
+		pthread_cond_wait(&poll_ctl->sync_cond, &poll_ctl->sync_lock);
+	pthread_mutex_unlock(&poll_ctl->sync_lock);
+}
+
+static void poll_thread_signal_state(struct poll_thread_ctl *poll_ctl, enum test_state state)
+{
+	pthread_mutex_lock(&poll_ctl->sync_lock);
+	poll_ctl->curr_state = state;
+	pthread_cond_signal(&poll_ctl->sync_cond);
+	pthread_mutex_unlock(&poll_ctl->sync_lock);
+}
+
+static void poll_thread_stop(struct poll_thread_ctl *poll_ctl)
+{
+	poll_thread_wait_for_state(poll_ctl, POLL_STATE_READY);
+	poll_ctl->exit = true;
+	poll_thread_signal_state(poll_ctl, POLL_STATE_START);
+}
+
+static void *poll_thread_fn(void *arg)
+{
+	struct poll_thread_ctl *poll_ctl = arg;
+	struct pollfd pollfd = {
+		.fd = poll_ctl->dev_fd,
+		.events = POLLIN,
+	};
+
+	while (true) {
+		poll_thread_signal_state(poll_ctl, POLL_STATE_READY);
+		poll_thread_wait_for_state(poll_ctl, POLL_STATE_START);
+		if (poll_ctl->exit)
+			break;
+
+		pollfd.revents = 0;
+		poll_ctl->poll_ret = poll(&pollfd, 1, POLL_TIMEOUT_MS);
+		poll_ctl->revents = pollfd.revents;
+
+		poll_thread_signal_state(poll_ctl, POLL_STATE_DONE);
+		poll_thread_wait_for_state(poll_ctl, POLL_STATE_RESET);
+	}
+
+	return NULL;
+}
+
+static void poll_thread_start_poll(struct poll_thread_ctl *poll_ctl)
+{
+	poll_thread_wait_for_state(poll_ctl, POLL_STATE_READY);
+	poll_thread_signal_state(poll_ctl, POLL_STATE_START);
+}
+
+static void poll_thread_finish_poll(struct __test_metadata *_metadata,
+				    struct poll_thread_ctl *poll_ctl)
+{
+	poll_thread_wait_for_state(poll_ctl, POLL_STATE_DONE);
+	ASSERT_EQ(poll_ctl->poll_ret, 1);
+	ASSERT_TRUE(poll_ctl->revents & POLLIN);
+	poll_thread_signal_state(poll_ctl, POLL_STATE_RESET);
+}
+
+static void verify_single_event(struct __test_metadata *_metadata,
+				FIXTURE_DATA(wrapfd_tests) *self,
+				struct poll_thread_ctl *poll_ctl,
+				__u32 expected_fd, __u32 expected_events,
+				__u64 *last_ts)
+{
+	struct wrapfd_event events[2] = {};
+	__u64 count = 0;
+
+	poll_thread_finish_poll(_metadata, poll_ctl);
+
+	ASSERT_EQ(wrapfd_query_events(self->dev_fd, events, 2, &count), 0);
+	ASSERT_EQ(count, 1);
+	ASSERT_EQ(events[0].fd, expected_fd);
+	ASSERT_EQ(events[0].events, expected_events);
+	ASSERT_TRUE(events[0].timestamp >= *last_ts);
+	*last_ts = events[0].timestamp;
+
+	/* Subsequent query without new events should return 0 events */
+	ASSERT_EQ(wrapfd_query_events(self->dev_fd, events, 2, &count), 0);
+	ASSERT_EQ(count, 0);
+}
+
+static void verify_dual_unmap_events(struct __test_metadata *_metadata,
+				     FIXTURE_DATA(wrapfd_tests) *self,
+				     struct poll_thread_ctl *poll_ctl,
+				     __u32 expected_fd1, __u32 expected_fd2,
+				     __u64 *last_ts)
+{
+	struct wrapfd_event events[2] = {};
+	__u64 count = 0;
+
+	poll_thread_finish_poll(_metadata, poll_ctl);
+
+	ASSERT_EQ(wrapfd_query_events(self->dev_fd, events, 2, &count), 0);
+	ASSERT_EQ(count, 2);
+
+	ASSERT_EQ(events[0].events, WRAPFD_EVENT_UNMAP);
+	ASSERT_EQ(events[1].events, WRAPFD_EVENT_UNMAP);
+
+	if (events[0].fd == expected_fd1) {
+		ASSERT_EQ(events[1].fd, expected_fd2);
+	} else if (events[0].fd == expected_fd2) {
+		ASSERT_EQ(events[1].fd, expected_fd1);
+	} else {
+		ASSERT_TRUE(!"Should not be here");
+	}
+
+	ASSERT_TRUE(events[0].timestamp >= *last_ts);
+	ASSERT_TRUE(events[1].timestamp >= *last_ts);
+
+	if (events[0].timestamp > events[1].timestamp)
+		*last_ts = events[0].timestamp;
+	else
+		*last_ts = events[1].timestamp;
+
+	/* Subsequent query without new events should return 0 events */
+	ASSERT_EQ(wrapfd_query_events(self->dev_fd, events, 2, &count), 0);
+	ASSERT_EQ(count, 0);
+}
+
+/* The rust wrapfd driver sends "unmap" events lazily, the following code forces this by
+ * indirectly invoking the driver's "show_fdinfo" method, which queries the wrap's map-count and
+ * sends any pending "unmap" events as a side effect.
+ */
+static int wrapfd_flush_munmap(int fd)
+{
+	FILE *fdinfo_fp;
+	char path[PATH_MAX];
+	char *line = NULL;
+	size_t len = 0;
+	ssize_t nread;
+
+	sprintf(path, "/proc/self/fdinfo/%d", fd);
+
+	fdinfo_fp = fopen(path, "r");
+	if (!fdinfo_fp)
+		return -ENOENT;
+
+	do {
+		nread = getline(&line, &len, fdinfo_fp);
+	} while (nread != -1);
+
+	free(line);
+	line = NULL;
+	fclose(fdinfo_fp);
+	fdinfo_fp = NULL;
+
+	return 0;
+}
+
+static void test_poll_ioctls(struct __test_metadata *_metadata,
+			     FIXTURE_DATA(wrapfd_tests) *self, int fd)
+{
+	struct wrapfd_add_monitors add_monitors = {};
+	struct wrapfd_del_monitors del_monitors = {};
+	struct wrapfd_monitor invalid_monitors[6];
+	struct wrapfd_monitor monitors[2];
+	struct wrapfd_event events[2] = {};
+	__u64 invalid_results[6] = {};
+	__u64 results[2] = {};
+	int wrapfd1, wrapfd2;
+	struct pollfd pollfd;
+	int wrapfd1_dup;
+	__u64 count = 0;
+	char *ptr;
+
+	wrapfd1 = wrapfd_wrap(self->dev_fd, fd, PROT_READ | PROT_WRITE);
+	ASSERT_TRUE(wrapfd1 >= 0);
+	wrapfd2 = wrapfd_wrap(self->dev_fd, fd, PROT_READ | PROT_WRITE);
+	ASSERT_TRUE(wrapfd2 >= 0);
+
+	/* Test ADD_MONITOR, DEL_MONITOR, and QUERY_EVENTS ioctls with various parameters */
+	monitors[0].fd = wrapfd1;
+	monitors[0].events = WRAPFD_EVENT_MAP;
+
+	/* Monitor/event ioctls on non-device fds should fail with ENOTTY */
+	ASSERT_TRUE(wrapfd_add_monitors(fd, monitors, results, 1) < 0 &&
+		    errno == ENOTTY);
+	ASSERT_TRUE(wrapfd_add_monitors(wrapfd1, monitors, results, 1) < 0 &&
+		    errno == ENOTTY);
+	ASSERT_TRUE(wrapfd_del_monitors(fd, monitors, results, 1) < 0 &&
+		    errno == ENOTTY);
+	ASSERT_TRUE(wrapfd_del_monitors(wrapfd1, monitors, results, 1) < 0 &&
+		    errno == ENOTTY);
+	ASSERT_TRUE(wrapfd_query_events(fd, events, 1, &count) < 0 &&
+		    errno == ENOTTY);
+	ASSERT_TRUE(wrapfd_query_events(wrapfd1, events, 1, &count) < 0 &&
+		    errno == ENOTTY);
+
+	/* Invalid parameters for WRAPFD_DEV_IOC_ADD_MONITOR */
+	ASSERT_TRUE(ioctl(self->dev_fd, WRAPFD_DEV_IOC_ADD_MONITOR, NULL) < 0 &&
+		    errno == EFAULT);
+	add_monitors.monitors.len = 1;
+	add_monitors.monitors.arr = (__u64)monitors;
+	add_monitors.monitors.results = (__u64)results;
+	add_monitors.reserved = 1;
+	ASSERT_TRUE(ioctl(self->dev_fd, WRAPFD_DEV_IOC_ADD_MONITOR, &add_monitors) < 0 &&
+		    errno == EINVAL);
+	ASSERT_TRUE(wrapfd_add_monitors(self->dev_fd, monitors, results, 0) < 0 &&
+		    errno == EINVAL);
+	ASSERT_TRUE(wrapfd_add_monitors(self->dev_fd, NULL, results, 1) < 0 &&
+		    errno == EFAULT);
+	ASSERT_TRUE(wrapfd_add_monitors(self->dev_fd, monitors, NULL, 1) < 0 &&
+		    errno == EFAULT);
+
+	/* Invalid parameters for WRAPFD_DEV_IOC_DEL_MONITOR */
+	ASSERT_TRUE(ioctl(self->dev_fd, WRAPFD_DEV_IOC_DEL_MONITOR, NULL) < 0 &&
+		    errno == EFAULT);
+	del_monitors.monitors.len = 1;
+	del_monitors.monitors.arr = (__u64)monitors;
+	del_monitors.monitors.results = (__u64)results;
+	del_monitors.reserved = 1;
+	ASSERT_TRUE(ioctl(self->dev_fd, WRAPFD_DEV_IOC_DEL_MONITOR, &del_monitors) < 0 &&
+		    errno == EINVAL);
+	ASSERT_TRUE(wrapfd_del_monitors(self->dev_fd, monitors, results, 0) < 0 &&
+		    errno == EINVAL);
+	ASSERT_TRUE(wrapfd_del_monitors(self->dev_fd, NULL, results, 1) < 0 &&
+		    errno == EFAULT);
+	ASSERT_TRUE(wrapfd_del_monitors(self->dev_fd, monitors, NULL, 1) < 0 &&
+		    errno == EFAULT);
+
+	/* Invalid parameters for WRAPFD_DEV_IOC_QUERY_EVENTS */
+	ASSERT_TRUE(ioctl(self->dev_fd, WRAPFD_DEV_IOC_QUERY_EVENTS, NULL) < 0 &&
+		    errno == EFAULT);
+	ASSERT_TRUE(wrapfd_query_events(self->dev_fd, events, 0, &count) < 0 &&
+		    errno == EINVAL);
+
+	/* Per-monitor parameter validation for ADD_MONITOR and DEL_MONITOR */
+	invalid_monitors[0].fd = -1;
+	invalid_monitors[0].events = WRAPFD_EVENT_MAP;
+	invalid_monitors[1].fd = fd;
+	invalid_monitors[1].events = WRAPFD_EVENT_MAP;
+	invalid_monitors[2].fd = self->dev_fd;
+	invalid_monitors[2].events = WRAPFD_EVENT_MAP;
+	invalid_monitors[3].fd = wrapfd1;
+	invalid_monitors[3].events = 0;
+	invalid_monitors[4].fd = wrapfd1;
+	invalid_monitors[4].events = ~WRAPFD_EVENTS_MASK;
+	invalid_monitors[5].fd = wrapfd1;
+	invalid_monitors[5].events = WRAPFD_EVENTS_MASK | (WRAPFD_EVENT_LOAD_DONE << 1);
+
+	ASSERT_EQ(wrapfd_add_monitors(self->dev_fd, invalid_monitors, invalid_results, 6), 0);
+	ASSERT_EQ((__s64)invalid_results[0], -EBADF);
+	ASSERT_EQ((__s64)invalid_results[1], -EBADF);
+	ASSERT_EQ((__s64)invalid_results[2], -EBADF);
+	ASSERT_EQ((__s64)invalid_results[3], -EINVAL);
+	ASSERT_EQ((__s64)invalid_results[4], -EINVAL);
+	ASSERT_EQ((__s64)invalid_results[5], -EINVAL);
+
+	memset(invalid_results, 0, sizeof(invalid_results));
+	ASSERT_EQ(wrapfd_del_monitors(self->dev_fd, invalid_monitors, invalid_results, 6), 0);
+	ASSERT_EQ((__s64)invalid_results[0], -EBADF);
+	ASSERT_EQ((__s64)invalid_results[1], -EBADF);
+	ASSERT_EQ((__s64)invalid_results[2], -EBADF);
+	ASSERT_EQ((__s64)invalid_results[3], -EINVAL);
+	ASSERT_EQ((__s64)invalid_results[4], -EINVAL);
+	ASSERT_EQ((__s64)invalid_results[5], -EINVAL);
+
+	/* Add monitor on wrapfd1, then test duplicate fd rejection (-EBUSY) */
+	monitors[0].fd = wrapfd1;
+	monitors[0].events = WRAPFD_EVENT_MAP | WRAPFD_EVENT_UNMAP;
+	results[0] = 0;
+	ASSERT_EQ(wrapfd_add_monitors(self->dev_fd, monitors, results, 1), 0);
+	ASSERT_EQ(results[0], 0);
+
+	wrapfd1_dup = dup(wrapfd1);
+	ASSERT_TRUE(wrapfd1_dup >= 0);
+	monitors[0].fd = wrapfd1_dup;
+	monitors[0].events = WRAPFD_EVENT_MAP;
+	results[0] = 0;
+	ASSERT_EQ(wrapfd_add_monitors(self->dev_fd, monitors, results, 1), 0);
+	ASSERT_EQ((__s64)results[0], -EBUSY);
+	close(wrapfd1_dup);
+
+	/* Expand monitored events on wrapfd1 and add monitor on wrapfd2 */
+	monitors[0].fd = wrapfd1;
+	monitors[0].events = WRAPFD_EVENT_OWN | WRAPFD_EVENT_UNOWN;
+	monitors[1].fd = wrapfd2;
+	monitors[1].events = WRAPFD_EVENTS_MASK;
+	memset(results, 0, sizeof(results));
+	ASSERT_EQ(wrapfd_add_monitors(self->dev_fd, monitors, results, 2), 0);
+	ASSERT_EQ(results[0], 0);
+	ASSERT_EQ(results[1], 0);
+
+	/* Querying when no events have triggered should return count == 0 */
+	ASSERT_EQ(wrapfd_query_events(self->dev_fd, events, 2, &count), 0);
+	ASSERT_EQ(count, 0);
+
+	/* Trigger events on both wrapfd1 and wrapfd2 to test QUERY_EVENTS parameters */
+	ASSERT_EQ(wrapfd_acquire_ownership(wrapfd1), 0);
+	ASSERT_EQ(wrapfd_release_ownership(wrapfd1), 0);
+	ptr = mmap(NULL, self->size, PROT_READ | PROT_WRITE, MAP_SHARED, wrapfd2, 0);
+	ASSERT_NE(ptr, MAP_FAILED);
+	ASSERT_EQ(munmap(ptr, self->size), 0);
+
+	// Force deferred munmap notification.
+	ASSERT_EQ(wrapfd_flush_munmap(wrapfd2), 0);
+
+	/* Consume the pending poll wakeup */
+	pollfd.fd = self->dev_fd;
+	pollfd.events = POLLIN;
+	pollfd.revents = 0;
+	ASSERT_EQ(poll(&pollfd, 1, 0), 1);
+	ASSERT_TRUE(pollfd.revents & POLLIN);
+
+	/* Querying with len == 1 when 2 wrapfds have events should return 1 event at a time */
+	ASSERT_EQ(wrapfd_query_events(self->dev_fd, events, 1, &count), 0);
+	ASSERT_EQ(count, 1);
+	ASSERT_TRUE(events[0].fd == wrapfd1 || events[0].fd == wrapfd2);
+
+	/* Querying remaining pending event with NULL array should fail with EINVAL */
+	ASSERT_TRUE(wrapfd_query_events(self->dev_fd, NULL, 1, &count) < 0 &&
+		    errno == EINVAL);
+
+	/* Querying remaining pending event with 0 len should fail with EINVAL */
+	ASSERT_TRUE(wrapfd_query_events(self->dev_fd, events, 0, &count) < 0 &&
+		    errno == EINVAL);
+
+	/* Trigger again if the failed query cleared the second event, or query the remaining one */
+	ASSERT_EQ(wrapfd_acquire_ownership(wrapfd1), 0);
+	ASSERT_EQ(wrapfd_release_ownership(wrapfd1), 0);
+	ASSERT_EQ(wrapfd_acquire_ownership(wrapfd2), 0);
+	ASSERT_EQ(wrapfd_release_ownership(wrapfd2), 0);
+	poll(&pollfd, 1, 0);
+
+	ASSERT_EQ(wrapfd_query_events(self->dev_fd, events, 1, &count), 0);
+	ASSERT_EQ(count, 1);
+	ASSERT_EQ(wrapfd_query_events(self->dev_fd, &events[1], 1, &count), 0);
+	ASSERT_EQ(count, 1);
+	ASSERT_NE(events[0].fd, events[1].fd);
+	ASSERT_EQ(wrapfd_query_events(self->dev_fd, events, 2, &count), 0);
+	ASSERT_EQ(count, 0);
+
+	/* Delete all monitors from wrapfd1 and wrapfd2 */
+	monitors[0].fd = wrapfd1;
+	monitors[0].events = WRAPFD_EVENTS_MASK;
+	monitors[1].fd = wrapfd2;
+	monitors[1].events = WRAPFD_EVENTS_MASK;
+	memset(results, 0, sizeof(results));
+	ASSERT_EQ(wrapfd_del_monitors(self->dev_fd, monitors, results, 2), 0);
+	ASSERT_EQ(results[0], 0);
+	ASSERT_EQ(results[1], 0);
+
+	close(wrapfd2);
+	close(wrapfd1);
+}
+
+static void test_poll(struct __test_metadata *_metadata,
+		       FIXTURE_DATA(wrapfd_tests) *self, int fd)
+{
+	struct poll_thread_ctl poll_ctl = {};
+	struct wrapfd_monitor monitors[2];
+	struct wrapfd_event events[2] = {};
+	pthread_mutexattr_t mutex_attr;
+	pthread_condattr_t cond_attr;
+	int wrapfd1, wrapfd2;
+	pthread_t poll_thread;
+	__u64 results[2] = {};
+	__u64 last_ts = 0;
+	__u64 count = 0;
+	char *ptr1, *ptr2;
+
+	wrapfd1 = wrapfd_wrap(self->dev_fd, fd, PROT_READ | PROT_WRITE);
+	ASSERT_TRUE(wrapfd1 >= 0);
+	wrapfd2 = wrapfd_wrap(self->dev_fd, fd, PROT_READ | PROT_WRITE);
+	ASSERT_TRUE(wrapfd2 >= 0);
+
+	/* Monitor both wrapfd1 and wrapfd2 for MAP, UNMAP, OWN, and UNOWN events */
+	monitors[0].fd = wrapfd1;
+	monitors[0].events = WRAPFD_EVENT_MAP | WRAPFD_EVENT_UNMAP |
+			     WRAPFD_EVENT_OWN | WRAPFD_EVENT_UNOWN;
+	monitors[1].fd = wrapfd2;
+	monitors[1].events = WRAPFD_EVENT_MAP | WRAPFD_EVENT_UNMAP |
+			     WRAPFD_EVENT_OWN | WRAPFD_EVENT_UNOWN;
+	ASSERT_EQ(wrapfd_add_monitors(self->dev_fd, monitors, results, 2), 0);
+	ASSERT_EQ(results[0], 0);
+	ASSERT_EQ(results[1], 0);
+
+	/* Initialize poll thread synchronization primitives and start poll thread */
+	pthread_mutexattr_init(&mutex_attr);
+	ASSERT_EQ(pthread_mutex_init(&poll_ctl.sync_lock, &mutex_attr), 0);
+	pthread_condattr_init(&cond_attr);
+	ASSERT_EQ(pthread_cond_init(&poll_ctl.sync_cond, &cond_attr), 0);
+	poll_ctl.curr_state = POLL_STATE_INIT;
+	poll_ctl.dev_fd = self->dev_fd;
+	poll_ctl.exit = false;
+
+	ASSERT_EQ(pthread_create(&poll_thread, NULL, poll_thread_fn, &poll_ctl), 0);
+
+	/* Test WRAPFD_EVENT_MAP on wrapfd1 */
+	poll_thread_start_poll(&poll_ctl);
+	ptr1 = mmap(NULL, self->size, PROT_READ | PROT_WRITE, MAP_SHARED, wrapfd1, 0);
+	ASSERT_NE(ptr1, MAP_FAILED);
+	verify_single_event(_metadata, self, &poll_ctl, wrapfd1, WRAPFD_EVENT_MAP, &last_ts);
+
+	/* Test WRAPFD_EVENT_MAP on wrapfd2 */
+	poll_thread_start_poll(&poll_ctl);
+	ptr2 = mmap(NULL, self->size, PROT_READ | PROT_WRITE, MAP_SHARED, wrapfd2, 0);
+	ASSERT_NE(ptr2, MAP_FAILED);
+	verify_single_event(_metadata, self, &poll_ctl, wrapfd2, WRAPFD_EVENT_MAP, &last_ts);
+
+	/* Test WRAPFD_EVENT_UNMAP on wrapfd1 */
+	poll_thread_start_poll(&poll_ctl);
+	ASSERT_EQ(munmap(ptr1, self->size), 0);
+	ASSERT_EQ(munmap(ptr2, self->size), 0);
+	// Force deferred munmap notification.
+	ASSERT_EQ(wrapfd_flush_munmap(wrapfd1), 0);
+	// Force deferred munmap notification.
+	ASSERT_EQ(wrapfd_flush_munmap(wrapfd2), 0);
+	verify_dual_unmap_events(_metadata, self, &poll_ctl, wrapfd1, wrapfd2, &last_ts);
+
+	/* Test WRAPFD_EVENT_OWN on wrapfd1 */
+	poll_thread_start_poll(&poll_ctl);
+	ASSERT_EQ(wrapfd_acquire_ownership(wrapfd1), 0);
+	verify_single_event(_metadata, self, &poll_ctl, wrapfd1, WRAPFD_EVENT_OWN, &last_ts);
+
+	/* Test WRAPFD_EVENT_OWN on wrapfd2 */
+	poll_thread_start_poll(&poll_ctl);
+	ASSERT_EQ(wrapfd_acquire_ownership(wrapfd2), 0);
+	verify_single_event(_metadata, self, &poll_ctl, wrapfd2, WRAPFD_EVENT_OWN, &last_ts);
+
+	/* Test WRAPFD_EVENT_UNOWN on wrapfd1 */
+	poll_thread_start_poll(&poll_ctl);
+	ASSERT_EQ(wrapfd_release_ownership(wrapfd1), 0);
+	verify_single_event(_metadata, self, &poll_ctl, wrapfd1, WRAPFD_EVENT_UNOWN, &last_ts);
+
+	/* Test WRAPFD_EVENT_UNOWN on wrapfd2 */
+	poll_thread_start_poll(&poll_ctl);
+	ASSERT_EQ(wrapfd_release_ownership(wrapfd2), 0);
+	verify_single_event(_metadata, self, &poll_ctl, wrapfd2, WRAPFD_EVENT_UNOWN, &last_ts);
+
+	/*
+	 * Test polling while generating multiple events (OWN, MAP, UNMAP, UNOWN)
+	 * across both wrapfd1 and wrapfd2.
+	 */
+	poll_thread_start_poll(&poll_ctl);
+	ASSERT_EQ(wrapfd_acquire_ownership(wrapfd1), 0);
+	ptr1 = mmap(NULL, self->size, PROT_READ | PROT_WRITE, MAP_SHARED, wrapfd1, 0);
+	ASSERT_NE(ptr1, MAP_FAILED);
+	ASSERT_EQ(munmap(ptr1, self->size), 0);
+	// Force deferred munmap notification.
+	ASSERT_EQ(wrapfd_flush_munmap(wrapfd1), 0);
+	ASSERT_EQ(wrapfd_release_ownership(wrapfd1), 0);
+
+	ptr2 = mmap(NULL, self->size, PROT_READ | PROT_WRITE, MAP_SHARED, wrapfd2, 0);
+	ASSERT_NE(ptr2, MAP_FAILED);
+	ASSERT_EQ(munmap(ptr2, self->size), 0);
+	// Force deferred munmap notification.
+	ASSERT_EQ(wrapfd_flush_munmap(wrapfd2), 0);
+	ASSERT_EQ(wrapfd_acquire_ownership(wrapfd2), 0);
+	ASSERT_EQ(wrapfd_release_ownership(wrapfd2), 0);
+
+	poll_thread_finish_poll(_metadata, &poll_ctl);
+
+	ASSERT_EQ(wrapfd_query_events(self->dev_fd, events, 2, &count), 0);
+	ASSERT_EQ(count, 2);
+	ASSERT_TRUE((events[0].fd == wrapfd1 && events[1].fd == wrapfd2) ||
+		    (events[0].fd == wrapfd2 && events[1].fd == wrapfd1));
+	ASSERT_EQ(events[0].events, WRAPFD_EVENT_MAP | WRAPFD_EVENT_UNMAP |
+				    WRAPFD_EVENT_OWN | WRAPFD_EVENT_UNOWN);
+	ASSERT_EQ(events[1].events, WRAPFD_EVENT_MAP | WRAPFD_EVENT_UNMAP |
+				    WRAPFD_EVENT_OWN | WRAPFD_EVENT_UNOWN);
+	ASSERT_TRUE(events[0].timestamp >= last_ts);
+	ASSERT_TRUE(events[1].timestamp >= last_ts);
+	last_ts = events[0].timestamp > events[1].timestamp ?
+		  events[0].timestamp : events[1].timestamp;
+
+	/*
+	 * Remove OWN and UNOWN monitoring from wrapfd1 and verify only
+	 * monitored events (MAP and UNMAP) are reported.
+	 */
+	monitors[0].fd = wrapfd1;
+	monitors[0].events = WRAPFD_EVENT_OWN | WRAPFD_EVENT_UNOWN;
+	ASSERT_EQ(wrapfd_del_monitors(self->dev_fd, monitors, results, 1), 0);
+	ASSERT_EQ(results[0], 0);
+
+	poll_thread_start_poll(&poll_ctl);
+	ASSERT_EQ(wrapfd_acquire_ownership(wrapfd1), 0);
+	ptr1 = mmap(NULL, self->size, PROT_READ | PROT_WRITE, MAP_SHARED, wrapfd1, 0);
+	ASSERT_NE(ptr1, MAP_FAILED);
+	ASSERT_EQ(munmap(ptr1, self->size), 0);
+	// Force deferred munmap notification.
+	ASSERT_EQ(wrapfd_flush_munmap(wrapfd1), 0);
+	ASSERT_EQ(wrapfd_release_ownership(wrapfd1), 0);
+	verify_single_event(_metadata, self, &poll_ctl, wrapfd1,
+			    WRAPFD_EVENT_MAP | WRAPFD_EVENT_UNMAP, &last_ts);
+
+	/* Stop poll thread and clean up */
+	poll_thread_stop(&poll_ctl);
+	ASSERT_EQ(pthread_join(poll_thread, NULL), 0);
+	pthread_cond_destroy(&poll_ctl.sync_cond);
+	pthread_condattr_destroy(&cond_attr);
+	pthread_mutex_destroy(&poll_ctl.sync_lock);
+	pthread_mutexattr_destroy(&mutex_attr);
+
+	/* Remove remaining monitors before closing wrapfd files */
+	monitors[0].fd = wrapfd1;
+	monitors[0].events = WRAPFD_EVENTS_MASK;
+	monitors[1].fd = wrapfd2;
+	monitors[1].events = WRAPFD_EVENTS_MASK;
+	ASSERT_EQ(wrapfd_del_monitors(self->dev_fd, monitors, results, 2), 0);
+	ASSERT_EQ(results[0], 0);
+	ASSERT_EQ(results[1], 0);
+
+	close(wrapfd2);
+	close(wrapfd1);
+}
+
 static void run_tests(struct __test_metadata *_metadata,
-		      FIXTURE_DATA(wrapfd_tests) *self, int fd, int rdonly_fd)
+		      FIXTURE_DATA(wrapfd_tests) *self, int heap_fd,
+		      int fd, int rdonly_fd)
 {
 	test_wrap(_metadata, self, fd);
 	test_wrap_rdonly_file(_metadata, self, rdonly_fd);
@@ -1610,6 +2398,7 @@ static void run_tests(struct __test_metadata *_metadata,
 	test_rewrap(_metadata, self, fd);
 	test_rewrap_rdonly_file(_metadata, self, rdonly_fd);
 	test_empty(_metadata, self, fd);
+	test_repopulate(_metadata, self, heap_fd, fd, rdonly_fd);
 	test_close_on_exec(_metadata, self, fd);
 	test_guests(_metadata, self, fd);
 	test_ioctl(_metadata, self, fd);
@@ -1617,6 +2406,8 @@ static void run_tests(struct __test_metadata *_metadata,
 	test_map_count(_metadata, self, fd);
 	test_prohibit_guests_on_owner_death(_metadata, self, fd);
 	test_not_owned_usage(_metadata, self, fd);
+	test_poll_ioctls(_metadata, self, fd);
+	test_poll(_metadata, self, fd);
 }
 
 TEST_F(wrapfd_tests, wrapfd_test_dmabuf_system_heap)
@@ -1631,10 +2422,10 @@ TEST_F(wrapfd_tests, wrapfd_test_dmabuf_system_heap)
 	ASSERT_TRUE(dmabuf_fd >= 0);
 	rdonly_dmabuf_fd = dmabuf_heap_alloc(heap_fd, self->size, O_RDONLY);
 	ASSERT_TRUE(rdonly_dmabuf_fd >= 0);
-	close(heap_fd);
-	run_tests(_metadata, self, dmabuf_fd, rdonly_dmabuf_fd);
+	run_tests(_metadata, self, heap_fd, dmabuf_fd, rdonly_dmabuf_fd);
 	close(rdonly_dmabuf_fd);
 	close(dmabuf_fd);
+	close(heap_fd);
 }
 
 TEST_F(wrapfd_tests, wrapfd_test_dmabuf_cma_heap)
@@ -1651,10 +2442,10 @@ TEST_F(wrapfd_tests, wrapfd_test_dmabuf_cma_heap)
 	ASSERT_TRUE(dmabuf_fd >= 0);
 	rdonly_dmabuf_fd = dmabuf_heap_alloc(heap_fd, self->size, O_RDONLY);
 	ASSERT_TRUE(rdonly_dmabuf_fd >= 0);
-	close(heap_fd);
-	run_tests(_metadata, self, dmabuf_fd, rdonly_dmabuf_fd);
+	run_tests(_metadata, self, heap_fd, dmabuf_fd, rdonly_dmabuf_fd);
 	close(rdonly_dmabuf_fd);
 	close(dmabuf_fd);
+	close(heap_fd);
 }
 
 /*

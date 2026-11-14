@@ -1752,8 +1752,6 @@ static int gic_irq_get_fwspec_info(struct irq_fwspec *fwspec, struct irq_fwspec_
 
 	/* If the specifier provides an affinity, use it */
 	if (fwspec->param_count == 4 && fwspec->param[3]) {
-		struct fwnode_handle *fw;
-
 		switch (fwspec->param[0]) {
 		case 1:			/* PPI */
 		case 3:			/* EPPI */
@@ -1762,7 +1760,10 @@ static int gic_irq_get_fwspec_info(struct irq_fwspec *fwspec, struct irq_fwspec_
 			return 0;
 		}
 
-		fw = of_fwnode_handle(of_find_node_by_phandle(fwspec->param[3]));
+		struct device_node *np __free(device_node) =
+			of_find_node_by_phandle(fwspec->param[3]);
+		struct fwnode_handle *fw = of_fwnode_handle(np);
+
 		if (!fw)
 			return -ENOENT;
 

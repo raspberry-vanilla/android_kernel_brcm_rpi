@@ -13,6 +13,7 @@
 #include <linux/mm_inline.h>
 #include <linux/pagemap.h>
 #include <linux/pagewalk.h>
+#include <linux/ptshare.h>
 #include <linux/rmap.h>
 #include <linux/swap.h>
 #include <linux/swapops.h>
@@ -1141,6 +1142,8 @@ static inline bool vma_supports_mlock(const struct vm_area_struct *vma)
 	if (vma->vm_flags & (VM_SPECIAL | VM_DROPPABLE))
 		return false;
 	if (vma_is_dax(vma) || is_vm_hugetlb_page(vma))
+		return false;
+	if (vma_is_ptshare_client(vma))
 		return false;
 	return vma != get_gate_vma(current->mm);
 }

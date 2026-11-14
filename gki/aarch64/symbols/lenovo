@@ -2166,3 +2166,4 @@
   snd_ctl_free_one
   irq_stat
   xhci_sideband_interrupter_id
+  input_device_enabled

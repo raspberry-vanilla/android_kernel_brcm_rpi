@@ -22,6 +22,7 @@
 #include <linux/mm_inline.h>
 #include <linux/ksm.h>
 #include <linux/rmap.h>
+#include <linux/ptshare.h>
 #include <linux/topology.h>
 #include <linux/cpu.h>
 #include <linux/cpuset.h>
@@ -2281,7 +2282,8 @@ static int do_move_pages_to_node(struct list_head *pagelist, int node)
 }
 
 static int __add_folio_for_migration(struct folio *folio, int node,
-		struct list_head *pagelist, bool migrate_all)
+		struct list_head *pagelist, bool migrate_all,
+		struct vm_area_struct *vma)
 {
 	if (is_zero_folio(folio) || is_huge_zero_folio(folio))
 		return -EFAULT;
@@ -2291,6 +2293,9 @@ static int __add_folio_for_migration(struct folio *folio, int node,
 
 	if (folio_nid(folio) == node)
 		return 0;
+
+	if (vma_is_ptshare_client(vma) && !migrate_all)
+		return -EACCES;
 
 	if (folio_maybe_mapped_shared(folio) && !migrate_all)
 		return -EACCES;
@@ -2334,7 +2339,7 @@ static int add_folio_for_migration(struct mm_struct *mm, const void __user *p,
 		folio = folio_walk_start(&fw, vma, addr, FW_ZEROPAGE);
 		if (folio) {
 			err = __add_folio_for_migration(folio, node, pagelist,
-							migrate_all);
+							migrate_all, vma);
 			folio_walk_end(&fw, vma);
 		} else {
 			err = -ENOENT;

@@ -98,6 +98,10 @@ static bool iommu_domain_compatible(struct intel_iommu *iommu,
 	if (domain->use_first_level) {
 		if (!sm_supported(iommu) || !ecap_flts(iommu->ecap))
 			return false;
+
+		if ((domain->domain.type == IOMMU_DOMAIN_NESTED) !=
+		    pkvm_nested_enabled(iommu))
+			return false;
 	} else {
 		if (sm_supported(iommu) && !ecap_slts(iommu->ecap))
 			return false;
@@ -219,16 +223,18 @@ int pkvm_free_iommu_domain(u64 pgd_gpa, struct pkvm_memcache *teardown_mc)
 
 	pkvm_spin_unlock(&iommu_domain_lock);
 
-	/* Unmap any remaining mappings. */
-	domain_unmap(domain, 0, DOMAIN_MAX_PFN(domain->gaw), NULL);
-	free_domain_memcache(domain, teardown_mc);
-	/*
-	 * pgd was not allocated through memcache, but its safe to return to
-	 * memcache as the teardown mc frees it the same way host driver frees
-	 * the pages.
-	 */
-	push_pkvm_memcache_page(teardown_mc, domain->pgd, pkvm_virt_to_host_gpa);
-	pkvm_hyp_donate_host(__pkvm_pa(domain->pgd), VTD_PAGE_SIZE, false);
+	if (domain->domain.type != IOMMU_DOMAIN_NESTED) {
+		/* Unmap any remaining mappings. */
+		domain_unmap(domain, 0, DOMAIN_MAX_PFN(domain->gaw), NULL);
+		free_domain_memcache(domain, teardown_mc);
+		/*
+		 * pgd was not allocated through memcache, but its safe to return to
+		 * memcache as the teardown mc frees it the same way host driver frees
+		 * the pages.
+		 */
+		push_pkvm_memcache_page(teardown_mc, domain->pgd, pkvm_virt_to_host_gpa);
+		pkvm_hyp_donate_host(__pkvm_pa(domain->pgd), VTD_PAGE_SIZE, false);
+	}
 
 	pkvm_dbg("%s: freeing domain[pgd: %p], freed pages: %lu\n",
 		 __func__, domain->pgd, teardown_mc->count);
@@ -270,6 +276,12 @@ struct dmar_domain *pkvm_alloc_iommu_domain(struct alloc_domain_data *data,
 		domain->max_addr = data->max_addr;
 		domain->index = index;
 		domain->qi_batch = &domain->_qi_batch;
+		if (data->pkvm_nested) {
+			domain->domain.type = IOMMU_DOMAIN_NESTED;
+			domain->s2_domain = &pt_domain;
+			domain->s1_cfg.pgtbl_addr = pkvm_host_gpa_to_phys(data->pgd_gpa);
+			domain->s1_cfg.addr_width = agaw_to_width(domain->agaw);
+		}
 		atomic_set(&domain->refcount, 1);
 		pkvm_spin_lock_init(&domain->lock);
 		pkvm_spin_lock_init(&domain->cache_lock);
@@ -308,6 +320,13 @@ static int iommu_domain_map(struct domain_map_data *data)
 		return -EINVAL;
 	}
 
+	if (domain->domain.type == IOMMU_DOMAIN_NESTED) {
+		pkvm_err("%s: map not supported for nested domain [pgd:%llx]\n",
+			 __func__, data->pgd_gpa);
+		ret = -EINVAL;
+		goto out_put_domain;
+	}
+
 	pkvm_spin_lock(&domain->lock);
 	if (data->mc.count) {
 		ret = refill_domain_memcache(domain, &data->mc);
@@ -327,6 +346,7 @@ static int iommu_domain_map(struct domain_map_data *data)
 
 out_unlock:
 	pkvm_spin_unlock(&domain->lock);
+out_put_domain:
 	pkvm_put_iommu_domain(domain);
 
 	return ret;
@@ -343,6 +363,7 @@ int pkvm_iommu_domain_map(struct domain_map_data *in, struct domain_map_data *ou
 int pkvm_iommu_domain_unmap(u64 pgd_gpa, u64 start_pfn, u64 last_pfn)
 {
 	struct dmar_domain *domain;
+	int ret = 0;
 
 	domain = __pkvm_get_iommu_domain(pkvm_host_gpa_to_virt(pgd_gpa));
 	if (!domain) {
@@ -351,10 +372,56 @@ int pkvm_iommu_domain_unmap(u64 pgd_gpa, u64 start_pfn, u64 last_pfn)
 		return -EINVAL;
 	}
 
+	if (domain->domain.type == IOMMU_DOMAIN_NESTED) {
+		pkvm_err("%s: unmap not supported for nested domain [pgd:%llx]\n",
+			 __func__, pgd_gpa);
+		ret = -EINVAL;
+		goto out_put_domain;
+	}
+
 	pkvm_spin_lock(&domain->lock);
 	domain_unmap(domain, start_pfn, last_pfn, NULL);
 	pkvm_spin_unlock(&domain->lock);
 
+out_put_domain:
+	pkvm_put_iommu_domain(domain);
+
+	return ret;
+}
+
+/* Flush IOMMU caches for the domain identified by the given pgd_gpa. */
+int pkvm_iommu_domain_flush(u64 pgd_gpa, u64 start, u64 last, bool ih)
+{
+	struct dmar_domain *domain;
+
+	if (start > last) {
+		pkvm_err("%s: invalid flush range [%llx, %llx]\n",
+			 __func__, start, last);
+		return -EINVAL;
+	}
+
+	domain = __pkvm_get_iommu_domain(pkvm_host_gpa_to_virt(pgd_gpa));
+	if (!domain) {
+		pkvm_err("%s, failed to get the domain [pgd:%llx]\n",
+			 __func__, pgd_gpa);
+		return -EINVAL;
+	}
+
+	/*
+	 * Guard against integer overflow and shift-by-64 UB on huge ranges in
+	 * calculate_psi_aligned_address() and qi_desc_piotlb(). With newer
+	 * kernels this check is not needed anymore, since commits e36ee89679f4
+	 * ("iommu/vt-d: Pass size_order to qi_desc_piotlb() not npages") and
+	 * 9785df3fd670 ("iommu/vt-d: Simplify calculate_psi_aligned_address()").
+	 */
+	if (last > domain->max_addr && !(start == 0 && last == ULONG_MAX)) {
+		pkvm_err("%s: invalid flush range [%llx, %llx] for domain [pgd:%llx, max_addr:%llx]\n",
+			 __func__, start, last, pgd_gpa, domain->max_addr);
+		pkvm_put_iommu_domain(domain);
+		return -EINVAL;
+	}
+
+	cache_tag_flush_range(domain, start, last, ih);
 	pkvm_put_iommu_domain(domain);
 
 	return 0;

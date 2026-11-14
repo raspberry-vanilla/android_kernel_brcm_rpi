@@ -678,6 +678,11 @@ struct dmar_domain {
 	u8 iotlb_sync_map:1;		/* Need to flush IOTLB cache or write
 					 * buffer when creating mappings.
 					 */
+#if defined(CONFIG_PKVM_INTEL) && !defined(__PKVM_HYP__)
+	u8 pkvm_nested:1;		/* pKVM hypervisor uses nested
+					 * translation for this domain.
+					 */
+#endif
 
 #ifndef __PKVM_HYP__
 	spinlock_t lock;		/* Protect device tracking lists */
@@ -731,10 +736,11 @@ struct dmar_domain {
 			struct mmu_notifier notifier;
 		};
 	};
+#endif
 
 	struct iommu_domain domain;	/* generic domain data structure for
 					   iommu core */
-#else
+#ifdef __PKVM_HYP__
 	/* virtual address */
 	struct dma_pte	*pgd;
 	/* max guest address width */
@@ -753,6 +759,12 @@ struct dmar_domain {
 	atomic_t refcount;
 	unsigned int index;
 	struct pkvm_memcache mc;
+
+	/* parent page table which the user domain is nested on */
+	struct dmar_domain *s2_domain;
+	/* page table attributes */
+	struct iommu_hwpt_vtd_s1 s1_cfg;
+
 	/*
 	 * Lock to protect the mapping operations
 	 * on this domain.
@@ -762,8 +774,22 @@ struct dmar_domain {
 	struct qi_batch _qi_batch;		/* domain->qi_batch = &domain->_qi_batch */
 
 	struct hlist_node hnode;
-#endif /* !__PKVM_HYP__ */
+#endif /* __PKVM_HYP__ */
 };
+
+#ifndef __PKVM_HYP__
+#ifdef CONFIG_PKVM_INTEL
+static inline bool domain_pkvm_nested(struct dmar_domain *domain)
+{
+	return domain->pkvm_nested;
+}
+#else
+static inline bool domain_pkvm_nested(struct dmar_domain *domain)
+{
+	return false;
+}
+#endif
+#endif
 
 /*
  * In theory, the VT-d 4.0 spec can support up to 2 ^ 16 counters.
@@ -1711,6 +1737,10 @@ static inline bool intel_domain_is_ss_paging(struct dmar_domain *domain)
 	return domain->domain.ops == &intel_ss_paging_domain_ops;
 }
 #endif /* !__PKVM_HYP__ */
+
+#ifdef CONFIG_PKVM_INTEL
+extern bool intel_iommu_pkvm_use_nested;
+#endif
 
 #ifdef CONFIG_INTEL_IOMMU
 extern int intel_iommu_sm;

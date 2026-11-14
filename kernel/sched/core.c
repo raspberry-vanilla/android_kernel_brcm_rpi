@@ -2289,7 +2289,8 @@ void __proxy_remove_from_sleeping_owner(struct task_struct *owner, struct task_s
 	if (p->sleeping_owner == owner) {
 		list_del_init(&p->blocked_node);
 		WRITE_ONCE(p->sleeping_owner, NULL);
-		put_task_struct(owner); // matches get in proxy_enqueue_on_owner
+		put_task_struct(owner); // matches get in proxy_enqueue_on_owner()
+		put_task_struct(p);	// matchet get in proxy_enqueue_on_owner()
 	}
 }
 
@@ -3542,6 +3543,19 @@ void relax_compatible_cpus_allowed_ptr(struct task_struct *p)
 
 #ifdef CONFIG_SMP
 
+static void __do_migrate_task_rq(struct task_struct *p, unsigned int new_cpu)
+{
+	if (task_cpu(p) != new_cpu) {
+		if (p->sched_class->migrate_task_rq)
+			p->sched_class->migrate_task_rq(p, new_cpu);
+		p->se.nr_migrations++;
+		rseq_migrate(p);
+		sched_mm_cid_migrate_from(p);
+		perf_event_task_migrate(p);
+		trace_android_rvh_set_task_cpu(p, new_cpu);
+	}
+}
+
 void set_task_cpu(struct task_struct *p, unsigned int new_cpu)
 {
 	unsigned int state = READ_ONCE(p->__state);
@@ -3584,16 +3598,7 @@ void set_task_cpu(struct task_struct *p, unsigned int new_cpu)
 
 	trace_sched_migrate_task(p, new_cpu);
 
-	if (task_cpu(p) != new_cpu) {
-		if (p->sched_class->migrate_task_rq)
-			p->sched_class->migrate_task_rq(p, new_cpu);
-		p->se.nr_migrations++;
-		rseq_migrate(p);
-		sched_mm_cid_migrate_from(p);
-		perf_event_task_migrate(p);
-		trace_android_rvh_set_task_cpu(p, new_cpu);
-	}
-
+	__do_migrate_task_rq(p, new_cpu);
 	__set_task_cpu(p, new_cpu);
 }
 EXPORT_SYMBOL_GPL(set_task_cpu);
@@ -3974,6 +3979,7 @@ static inline void proxy_set_task_cpu(struct task_struct *p, int cpu)
 	 * was previously runnable.
 	 */
 	wake_cpu = p->wake_cpu;
+	__do_migrate_task_rq(p, cpu);
 	__set_task_cpu(p, cpu);
 	p->wake_cpu = wake_cpu;
 }
@@ -3988,6 +3994,10 @@ static void do_activate_blocked_waiter(struct rq *target_rq, struct task_struct 
 		state = READ_ONCE(p->__state);
 		/* Avoid racing with ttwu */
 		if (state == TASK_WAKING)
+			return;
+
+		/* Dead tasks don't activate */
+		if (state == TASK_DEAD || READ_ONCE(p->exit_state))
 			return;
 
 		if (READ_ONCE(p->on_rq)) {
@@ -4119,6 +4129,7 @@ static void activate_blocked_waiters(struct rq *target_rq,
 					     blocked_node);
 			WARN_ON(p == owner);
 			WARN_ON(p->sleeping_owner != owner);
+			get_task_struct(p);
 			__proxy_remove_from_sleeping_owner(owner, p);
 			raw_spin_unlock_irqrestore(&owner->blocked_lock, flags);
 
@@ -4131,6 +4142,7 @@ static void activate_blocked_waiters(struct rq *target_rq,
 				list_add_tail(&p->blocked_activation_node, &bal_head);
 			}
 			raw_spin_unlock_irqrestore(&p->blocked_lock, flags);
+			put_task_struct(p);
 
 			raw_spin_lock_irqsave(&owner->blocked_lock, flags);
 		}
@@ -7416,6 +7428,7 @@ static void proxy_enqueue_on_owner(struct rq *rq, struct task_struct *owner,
 	WARN_ON(!p->on_rq);
 	WARN_ON(p->sleeping_owner);
 	get_task_struct(owner);
+	get_task_struct(p);
 	WRITE_ONCE(p->sleeping_owner, owner);
 	/*
 	 * ttwu_do_activate must not have a chance to activate p
@@ -7452,6 +7465,9 @@ DEFINE_LOCK_GUARD_1(blocked_on_lock, struct blocked_on_lock,
     lock_blocked_on_lock(_T->lock),
     unlock_blocked_on_lock(_T->lock))
 
+
+#define MAX_PROXY_CHAIN_DEPTH 1024
+
 /*
  * Find runnable lock owner to proxy for mutex blocked donor
  *
@@ -7484,10 +7500,14 @@ find_proxy_task(struct rq *rq, struct task_struct *donor, struct rq_flags *rf)
 {
 	struct blocked_on_lock bo, *blocked_on;
 	struct task_struct *owner = NULL;
+	struct task_struct *cycle_checkpoint = donor;
+	unsigned int cycle_power = 1;
+	unsigned int cycle_span = 0;
 	bool curr_in_chain = false;
 	int this_cpu = cpu_of(rq);
 	struct task_struct *p;
 	int owner_cpu;
+	int chain_depth = 0;
 
 	/* Follow blocked_on chain. */
 	for (p = donor; task_is_blocked(p); p = owner) {
@@ -7496,6 +7516,13 @@ find_proxy_task(struct rq *rq, struct task_struct *donor, struct rq_flags *rf)
 		bo = p->blocked_on;
 		raw_spin_unlock(&p->blocked_lock);
 		blocked_on = &bo;
+
+		/* Keep Brent's checkpoint state local to this owner walk. */
+		if (cycle_span == cycle_power) {
+			cycle_checkpoint = p;
+			cycle_power <<= 1;
+			cycle_span = 0;
+		}
 
 		/* Something changed in the chain, so pick again */
 		if (!blocked_on->lock)
@@ -7642,6 +7669,18 @@ find_proxy_task(struct rq *rq, struct task_struct *donor, struct rq_flags *rf)
 			 */
 			return proxy_resched_idle(rq);
 		}
+
+		/*
+		 * Check for cycles, and worst case limit the depth
+		 * we'll proxy to avoid cyclic deadlocks
+		 */
+		cycle_span++;
+		if ((owner == cycle_checkpoint) ||
+		    (++chain_depth > MAX_PROXY_CHAIN_DEPTH)) {
+			__clear_task_blocked_on(p, NULL);
+			goto deactivate;
+		}
+
 		/*
 		 * OK, now we're absolutely sure @owner is on this
 		 * rq, therefore holding @rq->lock is sufficient to

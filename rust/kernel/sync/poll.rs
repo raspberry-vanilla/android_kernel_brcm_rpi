@@ -66,6 +66,11 @@ impl<'a> PollTable<'a> {
         //   of the last waiter.
         unsafe { bindings::poll_wait(file.as_ptr(), cv.wait_queue_head.get(), self.table) }
     }
+
+    /// Wait on the provided queue.
+    pub fn wait(&self, file: &File, wait_queue_head: *mut bindings::wait_queue_head) {
+        unsafe { bindings::poll_wait(file.as_ptr(), wait_queue_head, self.table) }
+    }
 }
 
 /// A wrapper around [`CondVar`] that makes it usable with [`PollTable`].

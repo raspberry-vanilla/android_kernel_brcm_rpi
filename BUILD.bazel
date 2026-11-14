@@ -217,6 +217,7 @@ filegroup(
         "gki/aarch64/symbols/kunit",
         "gki/aarch64/symbols/lenovo",
         "gki/aarch64/symbols/mtk",
+        "gki/aarch64/symbols/nvidia",
         "gki/aarch64/symbols/oplus",
         "gki/aarch64/symbols/pixel",
         "gki/aarch64/symbols/pixel_watch",
@@ -1476,10 +1477,10 @@ cc_library(
     hdrs = glob([
         "tools/lib/bpf/*.h",
     ]),
-    implementation_deps = [":tools_includes"],
     strip_include_prefix = "tools/lib",
     visibility = ["//visibility:public"],
     deps = ["//prebuilts/kernel-build-tools:imported_libs"],
+    implementation_deps = [":tools_includes"],
 )
 
 pahole(
@@ -1961,6 +1962,34 @@ cc_binary_with_abi(
     name = "kselftest_binderfs_binderfs_test",
     srcs = ["tools/testing/selftests/filesystems/binderfs/binderfs_test.c"],
     copts = _KSELFTEST_COPTS,
+    path_prefix = _KSELFTEST_DIR,
+    target_compatible_with = ["@platforms//os:android"],
+    visibility = ["//visibility:private"],
+    deps = [":kselftest_headers_lib"],
+)
+
+cc_binary_with_abi(
+    name = "kselftest_fuse_bpf_test",
+    srcs = [
+        "include/uapi/linux/android_fuse.h",
+        "include/uapi/linux/bpf.h",
+        "include/uapi/linux/bpf_common.h",
+        "include/uapi/linux/fuse.h",
+        "tools/testing/selftests/filesystems/fuse/fuse_bpf_android_test.c",
+    ],
+    copts = _KSELFTEST_COPTS + [
+        "-I",
+        paths.join(
+            package_relative_label(":x").workspace_root,
+            package_relative_label(":x").package,
+            "include/uapi",
+        ),
+    ],
+    defines = ["__EXPORTED_HEADERS__"],
+    includes = [
+        "include/uapi",
+        "tools/testing/selftests",
+    ],
     path_prefix = _KSELFTEST_DIR,
     target_compatible_with = ["@platforms//os:android"],
     visibility = ["//visibility:private"],
@@ -3093,6 +3122,7 @@ pkg_filegroup(
         ":kselftest_breakpoints_breakpoint_test_x86_64",
         ":kselftest_capabilities_test_execve_x86_64",
         ":kselftest_capabilities_validate_cap_x86_64",
+        ":kselftest_fuse_bpf_test_x86_64",
         ":kselftest_futex_futex_requeue_pi_mismatched_ops_x86_64",
         ":kselftest_futex_futex_requeue_pi_signal_restart_x86_64",
         ":kselftest_futex_futex_requeue_pi_x86_64",
@@ -3163,6 +3193,7 @@ pkg_filegroup(
         ":kselftest_breakpoints_breakpoint_test_x86_64",
         ":kselftest_capabilities_test_execve_x86_64",
         ":kselftest_capabilities_validate_cap_x86_64",
+        ":kselftest_fuse_bpf_test_x86_64",
         ":kselftest_futex_futex_requeue_pi_mismatched_ops_x86_64",
         ":kselftest_futex_futex_requeue_pi_signal_restart_x86_64",
         ":kselftest_futex_futex_requeue_pi_x86_64",
@@ -3191,6 +3222,7 @@ pkg_filegroup(
         ":kselftest_breakpoints_breakpoint_test_x86",
         ":kselftest_capabilities_test_execve_x86",
         ":kselftest_capabilities_validate_cap_x86",
+        ":kselftest_fuse_bpf_test_x86",
         ":kselftest_futex_futex_requeue_pi_mismatched_ops_x86",
         ":kselftest_futex_futex_requeue_pi_signal_restart_x86",
         ":kselftest_futex_futex_requeue_pi_x86",
@@ -3259,6 +3291,7 @@ pkg_filegroup(
         ":kselftest_breakpoints_breakpoint_test_x86",
         ":kselftest_capabilities_test_execve_x86",
         ":kselftest_capabilities_validate_cap_x86",
+        ":kselftest_fuse_bpf_test_x86",
         ":kselftest_futex_futex_requeue_pi_mismatched_ops_x86",
         ":kselftest_futex_futex_requeue_pi_signal_restart_x86",
         ":kselftest_futex_futex_requeue_pi_x86",
@@ -3286,6 +3319,7 @@ pkg_filegroup(
         ":kselftest_binderfs_binderfs_test_arm",
         ":kselftest_capabilities_test_execve_arm",
         ":kselftest_capabilities_validate_cap_arm",
+        ":kselftest_fuse_bpf_test_arm",
         ":kselftest_futex_futex_requeue_arm",
         ":kselftest_futex_futex_requeue_pi_arm",
         ":kselftest_futex_futex_requeue_pi_mismatched_ops_arm",
@@ -3348,6 +3382,7 @@ pkg_filegroup(
         # ":kselftest_breakpoints_breakpoint_test_arm", Disabled due to not supported for this architecture
         ":kselftest_capabilities_test_execve_arm",
         ":kselftest_capabilities_validate_cap_arm",
+        ":kselftest_fuse_bpf_test_arm",
         ":kselftest_futex_futex_requeue_arm",
         ":kselftest_futex_futex_requeue_pi_arm",
         ":kselftest_futex_futex_requeue_pi_mismatched_ops_arm",
@@ -3376,6 +3411,7 @@ pkg_filegroup(
         ":kselftest_breakpoints_breakpoint_test_arm64",
         ":kselftest_capabilities_test_execve_arm64",
         ":kselftest_capabilities_validate_cap_arm64",
+        ":kselftest_fuse_bpf_test_arm64",
         ":kselftest_futex_futex_requeue_arm64",
         ":kselftest_futex_futex_requeue_pi_arm64",
         ":kselftest_futex_futex_requeue_pi_mismatched_ops_arm64",
@@ -3440,6 +3476,7 @@ pkg_filegroup(
         ":kselftest_breakpoints_breakpoint_test_arm64",
         ":kselftest_capabilities_test_execve_arm64",
         ":kselftest_capabilities_validate_cap_arm64",
+        ":kselftest_fuse_bpf_test_arm64",
         ":kselftest_futex_futex_requeue_arm64",
         ":kselftest_futex_futex_requeue_pi_arm64",
         ":kselftest_futex_futex_requeue_pi_mismatched_ops_arm64",

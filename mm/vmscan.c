@@ -913,7 +913,10 @@ enum folio_references {
 static inline bool is_exec_file_folio(const struct folio *folio,
 		const vm_flags_t vm_flags)
 {
-	return (vm_flags & VM_EXEC) && folio_is_file_lru(folio);
+	bool is_exec = (vm_flags & VM_EXEC) && folio_is_file_lru(folio);
+
+	trace_android_vh_is_exec_file_folio(folio, vm_flags, &is_exec);
+	return is_exec;
 }
 
 #ifdef CONFIG_LRU_GEN
@@ -2518,6 +2521,7 @@ static void prepare_scan_control(pg_data_t *pgdat, struct scan_control *sc)
 {
 	unsigned long file;
 	struct lruvec *target_lruvec;
+	bool bypass = false;
 
 	if (lru_gen_enabled())
 		return;
@@ -2529,7 +2533,9 @@ static void prepare_scan_control(pg_data_t *pgdat, struct scan_control *sc)
 	 * most accurate stats here. We may switch to regular stats flushing
 	 * in the future once it is cheap enough.
 	 */
-	mem_cgroup_flush_stats_ratelimited(sc->target_mem_cgroup);
+	trace_android_vh_mem_cgroup_flush_stats_bypass(sc->target_mem_cgroup, &bypass);
+	if (!bypass)
+		mem_cgroup_flush_stats_ratelimited(sc->target_mem_cgroup);
 
 	/*
 	 * Determine the scan balance between anon and file LRUs.
@@ -2566,6 +2572,8 @@ static void prepare_scan_control(pg_data_t *pgdat, struct scan_control *sc)
 			sc->may_deactivate |= DEACTIVATE_FILE;
 		else
 			sc->may_deactivate &= ~DEACTIVATE_FILE;
+
+		trace_android_vh_customize_may_deactivate(target_lruvec, sc);
 	} else
 		sc->may_deactivate = DEACTIVATE_ANON | DEACTIVATE_FILE;
 
@@ -4665,6 +4673,7 @@ static bool sort_folio(struct lruvec *lruvec, struct folio *folio, struct scan_c
 		       int tier_idx)
 {
 	bool dirty, writeback;
+	bool protect = false;
 	int gen = folio_lru_gen(folio);
 	int type = folio_is_file_lru(folio);
 	int zone = folio_zonenum(folio);
@@ -4719,6 +4728,13 @@ static bool sort_folio(struct lruvec *lruvec, struct folio *folio, struct scan_c
 	/* waiting for writeback */
 	if (writeback || (type == LRU_GEN_FILE && dirty)) {
 		gen = folio_inc_gen(lruvec, folio, true);
+		list_move(&folio->lru, &lrugen->folios[gen][type][zone]);
+		return true;
+	}
+
+	trace_android_vh_sort_folio_protect(lruvec, folio, tier_idx, &protect);
+	if (protect) {
+		gen = folio_inc_gen(lruvec, folio, false);
 		list_move(&folio->lru, &lrugen->folios[gen][type][zone]);
 		return true;
 	}
@@ -5111,6 +5127,8 @@ static bool should_abort_scan(struct lruvec *lruvec, struct scan_control *sc)
 		struct zone *zone = lruvec_pgdat(lruvec)->node_zones + i;
 		unsigned long size = wmark_pages(zone, mark) + MIN_LRU_BATCH;
 
+		trace_android_vh_mm_get_zone_mark_mglru(zone, &size);
+
 		if (managed_zone(zone) && !zone_watermark_ok(zone, 0, size, sc->reclaim_idx, 0))
 			return false;
 	}
@@ -5252,6 +5270,7 @@ restart:
 		}
 
 		trace_android_vh_should_memcg_bypass(memcg, sc->priority, &bypass);
+		trace_android_vh_should_memcg_bypass_ext(memcg, sc->priority, &bypass, &op);
 		if (bypass)
 			continue;
 
@@ -6074,6 +6093,7 @@ static void shrink_lruvec(struct lruvec *lruvec, struct scan_control *sc)
 	bool bypass = false;
 	bool shrink_bypass = false;
 	bool reclaim_target_exit = false;
+	unsigned int orig_may_deactivate = sc->may_deactivate;
 
 	if (lru_gen_enabled() && !root_reclaim(sc)) {
 		lru_gen_shrink_lruvec(lruvec, sc);
@@ -6081,6 +6101,8 @@ static void shrink_lruvec(struct lruvec *lruvec, struct scan_control *sc)
 	}
 
 	get_scan_count(lruvec, sc, nr);
+
+	trace_android_vh_customize_lruvec_may_deactivate(lruvec, sc);
 
 	/* Record the original scan target for proportional adjustments later */
 	memcpy(targets, nr, sizeof(nr));
@@ -6187,6 +6209,7 @@ static void shrink_lruvec(struct lruvec *lruvec, struct scan_control *sc)
 	}
 
 out:
+	trace_android_vh_restore_may_deactivate(orig_may_deactivate, sc);
 	blk_finish_plug(&plug);
 	sc->nr_reclaimed += nr_reclaimed;
 	trace_android_vh_rebalance_anon_lru_bypass(&bypass);
@@ -6665,6 +6688,8 @@ static void snapshot_refaults(struct mem_cgroup *target_memcg, pg_data_t *pgdat)
 	target_lruvec->refaults[WORKINGSET_ANON] = refaults;
 	refaults = lruvec_page_state(target_lruvec, WORKINGSET_ACTIVATE_FILE);
 	target_lruvec->refaults[WORKINGSET_FILE] = refaults;
+
+	trace_android_vh_snapshot_refaults(target_memcg, pgdat);
 }
 
 /*

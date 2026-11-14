@@ -17,6 +17,7 @@
 #include <hyp/adjust_pc.h>
 
 #include <nvhe/alloc.h>
+#include <nvhe/arm-smccc.h>
 #include <nvhe/errno.h>
 #include <nvhe/ffa.h>
 #include <nvhe/mem_protect.h>
@@ -346,8 +347,11 @@ struct pkvm_hyp_vcpu *pkvm_load_hyp_vcpu(pkvm_handle_t handle,
 	if (!hyp_vcpu)
 		goto unlock;
 
-	/* Ensure vcpu isn't loaded on more than one cpu simultaneously. */
-	if (unlikely(cmpxchg_relaxed(&hyp_vcpu->loaded_hyp_vcpu, NULL,
+	/*
+	 * Ensure vcpu isn't loaded on more than one cpu simultaneously.
+	 * Pairs with smp_store_release() in pkvm_put_hyp_vcpu().
+	 */
+	if (unlikely(cmpxchg_acquire(&hyp_vcpu->loaded_hyp_vcpu, NULL,
 				     this_cpu_ptr(&loaded_hyp_vcpu)))) {
 		hyp_vcpu = NULL;
 		goto unlock;
@@ -995,8 +999,10 @@ int __pkvm_init_vm(struct kvm *host_kvm, unsigned long pgd_hva)
 	}
 
 	pgd_size = kvm_pgtable_stage2_pgd_size(host_mmu.arch.mmu.vtcr);
-	if (!IS_ALIGNED(pgd_hva, pgd_size))
+	if (!IS_ALIGNED(pgd_hva, pgd_size)) {
+		ret = -EINVAL;
 		goto err_free_last_ran;
+	}
 	pgd = map_donated_memory_noclear(pgd_hva, pgd_size);
 	if (!pgd) {
 		ret = -ENOMEMHOSTS2;

@@ -22,6 +22,7 @@
 #include <linux/security.h>
 #include <linux/syscalls.h>
 #include <linux/mmu_notifier.h>
+#include <linux/ptshare.h>
 #include <linux/uaccess.h>
 #include <linux/userfaultfd_k.h>
 #include <linux/mempolicy.h>
@@ -1722,7 +1723,7 @@ static int check_prep_vma(struct vma_remap_struct *vrm)
 		return -EFAULT;
 
 	if (new_len == old_len)
-		return 0;
+		goto unshare;
 
 	/* We are expanding and the VMA is mlock()'d so we need to populate. */
 	if (vma->vm_flags & VM_LOCKED)
@@ -1743,7 +1744,8 @@ static int check_prep_vma(struct vma_remap_struct *vrm)
 	if (!may_expand_vm(mm, vma->vm_flags, vrm->delta >> PAGE_SHIFT))
 		return -ENOMEM;
 
-	return 0;
+unshare:
+	return ptshare_unshare_vma_locked(vma);
 }
 
 /*

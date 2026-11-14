@@ -2,7 +2,7 @@
 
 CFLAGS += -Wall -O2 -g $(KHDR_INCLUDES) -D_FILE_OFFSET_BITS=64 -I../.. -I../../../../.. -I../../../../include
 
-TEST_GEN_PROGS := fusectl_test fuse_test fuse_daemon
+TEST_GEN_PROGS := fusectl_test fuse_test fuse_daemon fuse_bpf_android_test
 TEST_GEN_FILES := \
 	test_bpf.bpf \
 	fd_bpf.bpf \
@@ -35,7 +35,10 @@ $(OUTPUT)/fuse_mnt: CFLAGS += $(VAR_CFLAGS)
 $(OUTPUT)/fuse_mnt: LDLIBS += $(VAR_LDLIBS)
 
 EXTRA_SOURCES := bpf_loader.c
-$(TEST_GEN_PROGS) : $(EXTRA_SOURCES)
+$(filter-out $(OUTPUT)/fuse_bpf_android_test,$(TEST_GEN_PROGS)) : $(EXTRA_SOURCES)
+
+$(OUTPUT)/fuse_bpf_android_test: CFLAGS += -I$(top_srcdir)/include/uapi
+$(OUTPUT)/fuse_bpf_android_test: LDLIBS := -lpthread
 
 $(OUTPUT)/%.ir: %.c
 	clang $(BPF_FLAGS) -c $< -o $@
