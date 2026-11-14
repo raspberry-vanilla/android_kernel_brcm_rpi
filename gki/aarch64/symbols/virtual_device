@@ -879,6 +879,7 @@
   __sw_hweight64
   system_freezable_wq
   tasklet_kill
+  timer_shutdown_sync
   unregister_inet6addr_notifier
   unregister_inetaddr_notifier
 
@@ -948,6 +949,7 @@
   bio_alloc_bioset
   bio_chain
   bio_clone_blkg_association
+  bio_endio
   fs_bio_set
   submit_bio
 
@@ -1399,6 +1401,7 @@
   xsk_uses_need_wakeup
 
 # required by virtio_pmem.ko
+  drain_workqueue
   nvdimm_bus_register
   nvdimm_bus_unregister
   nvdimm_pmem_region_create
