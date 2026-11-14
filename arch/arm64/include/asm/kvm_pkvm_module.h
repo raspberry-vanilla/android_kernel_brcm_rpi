@@ -20,6 +20,11 @@ enum pkvm_psci_notification {
 	PKVM_PSCI_CPU_ENTRY,
 };
 
+enum pkvm_device_context_op {
+	PKVM_DEVICE_CONTEXT_GET,
+	PKVM_DEVICE_CONTEXT_PUT,
+};
+
 struct pkvm_sglist_page {
 	u64	pfn : 40;
 	u8	order;
@@ -247,6 +252,13 @@ enum pkvm_smc_handler_ret {
  *				for pVMs. The @ops.trng_uuid is used to advertise the
  *				identity of TRNG implementation. @ops.trng_rnd64 is used
  *				to generate entropy bits to guest.
+ * @host_device_manage_context:	Manage host context (vm == NULL) for an IOMMU stream
+ *				(@iommu_id, @endpoint_id). If @op is
+ *				PKVM_DEVICE_CONTEXT_GET, queries and acquires context
+ *				(incrementing refcount if owned by host / unassigned,
+ *				returning -EPERM if assigned to a guest VM). If @op is
+ *				PKVM_DEVICE_CONTEXT_PUT, releases context (decrementing
+ *				refcount).
  */
 struct pkvm_module_ops {
 	int (*create_private_mapping)(phys_addr_t phys, size_t size,
@@ -333,7 +345,8 @@ struct pkvm_module_ops {
 	ANDROID_KABI_USE(4, int (*request_hyp_alloc)(void));
 	ANDROID_KABI_USE(5, int (*device_register_power_lock)(u64 phys, void *cookie,
 					     int(*cb)(void *cookie, bool lock)));
-	ANDROID_KABI_RESERVE(6);
+	ANDROID_KABI_USE(6, int (*host_device_manage_context)(u64 iommu_id, u32 endpoint_id,
+							      enum pkvm_device_context_op op));
 	ANDROID_KABI_RESERVE(7);
 	ANDROID_KABI_RESERVE(8);
 	ANDROID_KABI_RESERVE(9);

@@ -356,3 +356,8 @@ type 'struct bindings::bindings_raw::task_dma_buf_info' changed
   member 'struct bindings::bindings_raw::list_head dmabufs' was added
   member 'u32 dmabuf_count' was added
 
+type 'struct pkvm_module_ops' changed
+  member 'u64 __kabi_reserved6' was removed
+  member 'union { int(* host_device_manage_context)(u64, u32, enum pkvm_device_context_op); struct { u64 __kabi_reserved6; }; union { }; }' was added
+
+

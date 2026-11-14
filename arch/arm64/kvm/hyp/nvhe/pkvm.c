@@ -15,6 +15,7 @@
 #include <hyp/adjust_pc.h>
 
 #include <nvhe/alloc.h>
+#include <nvhe/arm-smccc.h>
 #include <nvhe/ffa.h>
 #include <nvhe/mem_protect.h>
 #include <nvhe/memory.h>

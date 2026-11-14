@@ -12,6 +12,7 @@
 #include <nvhe/mem_protect.h>
 #include <nvhe/modules.h>
 #include <nvhe/mm.h>
+#include <nvhe/pkvm.h>
 #include <nvhe/serial.h>
 #include <nvhe/spinlock.h>
 #include <nvhe/trace.h>
@@ -315,6 +316,20 @@ int module_guest_accept_module_owned_share(u64 phys, u64 ipa, u64 size, struct p
 	return -EPERM;
 }
 
+static int module_host_device_manage_context(u64 iommu_id, u32 endpoint_id,
+					     enum pkvm_device_context_op op)
+{
+	switch (op) {
+	case PKVM_DEVICE_CONTEXT_GET:
+		return pkvm_devices_get_context(iommu_id, endpoint_id, NULL);
+	case PKVM_DEVICE_CONTEXT_PUT:
+		pkvm_devices_put_context(iommu_id, endpoint_id);
+		return 0;
+	default:
+		return -EINVAL;
+	}
+}
+
 const struct pkvm_module_ops module_ops = {
 	.create_private_mapping = __pkvm_create_private_mapping,
 	.alloc_module_va = __pkvm_alloc_module_va,
@@ -386,6 +401,7 @@ const struct pkvm_module_ops module_ops = {
 	.request_hyp_alloc = kvm_iommu_request_hyp_alloc,
 	.guest_accept_module_prot_page = __pkvm_accept_module_prot_page,
 	.register_guest_accept_module_owned_handler = __register_guest_accept_module_owned_handler,
+	.host_device_manage_context = module_host_device_manage_context,
 };
 
 static void *pkvm_module_hyp_va(struct pkvm_el2_module *mod, void *kern_va)

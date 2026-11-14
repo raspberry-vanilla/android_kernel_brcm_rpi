@@ -18,6 +18,7 @@
 #include <linux/vmalloc.h>
 #include <linux/sched/xacct.h>
 #include <linux/crc32c.h>
+#include <linux/namei.h>
 
 #include "glob.h"
 #include "oplock.h"
@@ -64,6 +65,30 @@ int ksmbd_vfs_lock_parent(struct dentry *parent, struct dentry *child)
 	return 0;
 }
 
+/*
+ * ANDROID: vfs_path_parent_lookup() keeps its KMI signature (with the
+ * @type argument) on this branch, so do the LAST_NORM check that upstream
+ * commit f2f1dddccae5 ("vfs: make LAST_XXX private to fs/namei.c") moved
+ * into vfs_path_parent_lookup() here instead.
+ */
+static int ksmbd_vfs_path_parent_lookup(struct filename *filename,
+					unsigned int flags,
+					struct path *parent,
+					struct qstr *last,
+					const struct path *root)
+{
+	int type, err;
+
+	err = vfs_path_parent_lookup(filename, flags, parent, last, &type, root);
+	if (err)
+		return err;
+	if (unlikely(type != LAST_NORM)) {
+		path_put(parent);
+		return -EINVAL;
+	}
+	return 0;
+}
+
 static int ksmbd_vfs_path_lookup_locked(struct ksmbd_share_config *share_conf,
 					char *pathname, unsigned int flags,
 					struct path *parent_path,
@@ -86,9 +111,9 @@ static int ksmbd_vfs_path_lookup_locked(struct ksmbd_share_config *share_conf,
 	if (IS_ERR(filename))
 		return PTR_ERR(filename);
 
-	err = vfs_path_parent_lookup(filename, flags,
-				     parent_path, &last,
-				     root_share_path);
+	err = ksmbd_vfs_path_parent_lookup(filename, flags,
+					   parent_path, &last,
+					   root_share_path);
 	if (err) {
 		putname(filename);
 		return err;
@@ -709,8 +734,9 @@ int ksmbd_vfs_rename(struct ksmbd_work *work, const struct path *old_path,
 	to = getname_kernel(newname);
 
 retry:
-	err = vfs_path_parent_lookup(to, lookup_flags | LOOKUP_BENEATH,
-				     &new_path, &new_last, &share_conf->vfs_path);
+	err = ksmbd_vfs_path_parent_lookup(to, lookup_flags | LOOKUP_BENEATH,
+					   &new_path, &new_last,
+					   &share_conf->vfs_path);
 	if (err)
 		goto out1;
 
@@ -1336,8 +1362,8 @@ struct dentry *ksmbd_vfs_kern_path_create(struct ksmbd_work *work,
 	if (IS_ERR(filename))
 		return ERR_CAST(filename);
 
-	err = vfs_path_parent_lookup(filename, flags | LOOKUP_BENEATH,
-				     path, &last, &share_conf->vfs_path);
+	err = ksmbd_vfs_path_parent_lookup(filename, flags | LOOKUP_BENEATH,
+					   path, &last, &share_conf->vfs_path);
 	if (err) {
 		putname(filename);
 		return ERR_PTR(err);

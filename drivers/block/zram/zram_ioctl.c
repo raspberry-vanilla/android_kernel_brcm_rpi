@@ -262,6 +262,7 @@ static int zram_ioctl_process_prefetch(struct zram *zram,
 	struct zram_android_ioc_process_prefetch *ioc_prefetch)
 {
 	struct zram_pp_ctl *pp_ctl = NULL;
+	u64 read_bytes = 0;
 	int ret;
 
 	/* Require CAP_SYS_NICE for influencing process performance. */
@@ -294,11 +295,58 @@ static int zram_ioctl_process_prefetch(struct zram *zram,
 	ret = zram_ioctl_process_scan(zram, ZRAM_ANDROID_IOC_PROCESS_PREFETCH,
 				      ioc_prefetch->pidfd, NULL, pp_ctl);
 	if (!ret)
-		ret = zram_prefetch_slots(zram, pp_ctl);
+		ret = zram_prefetch_slots(zram, pp_ctl, &read_bytes);
+
+	ioc_prefetch->read_bytes = read_bytes;
 
 	release_pp_ctl(zram, pp_ctl);
 clear_pp_in_progress:
 	atomic_set(&zram->pp_in_progress, 0);
+	return ret;
+}
+
+/*
+ * struct zram_android_ioc_process_prefetch is extensible: its user size is
+ * taken from _IOC_SIZE(cmd), so the legacy _IOW cmd and any newer/older
+ * _IOWR cmd share the same handler.
+ */
+static int zram_ioctl_process_prefetch_user(struct zram *zram,
+	unsigned int cmd, void __user *argp)
+{
+	struct zram_android_ioc_process_prefetch kprefetch;
+	size_t usize = _IOC_SIZE(cmd);
+	int ret;
+
+	BUILD_BUG_ON(offsetofend(struct zram_android_ioc_process_prefetch,
+				 pidfd) !=
+		     ZRAM_ANDROID_IOC_PROCESS_PREFETCH_SIZE_VER0);
+	BUILD_BUG_ON(offsetofend(struct zram_android_ioc_process_prefetch,
+				 read_bytes) !=
+		     ZRAM_ANDROID_IOC_PROCESS_PREFETCH_SIZE_VER1);
+	BUILD_BUG_ON(sizeof(kprefetch) !=
+		     ZRAM_ANDROID_IOC_PROCESS_PREFETCH_SIZE_VER1);
+
+	if (!(_IOC_DIR(cmd) & _IOC_WRITE) ||
+	    usize < ZRAM_ANDROID_IOC_PROCESS_PREFETCH_SIZE_VER0)
+		return -ENOTTY;
+
+	ret = copy_struct_from_user(&kprefetch, sizeof(kprefetch), argp,
+				    usize);
+	if (ret)
+		return ret;
+
+	if (kprefetch.flags)
+		return -EINVAL;
+
+	kprefetch.size = sizeof(kprefetch);
+	kprefetch.read_bytes = 0;
+
+	ret = zram_ioctl_process_prefetch(zram, &kprefetch);
+
+	if ((_IOC_DIR(cmd) & _IOC_READ) &&
+	    copy_to_user(argp, &kprefetch, min(usize, sizeof(kprefetch))))
+		ret = -EFAULT;
+
 	return ret;
 }
 
@@ -319,13 +367,9 @@ int zram_ioctl(struct block_device *bdev, blk_mode_t mode,
 
 		if (copy_to_user(argp, &prwb, sizeof(prwb)))
 			ret = -EFAULT;
-	} else if (cmd == ZRAM_ANDROID_IOC_PROCESS_PREFETCH) {
-		struct zram_android_ioc_process_prefetch ioc_prefetch;
-
-		if (copy_from_user(&ioc_prefetch, argp, sizeof(ioc_prefetch)))
-			return -EFAULT;
-
-		ret = zram_ioctl_process_prefetch(zram, &ioc_prefetch);
+	} else if (_IOC_TYPE(cmd) == ZRAM_ANDROID_IOC_MAGIC &&
+		   _IOC_NR(cmd) == _IOC_NR(ZRAM_ANDROID_IOC_PROCESS_PREFETCH)) {
+		ret = zram_ioctl_process_prefetch_user(zram, cmd, argp);
 	} else if (cmd == ZRAM_ANDROID_IOC_PROCESS_WRITEBACK) {
 		/* Legacy: map to unlimited process_range_writeback */
 		struct zram_android_ioc_data ioc_data;

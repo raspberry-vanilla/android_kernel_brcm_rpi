@@ -10,3 +10,4 @@ obj-$(CONFIG_ANDROID_WRAPFD_LEGACY)	+= wrapfd.o
 obj-$(CONFIG_GUEST_DMA_PROXY)		+= guest_dma_proxy.o
 obj-y += binder/
 obj-$(CONFIG_ANDROID_WRAPFD) += wrapfd/
+obj-$(CONFIG_ANDROID_WRAPFD_KUNIT_TEST)	+= tests/

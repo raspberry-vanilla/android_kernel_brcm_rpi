@@ -13,17 +13,22 @@
 #include <linux/fdtable.h>
 #include <linux/file.h>
 #include <linux/fs.h>
+#include <linux/iosys-map.h>
 #include <linux/miscdevice.h>
 #include <linux/mm.h>
 #include <linux/mman.h>
 #include <linux/pagemap.h>
+#include <linux/poll.h>
 #include <linux/scatterlist.h>
 #include <linux/seq_file.h>
+#include <linux/slab.h>
 #include <linux/spinlock.h>
 #include <linux/uaccess.h>
 #include <linux/uio.h>
+#include <linux/wait.h>
 #include <linux/wrapfd.h>
 #include <uapi/linux/wrapfd.h>
+#include "wrapfd_internal.h"
 
 /* 1 buffer for the start, and at most 2 at the end. */
 #define MAX_NR_BOUNCE_BUFS 3
@@ -35,8 +40,15 @@ struct wrap_ctx;
 struct wrap_content;
 static const struct file_operations wrap_fops;
 
+struct content_attribs {
+	bool writable;
+	loff_t size;
+};
+
 struct wrap_content_operations {
-	int (*create_wrap)(struct wrap_content *content, struct wrap_ctx *ctx);
+	void (*get_content_attribs)(struct wrap_content *content,
+				    struct content_attribs *attrs);
+	int (*clear)(struct wrap_content *content);
 	int (*load)(struct wrap_content *content, struct file *file,
 		    loff_t file_offs, loff_t buf_offs, loff_t len);
 	loff_t (*llseek)(struct wrap_content *content, loff_t offs, int whence);
@@ -60,6 +72,7 @@ struct wrap_content_operations {
 struct wrap_content {
 	struct wrap_content_operations *ops;
 	bool close_on_exec;
+	struct list_head listeners;
 };
 
 /* dmabuf content */
@@ -130,36 +143,45 @@ module_param_cb(max_nr_load_reqs, &nonzero_param_ops, &max_nr_load_reqs, 0644);
 static unsigned long min_bytes_per_req = SZ_1M;
 module_param_cb(min_bytes_per_req, &nonzero_param_ops, &min_bytes_per_req, 0644);
 
-static int dmabuf_content_create_wrap(struct wrap_content *content,
-				      struct wrap_ctx *ctx)
+static void dmabuf_get_content_attribs(struct wrap_content *content,
+				       struct content_attribs *attrs)
 {
 	struct wrap_content_dmabuf *dmabuf_content;
-	struct file *file;
-	int fd;
 
 	dmabuf_content = container_of(content, struct wrap_content_dmabuf,
 				      content);
+	attrs->writable = dmabuf_content->writable;
+	attrs->size = dmabuf_content->dmabuf->size;
+}
 
-	fd = get_unused_fd_flags(0);
-	if (fd < 0)
-		return fd;
+static int dmabuf_content_clear(struct wrap_content *content)
+{
+	struct wrap_content_dmabuf *dmabuf_content;
+	struct iosys_map map;
+	struct dma_buf *dmabuf;
+	int ret;
 
-	file = anon_inode_create_getfile("[wrapfd]", &wrap_fops, ctx,
-					 dmabuf_content->writable ? O_RDWR : O_RDONLY, NULL);
-	if (IS_ERR(file)) {
-		put_unused_fd(fd);
-		return PTR_ERR(file);
-	}
+	dmabuf_content = container_of(content, struct wrap_content_dmabuf,
+				      content);
+	dmabuf = dmabuf_content->dmabuf;
+	ret = dma_buf_begin_cpu_access(dmabuf, DMA_BIDIRECTIONAL);
+	if (ret)
+		return ret;
 
-	/*
-	 * Anonymous inodes are created with size == 0. To ensure that calls
-	 * like fstat() work as expected, copy the size from the buffer we are
-	 * wrapping.
-	 */
-	i_size_write(file_inode(file), dmabuf_content->dmabuf->size);
-	fd_install(fd, file);
+	ret = dma_buf_vmap_unlocked(dmabuf, &map);
+	if (ret)
+		goto err_end_cpu;
 
-	return fd;
+	if (!map.is_iomem)
+		iosys_map_memset(&map, 0, 0, dmabuf->size);
+	else
+		ret = -EINVAL;
+
+	dma_buf_vunmap_unlocked(dmabuf, &map);
+err_end_cpu:
+	dma_buf_end_cpu_access(dmabuf, DMA_BIDIRECTIONAL);
+
+	return ret;
 }
 
 static size_t dio_aligned_len(loff_t file_offs, size_t len)
@@ -722,7 +744,8 @@ static int dmabuf_content_ioctl(struct wrap_content *content,
 }
 
 static struct wrap_content_operations dmabuf_content_ops = {
-	.create_wrap		= dmabuf_content_create_wrap,
+	.get_content_attribs	= dmabuf_get_content_attribs,
+	.clear			= dmabuf_content_clear,
 	.load			= dmabuf_content_load,
 	.llseek			= dmabuf_content_llseek,
 	.mmap			= dmabuf_content_mmap,
@@ -773,7 +796,95 @@ struct wrap_ctx {
 	unsigned long map_count;
 	unsigned long use_count;
 	bool unusable;
+	struct mutex listeners_lock;
+	struct list_head event_list;
 };
+
+struct wrapfd_content_listener {
+	const struct wrapfd_listener_operations *ops;
+	void *param;
+	struct list_head list;
+};
+
+struct file_monitor {
+	struct wait_queue_head wait_queue;
+	atomic_t events_pending;
+	struct list_head event_list;
+	spinlock_t event_lock; /* protects event_list */
+};
+
+struct wrap_event_info {
+	/* Links to file and wrap_ctx */
+	struct file_monitor *file_mon;
+	struct wrap_ctx *ctx;
+	/* Nodes in wrap_ctx.event_list and file_monitor.event_list */
+	struct list_head file_list;
+	struct list_head ctx_list;
+	/* Event attributes and states */
+	unsigned int monitored;
+	unsigned int triggered;
+	__u64 timestamp;
+	__u32 fd;
+};
+
+static struct wrap_event_info *
+find_wrap_event_info(struct file_monitor *file_mon, struct wrap_ctx *ctx)
+{
+	struct wrap_event_info *event_info;
+
+	assert_spin_locked(&ctx->lock);
+	assert_spin_locked(&file_mon->event_lock);
+	list_for_each_entry(event_info, &ctx->event_list, ctx_list) {
+		if (file_mon == event_info->file_mon)
+			return event_info;
+	}
+
+	return NULL;
+}
+
+static void
+init_wrap_event_info(struct wrap_event_info *event_info,
+		     struct file_monitor *file_mon, struct wrap_ctx *ctx, __u32 fd)
+{
+	assert_spin_locked(&ctx->lock);
+	assert_spin_locked(&file_mon->event_lock);
+	event_info->file_mon = file_mon;
+	event_info->ctx = ctx;
+	event_info->fd = fd;
+	list_add(&event_info->file_list, &file_mon->event_list);
+	list_add(&event_info->ctx_list, &ctx->event_list);
+}
+
+static void free_wrap_event_info(struct wrap_event_info *event_info)
+{
+	assert_spin_locked(&event_info->ctx->lock);
+	assert_spin_locked(&event_info->file_mon->event_lock);
+
+	list_del(&event_info->file_list);
+	list_del(&event_info->ctx_list);
+	kfree(event_info);
+}
+
+static void generate_event(struct wrap_ctx *ctx, unsigned long event)
+{
+	struct wrap_event_info *event_info;
+
+	assert_spin_locked(&ctx->lock);
+	list_for_each_entry(event_info, &ctx->event_list, ctx_list) {
+		struct file_monitor *file_mon = event_info->file_mon;
+
+		if (!(event_info->monitored & event))
+			continue;
+
+		/* Generate the event */
+		spin_lock(&file_mon->event_lock);
+		event_info->triggered |= event;
+		event_info->timestamp = ktime_get_ns();
+		if (atomic_cmpxchg(&file_mon->events_pending, 0, 1) == 0)
+			wake_up_interruptible(&file_mon->wait_queue);
+		spin_unlock(&file_mon->event_lock);
+	}
+}
 
 static struct wrap_ctx *create_wrap_ctx(void)
 {
@@ -784,6 +895,8 @@ static struct wrap_ctx *create_wrap_ctx(void)
 		return NULL;
 
 	spin_lock_init(&ctx->lock);
+	mutex_init(&ctx->listeners_lock);
+	INIT_LIST_HEAD(&ctx->event_list);
 
 	return ctx;
 }
@@ -793,6 +906,8 @@ static inline void reset_owner(struct wrap_ctx *ctx)
 	assert_spin_locked(&ctx->lock);
 	put_task_struct(ctx->owner.task);
 	ctx->owner.task = NULL;
+	ctx->allow_guests = false;
+	generate_event(ctx, WRAPFD_EVENT_UNOWN);
 }
 
 static inline struct task_struct *get_valid_owner(struct wrap_ctx *ctx)
@@ -829,18 +944,67 @@ static inline bool is_owner_dev(struct wrap_ctx *ctx,
 	return ctx->owner.dev == dev;
 }
 
+static void notify_content_release(struct wrap_ctx *ctx,
+				   struct wrap_content *content)
+{
+	struct wrapfd_content_listener *listener;
+	struct wrapfd_content_listener *tmp;
+
+	mutex_lock(&ctx->listeners_lock);
+	list_for_each_entry_safe(listener, tmp, &content->listeners, list) {
+		listener->ops->on_content_release(listener->param);
+		list_del(&listener->list);
+		kfree(listener);
+	}
+	INIT_LIST_HEAD(&content->listeners);
+	mutex_unlock(&ctx->listeners_lock);
+}
+
 static inline int publish_wrap(struct wrap_ctx *ctx,
+			       struct wrap_content *old_content,
 			       struct wrap_content *content)
 {
-	int ret;
+	struct content_attribs attrs;
+	struct file *file;
+	int err;
+	int fd;
 
+	content->ops->get_content_attribs(content, &attrs);
+	fd = get_unused_fd_flags(0);
+	if (fd < 0)
+		return fd;
+
+	file = anon_inode_create_getfile("[wrapfd]", &wrap_fops, ctx,
+					 attrs.writable ? O_RDWR : O_RDONLY, NULL);
+	if (IS_ERR(file)) {
+		err = PTR_ERR(file);
+		goto put_fd;
+	}
+
+	if (old_content == content) {
+		notify_content_release(ctx, old_content);
+		err = old_content->ops->clear(old_content);
+		if (err)
+			goto put_file;
+	}
+
+	/*
+	 * Anonymous inodes are created with size == 0. To ensure that calls
+	 * like fstat() work as expected, copy the size from the buffer we are
+	 * wrapping.
+	 */
+	i_size_write(file_inode(file), attrs.size);
 	ctx->content = content;
-	ret = content->ops->create_wrap(content, ctx);
+	fd_install(fd, file);
 	/* Set FD_CLOEXEC flag for wrapfd the same as its content */
-	if (ret >= 0)
-		set_close_on_exec(ret, content->close_on_exec ? 1 : 0);
+	set_close_on_exec(fd, content->close_on_exec ? 1 : 0);
 
-	return ret;
+	return fd;
+put_file:
+	fput(file);
+put_fd:
+	put_unused_fd(fd);
+	return err;
 }
 
 static bool context_use(struct wrap_ctx *ctx)
@@ -861,10 +1025,11 @@ static void context_unuse(struct wrap_ctx *ctx)
 }
 
 static int can_modify(struct wrap_ctx *ctx, struct task_struct *task,
-		      bool check_content)
+		      struct device *dev, bool check_content)
 {
 	assert_spin_locked(&ctx->lock);
-	if (!is_owner_task(ctx, task))
+	if (!is_owner_task(ctx, task) &&
+	    !(dev && is_owner_dev(ctx, dev)))
 		return -EBUSY;
 
 	if (ctx->map_count > 0 || ctx->use_count > 0)
@@ -876,12 +1041,12 @@ static int can_modify(struct wrap_ctx *ctx, struct task_struct *task,
 	return 0;
 }
 
-static int block_usage(struct wrap_ctx *ctx)
+static int block_usage(struct wrap_ctx *ctx, struct device *dev)
 {
 	int ret;
 
 	assert_spin_locked(&ctx->lock);
-	ret = can_modify(ctx, current, true);
+	ret = can_modify(ctx, current, dev, true);
 	if (ret)
 		return ret;
 
@@ -918,6 +1083,7 @@ static void wrap_vm_open(struct vm_area_struct *vma)
 	spin_lock(&mapping->ctx->lock);
 	mapping->ctx->map_count++;
 	refcount_inc(&mapping->refcnt);
+	generate_event(mapping->ctx, WRAPFD_EVENT_MAP);
 	spin_unlock(&mapping->ctx->lock);
 }
 
@@ -942,6 +1108,7 @@ static void wrap_vm_close(struct vm_area_struct *vma)
 			file = mapping->file;
 		kfree(mapping);
 	}
+	generate_event(ctx, WRAPFD_EVENT_UNMAP);
 	spin_unlock(&ctx->lock);
 	if (file)
 		fput(file);
@@ -1032,6 +1199,7 @@ unlock:
 		}
 		vm_flags_clear(vma, VM_MAYWRITE);
 	}
+	vm_flags_set(vma, VM_DONTCOPY);
 
 	spin_lock(&ctx->lock);
 	mapping->content_vm_ops = vma->vm_ops;
@@ -1050,6 +1218,7 @@ unlock:
 	 */
 	if (vma->vm_file != file)
 		mapping->file = get_file(file);
+	generate_event(ctx, WRAPFD_EVENT_MAP);
 	spin_unlock(&ctx->lock);
 
 	return 0;
@@ -1070,12 +1239,9 @@ static loff_t wrap_llseek(struct file *file, loff_t offs, int whence)
 	loff_t ret = 0;
 
 	spin_lock(&ctx->lock);
-	/*
-	 * If usage is blocked, the content is being rewrapped or emptied.
-	 * Treat this as if the wrap is already empty.
-	 */
-	if (!context_use(ctx)) {
-		ret = -ENOENT;
+	if (!ctx->allow_guests && has_owner(ctx) &&
+	    !is_owner_task(ctx, current)) {
+		ret = -EBUSY;
 		goto unlock;
 	}
 
@@ -1089,6 +1255,13 @@ static loff_t wrap_llseek(struct file *file, loff_t offs, int whence)
 		ret = -ESPIPE;
 		goto unlock;
 	}
+
+	/*
+	 * If usage is blocked, the content is being rewrapped or emptied.
+	 * Treat this as if the wrap is already empty.
+	 */
+	if (!context_use(ctx))
+		ret = -ENOENT;
 unlock:
 	spin_unlock(&ctx->lock);
 
@@ -1107,9 +1280,24 @@ unlock:
 static int wrap_release(struct inode *ignored, struct file *file)
 {
 	struct wrap_ctx *ctx = file->private_data;
+	struct wrap_event_info *event_info, *tmp;
 
-	if (ctx->content)
+	if (ctx->content) {
+		notify_content_release(ctx, ctx->content);
 		ctx->content->ops->free(ctx->content);
+	}
+
+	spin_lock(&ctx->lock);
+	list_for_each_entry_safe(event_info, tmp, &ctx->event_list, ctx_list) {
+		struct file_monitor *file_mon = event_info->file_mon;
+
+		spin_lock(&file_mon->event_lock);
+		free_wrap_event_info(event_info);
+		spin_unlock(&file_mon->event_lock);
+	}
+	spin_unlock(&ctx->lock);
+
+	mutex_destroy(&ctx->listeners_lock);
 	kfree(ctx);
 
 	return 0;
@@ -1175,6 +1363,7 @@ static int wrap_file_acquire_ownership(struct wrap_ctx *ctx)
 	}
 
 	ctx->owner.task = get_task_struct(current->group_leader);
+	generate_event(ctx, WRAPFD_EVENT_OWN);
 unlock:
 	spin_unlock(&ctx->lock);
 
@@ -1186,13 +1375,11 @@ static int wrap_file_release_ownership(struct wrap_ctx *ctx)
 	int ret = 0;
 
 	spin_lock(&ctx->lock);
-
-	ret = can_modify(ctx, current, false);
-	if (ret)
+	if (!is_owner_task(ctx, current)) {
+		ret = -EBUSY;
 		goto unlock;
-
+	}
 	reset_owner(ctx);
-	ctx->allow_guests = false;
 unlock:
 	spin_unlock(&ctx->lock);
 
@@ -1260,7 +1447,13 @@ static int wrap_file_load(struct wrap_ctx *ctx,
 	}
 
 	spin_lock(&ctx->lock);
-	ret = context_use(ctx) ? 0 : -ENOENT;
+	if (!ctx->allow_guests && has_owner(ctx) &&
+	    !is_owner_task(ctx, current))
+		ret = -EBUSY;
+	else
+		ret = context_use(ctx) ? 0 : -ENOENT;
+	if (!ret)
+		generate_event(ctx, WRAPFD_EVENT_LOAD);
 	spin_unlock(&ctx->lock);
 
 	if (ret)
@@ -1281,6 +1474,7 @@ static int wrap_file_load(struct wrap_ctx *ctx,
 put_ctx:
 	spin_lock(&ctx->lock);
 	context_unuse(ctx);
+	generate_event(ctx, WRAPFD_EVENT_LOAD_DONE);
 	spin_unlock(&ctx->lock);
 put_file:
 	fput(file);
@@ -1308,7 +1502,7 @@ static int wrap_file_rewrap(struct wrap_ctx *ctx,
 		return -EINVAL;
 
 	spin_lock(&ctx->lock);
-	ret = block_usage(ctx);
+	ret = block_usage(ctx, NULL);
 	if (!ret) {
 		content = ctx->content;
 		ctx->content = NULL;
@@ -1332,7 +1526,7 @@ static int wrap_file_rewrap(struct wrap_ctx *ctx,
 		goto free_new_content;
 	}
 
-	ret = publish_wrap(new_ctx, new_content);
+	ret = publish_wrap(new_ctx, content, new_content);
 	if (ret < 0)
 		goto free_new_ctx;
 
@@ -1363,14 +1557,14 @@ out:
 	return ret;
 }
 
-static int wrap_file_empty(struct wrap_ctx *ctx)
+static int wrap_file_empty(struct wrap_ctx *ctx, struct device *dev)
 {
 	struct wrap_content *content;
 	int ret = 0;
 
 	spin_lock(&ctx->lock);
 
-	ret = block_usage(ctx);
+	ret = block_usage(ctx, dev);
 	if (ret)
 		goto unlock;
 
@@ -1380,8 +1574,10 @@ static int wrap_file_empty(struct wrap_ctx *ctx)
 unlock:
 	spin_unlock(&ctx->lock);
 
-	if (!ret)
+	if (!ret) {
+		notify_content_release(ctx, content);
 		content->ops->free(content);
+	}
 
 	return ret;
 }
@@ -1392,13 +1588,113 @@ static int wrap_file_allow_guests(struct wrap_ctx *ctx, bool allow)
 
 	spin_lock(&ctx->lock);
 
-	ret = can_modify(ctx, current, true);
+	ret = can_modify(ctx, current, NULL, true);
 	if (ret)
 		goto unlock;
 
 	ctx->allow_guests = allow;
 unlock:
 	spin_unlock(&ctx->lock);
+
+	return ret;
+}
+
+static struct wrap_content *create_content_for(int fd, unsigned long prot)
+{
+	bool is_file_writable, writable;
+	struct wrap_content *content;
+	struct dma_buf *dmabuf;
+
+	dmabuf = dma_buf_get(fd);
+	if (IS_ERR(dmabuf))
+		return ERR_PTR(PTR_ERR(dmabuf));
+
+	writable = !!(prot & PROT_WRITE);
+	is_file_writable = !!(dmabuf->file->f_mode & FMODE_WRITE);
+	if (writable && !is_file_writable)
+		content = ERR_PTR(-EACCES);
+	else
+		content = alloc_dmabuf_content(dmabuf, writable);
+	dma_buf_put(dmabuf);
+
+	return content;
+}
+
+static int wrap_file_repopulate(struct wrapfd_repopulate *wrapfd_repopulate)
+{
+	struct wrap_content *content;
+	struct content_attribs attrs;
+	struct wrap_ctx *ctx;
+	struct file *file;
+	struct fd f;
+	__u32 prot = 0;
+	int ret = 0;
+
+	if (wrapfd_repopulate->wrapfd > INT_MAX)
+		return -EBADF;
+
+	f = fdget(wrapfd_repopulate->wrapfd);
+	file = fd_file(f);
+	if (!file || file->f_op != &wrap_fops) {
+		ret = -EBADF;
+		goto put_file;
+	}
+
+	if (file->f_mode & FMODE_READ)
+		prot |= PROT_READ;
+	if (file->f_mode & FMODE_WRITE)
+		prot |= PROT_WRITE;
+	if (!prot) {
+		ret = -EINVAL;
+		goto put_file;
+	}
+
+	ctx = file->private_data;
+	spin_lock(&ctx->lock);
+
+	if (has_owner(ctx) && !is_owner_task(ctx, current)) {
+		ret = -EBUSY;
+		goto unlock;
+	}
+
+	if (ctx->content || ctx->map_count > 0 || ctx->use_count > 0) {
+		ret = -EINVAL;
+		goto unlock;
+	}
+
+	/* Concurrent repopulate request should retry. */
+	if (ctx->unusable) {
+		ret = -EAGAIN;
+		goto unlock;
+	}
+
+	ctx->unusable = true;
+unlock:
+	spin_unlock(&ctx->lock);
+	if (ret)
+		goto put_file;
+
+	content = create_content_for(wrapfd_repopulate->fd, prot);
+	if (IS_ERR(content)) {
+		ret = PTR_ERR(content);
+		goto unblock;
+	}
+
+	INIT_LIST_HEAD(&content->listeners);
+	content->close_on_exec = get_close_on_exec(wrapfd_repopulate->fd);
+	content->ops->get_content_attribs(content, &attrs);
+	set_close_on_exec(wrapfd_repopulate->wrapfd,
+			  content->close_on_exec ? 1 : 0);
+unblock:
+	spin_lock(&ctx->lock);
+	if (!ret) {
+		i_size_write(file_inode(file), attrs.size);
+		ctx->content = content;
+	}
+	unblock_usage(ctx);
+	spin_unlock(&ctx->lock);
+put_file:
+	fdput(f);
 
 	return ret;
 }
@@ -1474,7 +1770,7 @@ static long wrap_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 				       (struct wrapfd_rewrap __user *)arg);
 		break;
 	case WRAPFD_DEV_IOC_EMPTY:
-		ret = wrap_file_empty(ctx);
+		ret = wrap_file_empty(ctx, NULL);
 		break;
 	case WRAPFD_DEV_IOC_ALLOW_GUESTS:
 		ret = wrap_file_allow_guests(ctx, true);
@@ -1545,17 +1841,101 @@ int wrapfd_get_mappable(struct file *file, struct device *dev,
 	struct wrap_ctx *ctx;
 	int ret;
 
-	if (WARN_ON(!dev))
+	if (!dev)
 		return -ENODEV;
 
-	if (file->f_op != &wrap_fops)
+	if (!file || file->f_op != &wrap_fops)
+		return -EBADF;
+
+	if (!mappable)
+		return -EINVAL;
+
+	ctx = file->private_data;
+
+	spin_lock(&ctx->lock);
+
+	if (has_owner(ctx) && !is_owner_dev(ctx, dev) &&
+	    !is_owner_task(ctx, current)) {
+		ret = -EBUSY;
+		goto unlock;
+	}
+
+	if (!ctx->content) {
+		ret = -ENOENT;
+		goto unlock;
+	}
+
+	/*
+	 * If usage is blocked, the content is being rewrapped or emptied.
+	 * Treat this as if the wrap is already empty.
+	 */
+	if (!context_use(ctx)) {
+		ret = -ENOENT;
+		goto unlock;
+	}
+
+	ret = ctx->content->ops->get_mappable(ctx->content, dev, mappable);
+	if (!ret) {
+		ctx->map_count++;
+		generate_event(ctx, WRAPFD_EVENT_MAP);
+	}
+
+	context_unuse(ctx);
+unlock:
+	spin_unlock(&ctx->lock);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(wrapfd_get_mappable);
+
+int wrapfd_put_mappable(struct file *file, struct device *dev,
+			union wrapfd_mappable *mappable)
+{
+	struct wrap_ctx *ctx;
+
+	if (!dev)
+		return -ENODEV;
+
+	if (!file || file->f_op != &wrap_fops)
+		return -EBADF;
+
+	if (!mappable)
+		return -EINVAL;
+
+	ctx = file->private_data;
+
+	spin_lock(&ctx->lock);
+
+	if (ctx->content->ops->put_mappable)
+		ctx->content->ops->put_mappable(ctx->content, mappable);
+
+	if (!WARN_ON(ctx->map_count <= 0))
+		ctx->map_count--;
+	generate_event(ctx, WRAPFD_EVENT_UNMAP);
+	spin_unlock(&ctx->lock);
+
+	return 0;
+}
+EXPORT_SYMBOL_GPL(wrapfd_put_mappable);
+
+int wrapfd_acquire_ownership(struct file *file, struct device *dev)
+{
+	struct wrap_ctx *ctx;
+	int ret;
+
+	if (!dev)
+		return -ENODEV;
+
+	if (!file || file->f_op != &wrap_fops)
 		return -EBADF;
 
 	ctx = file->private_data;
 
 	spin_lock(&ctx->lock);
 
-	if (has_owner(ctx) && !is_owner_dev(ctx, dev)) {
+	if (has_owner(ctx)) {
+		if (is_owner_dev(ctx, dev))
+			goto already_owned;
 		ret = -EBUSY;
 		goto unlock;
 	}
@@ -1571,35 +1951,25 @@ int wrapfd_get_mappable(struct file *file, struct device *dev,
 	}
 
 	ctx->owner.dev = dev;
-	/* Device is the owner, context can't change from under us. */
+	generate_event(ctx, WRAPFD_EVENT_OWN);
+already_owned:
 	ret = 0;
 unlock:
 	spin_unlock(&ctx->lock);
 
-	if (!ret) {
-		ret = ctx->content->ops->get_mappable(ctx->content, dev,
-						      mappable);
-		if (ret) {
-			spin_lock(&ctx->lock);
-			ctx->owner.dev = NULL;
-			spin_unlock(&ctx->lock);
-		}
-	}
-
 	return ret;
 }
-EXPORT_SYMBOL_GPL(wrapfd_get_mappable);
+EXPORT_SYMBOL_GPL(wrapfd_acquire_ownership);
 
-int wrapfd_put_mappable(struct file *file, struct device *dev,
-			union wrapfd_mappable *mappable)
+int wrapfd_release_ownership(struct file *file, struct device *dev)
 {
 	struct wrap_ctx *ctx;
 	int ret;
 
-	if (WARN_ON(!dev))
+	if (!dev)
 		return -ENODEV;
 
-	if (file->f_op != &wrap_fops)
+	if (!file || file->f_op != &wrap_fops)
 		return -EBADF;
 
 	ctx = file->private_data;
@@ -1611,17 +1981,113 @@ int wrapfd_put_mappable(struct file *file, struct device *dev,
 		goto unlock;
 	}
 
+	if (ctx->map_count > 0 || ctx->use_count > 0) {
+		ret = -EINVAL;
+		goto unlock;
+	}
+
 	ctx->owner.dev = NULL;
+	generate_event(ctx, WRAPFD_EVENT_UNOWN);
 	ret = 0;
 unlock:
 	spin_unlock(&ctx->lock);
 
-	if (!ret && ctx->content->ops->put_mappable)
-		ctx->content->ops->put_mappable(ctx->content, mappable);
+	return ret;
+}
+EXPORT_SYMBOL_GPL(wrapfd_release_ownership);
+
+int wrapfd_add_listener(struct file *file, struct device *dev,
+			const struct wrapfd_listener_operations *ops,
+			void *param, void **handlep)
+{
+	struct wrapfd_content_listener *listener;
+	struct wrap_ctx *ctx;
+	int ret;
+
+	if (WARN_ON(!dev))
+		return -ENODEV;
+
+	if (!file || file->f_op != &wrap_fops)
+		return -EBADF;
+
+	if (!ops || !ops->on_content_release || !handlep)
+		return -EINVAL;
+
+	ctx = file->private_data;
+
+	listener = kmalloc_obj(*listener);
+	if (!listener)
+		return -ENOMEM;
+
+	listener->ops = ops;
+	listener->param = param;
+
+	mutex_lock(&ctx->listeners_lock);
+	spin_lock(&ctx->lock);
+
+	if (!is_owner_dev(ctx, dev)) {
+		ret = -EBUSY;
+		goto unlock;
+	}
+
+	if (!ctx->content) {
+		ret = -ENOENT;
+		goto unlock;
+	}
+
+	*handlep = listener;
+	ret = 0;
+unlock:
+	if (!ret)
+		list_add(&listener->list, &ctx->content->listeners);
+	else
+		kfree(listener);
+	spin_unlock(&ctx->lock);
+	mutex_unlock(&ctx->listeners_lock);
 
 	return ret;
 }
-EXPORT_SYMBOL_GPL(wrapfd_put_mappable);
+EXPORT_SYMBOL_GPL(wrapfd_add_listener);
+
+int wrapfd_del_listener(struct file *file, void *handle)
+{
+	struct wrapfd_content_listener *listener;
+	struct wrap_ctx *ctx;
+	int ret = -EINVAL;
+
+	if (!handle)
+		return -EINVAL;
+
+	if (!file || file->f_op != &wrap_fops)
+		return -EBADF;
+
+	ctx = file->private_data;
+
+	mutex_lock(&ctx->listeners_lock);
+	spin_lock(&ctx->lock);
+
+	if (!ctx->content)
+		goto unlock;
+
+	/*
+	 * We could use handle directly as a listener but let's make sure
+	 * it actually points to a valid listener.
+	 */
+	list_for_each_entry(listener, &ctx->content->listeners, list) {
+		if (listener == handle) {
+			list_del(&listener->list);
+			kfree(listener);
+			ret = 0;
+			break;
+		}
+	}
+unlock:
+	spin_unlock(&ctx->lock);
+	mutex_unlock(&ctx->listeners_lock);
+
+	return ret;
+}
+EXPORT_SYMBOL_GPL(wrapfd_del_listener);
 
 static const struct file_operations wrap_fops = {
 	.owner		= THIS_MODULE,
@@ -1635,50 +2101,21 @@ static const struct file_operations wrap_fops = {
 #endif
 };
 
-static struct wrap_content *create_content_for(int fd, unsigned long prot)
+static int wrap_file(struct wrap_ctx *ctx, __u32 fd, __u32 prot)
 {
-	bool is_file_writable, writable;
-	struct wrap_content *content;
-	struct dma_buf *dmabuf;
-
-	dmabuf = dma_buf_get(fd);
-	if (IS_ERR(dmabuf))
-		return ERR_PTR(PTR_ERR(dmabuf));
-
-	writable = !!(prot & PROT_WRITE);
-	is_file_writable = !!(dmabuf->file->f_mode & FMODE_WRITE);
-	if (writable && !is_file_writable)
-		content = ERR_PTR(-EACCES);
-	else
-		content = alloc_dmabuf_content(dmabuf, writable);
-	dma_buf_put(dmabuf);
-
-	return content;
-}
-
-static int wrap_file(struct wrap_ctx *ctx,
-		     struct wrapfd_wrap __user *user_wrapfd_wrap)
-{
-	struct wrapfd_wrap wrapfd_wrap;
 	struct wrap_content *content;
 	int wrapfd;
 
-	if (copy_from_user(&wrapfd_wrap, user_wrapfd_wrap,
-			   sizeof(wrapfd_wrap)))
-		return -EFAULT;
-
-	if (wrapfd_wrap.prot & ~(PROT_WRITE | PROT_READ))
+	if (prot & ~(PROT_WRITE | PROT_READ))
 		return -EINVAL;
 
-	if (wrapfd_wrap.reserved)
-		return -EINVAL;
-
-	content = create_content_for(wrapfd_wrap.fd, wrapfd_wrap.prot);
+	content = create_content_for(fd, prot);
 	if (IS_ERR(content))
 		return PTR_ERR(content);
 
-	content->close_on_exec = get_close_on_exec(wrapfd_wrap.fd);
-	wrapfd = publish_wrap(ctx, content);
+	content->close_on_exec = get_close_on_exec(fd);
+	INIT_LIST_HEAD(&content->listeners);
+	wrapfd = publish_wrap(ctx, NULL, content);
 	if (wrapfd < 0) {
 		ctx->content = NULL;
 		content->ops->free(content);
@@ -1687,24 +2124,306 @@ static int wrap_file(struct wrap_ctx *ctx,
 	return wrapfd;
 }
 
+static int __create_wrapfd(int fd, int prot)
+{
+	struct wrap_ctx *ctx;
+	int ret;
+
+	ctx = create_wrap_ctx();
+	if (!ctx)
+		return -ENOMEM;
+
+	ret = wrap_file(ctx, fd, prot);
+	if (ret < 0)
+		kfree(ctx);
+
+	return ret;
+}
+
+static long process_monitors(struct file_monitor *file_mon,
+			     struct wrapfd_monitors *monitors, bool add)
+{
+	struct wrap_event_info *tmp = NULL;
+	struct wrapfd_monitor *arr;
+	__u64 *results;
+	long ret = 0;
+
+	if (!monitors->len || monitors->len > WRAPFD_MAX_NR_MONITORS)
+		return -EINVAL;
+
+	arr = kzalloc_objs(struct wrapfd_monitor, monitors->len);
+	if (!arr)
+		return -ENOMEM;
+
+	results = kzalloc_objs(__u64, monitors->len);
+	if (!results) {
+		ret = -ENOMEM;
+		goto free_arr;
+	}
+
+	if (copy_from_user(arr, (void __user *)monitors->arr,
+			   monitors->len * sizeof(struct wrapfd_monitor))) {
+		ret = -EFAULT;
+		goto free_res;
+	}
+
+	/* Verify all inputs */
+	for (__u64 i = 0; i < monitors->len; i++) {
+		struct wrapfd_monitor *monitor = &arr[i];
+		struct wrap_event_info *event_info;
+		struct wrap_ctx *ctx;
+		struct file *file;
+		struct fd f;
+
+		if (monitor->events & ~WRAPFD_EVENTS_MASK ||
+		    (monitor->events & WRAPFD_EVENTS_MASK) == 0) {
+			results[i] = -EINVAL;
+			continue;
+		}
+
+		if (monitor->fd > INT_MAX) {
+			results[i] = -EBADF;
+			continue;
+		}
+
+		f = fdget(monitor->fd);
+		file = fd_file(f);
+		if (!file || file->f_op != &wrap_fops) {
+			fdput(f);
+			results[i] = -EBADF;
+			continue;
+		}
+
+		ctx = file->private_data;
+		if (add && !tmp) {
+			/*
+			 * Preallocate wrap_event_info before locking in case
+			 * we need it later.
+			 */
+			tmp = kzalloc_obj(*tmp);
+		}
+
+		spin_lock(&ctx->lock);
+		spin_lock(&file_mon->event_lock);
+		event_info = find_wrap_event_info(file_mon, ctx);
+		if (event_info) {
+			/*
+			 * Do not allow monitoring the same wrapfd file
+			 * under different (dup'ed) FDs since that
+			 * would cause one wrapfd operation to generate
+			 * multiple events.
+			 */
+			if (monitor->fd != event_info->fd) {
+				results[i] = -EBUSY;
+				goto unlock;
+			}
+		}
+		if (add) {
+			if (!event_info) {
+				if (!tmp) {
+					results[i] = -ENOMEM;
+					goto unlock;
+				}
+				event_info = tmp;
+				tmp = NULL;
+				init_wrap_event_info(event_info, file_mon,
+						     ctx, monitor->fd);
+			}
+			event_info->monitored |= monitor->events;
+		} else {
+			if (event_info) {
+				event_info->monitored &= ~monitor->events;
+				if (!event_info->monitored)
+					free_wrap_event_info(event_info);
+			} else {
+				results[i] = -EINVAL;
+			}
+		}
+unlock:
+		spin_unlock(&file_mon->event_lock);
+		spin_unlock(&ctx->lock);
+		fdput(f);
+	}
+	kfree(tmp);
+	if (copy_to_user((void __user *)monitors->results, results,
+			 monitors->len * sizeof(__u64)))
+		ret = -EFAULT;
+free_res:
+	kfree(results);
+free_arr:
+	kfree(arr);
+
+	return ret;
+}
+
+static long wrapfd_dev_add_monitor(struct file *file, unsigned long arg)
+{
+	struct wrapfd_add_monitors params;
+
+	if (copy_from_user(&params, (struct wrapfd_add_monitors __user *)arg,
+			   sizeof(params)))
+		return -EFAULT;
+
+	if (params.reserved)
+		return -EINVAL;
+
+	return process_monitors(file->private_data, &params.monitors, true);
+}
+
+static long wrapfd_dev_del_monitor(struct file *file, unsigned long arg)
+{
+	struct wrapfd_del_monitors params;
+
+	if (copy_from_user(&params, (struct wrapfd_del_monitors __user *)arg,
+			   sizeof(params)))
+		return -EFAULT;
+
+	if (params.reserved)
+		return -EINVAL;
+
+	return process_monitors(file->private_data, &params.monitors, false);
+}
+
+static long wrapfd_dev_query_events(struct file *file, unsigned long arg)
+{
+	struct file_monitor *file_mon = file->private_data;
+	struct wrap_event_info *event_info;
+	struct wrapfd_events events;
+	struct wrapfd_event *arr;
+	bool has_more = false;
+	__u64 i = 0;
+	int ret;
+
+	if (copy_from_user(&events, (struct wrapfd_events __user *)arg,
+			   sizeof(events)))
+		return -EFAULT;
+
+	if (!events.arr || !events.len || events.len > WRAPFD_MAX_NR_EVENTS)
+		return -EINVAL;
+
+	arr = kzalloc_objs(struct wrapfd_event, events.len);
+	if (!arr)
+		return -ENOMEM;
+
+	spin_lock(&file_mon->event_lock);
+	list_for_each_entry(event_info, &file_mon->event_list, file_list) {
+		if (!event_info->triggered)
+			continue;
+
+		if (i >= events.len) {
+			has_more = true;
+			break;
+		}
+
+		arr[i].fd = event_info->fd;
+		arr[i].events = event_info->triggered;
+		arr[i].timestamp = event_info->timestamp;
+		event_info->triggered = 0;
+		i++;
+	}
+	if (!has_more)
+		atomic_set(&file_mon->events_pending, 0);
+	spin_unlock(&file_mon->event_lock);
+
+	if (copy_to_user((void __user *)events.arr, arr,
+			 i * sizeof(struct wrapfd_event))) {
+		ret = -EFAULT;
+		goto free_arr;
+	}
+	if (put_user(i, &((struct wrapfd_events __user *)arg)->count)) {
+		ret = -EFAULT;
+		goto free_arr;
+	}
+	ret = 0;
+free_arr:
+	kfree(arr);
+
+	return ret;
+}
+
+static int wrapfd_dev_open(struct inode *ignored, struct file *file)
+{
+	struct file_monitor *file_mon;
+
+	file_mon = kmalloc_obj(*file_mon);
+	if (!file_mon)
+		return -ENOMEM;
+
+	init_waitqueue_head(&file_mon->wait_queue);
+	atomic_set(&file_mon->events_pending, 0);
+	INIT_LIST_HEAD(&file_mon->event_list);
+	spin_lock_init(&file_mon->event_lock);
+	file->private_data = file_mon;
+
+	return 0;
+}
+
+static int wrapfd_dev_release(struct inode *ignored, struct file *file)
+{
+	struct file_monitor *file_mon = file->private_data;
+
+	spin_lock(&file_mon->event_lock);
+	while (!list_empty(&file_mon->event_list)) {
+		struct wrap_event_info *event_info;
+		struct wrap_ctx *ctx;
+
+		event_info = list_first_entry(&file_mon->event_list,
+					      struct wrap_event_info,
+					      file_list);
+		ctx = event_info->ctx;
+		if (!spin_trylock(&ctx->lock)) {
+			spin_unlock(&file_mon->event_lock);
+			cpu_relax();
+			spin_lock(&file_mon->event_lock);
+			continue;
+		}
+		free_wrap_event_info(event_info);
+		spin_unlock(&ctx->lock);
+	}
+	spin_unlock(&file_mon->event_lock);
+	kfree(file_mon);
+
+	return 0;
+}
+
 static long wrapfd_dev_ioctl(struct file *file, unsigned int cmd,
 			     unsigned long arg)
 {
-	struct wrap_ctx *ctx;
+	struct wrapfd_repopulate wrapfd_repopulate;
+	struct wrapfd_wrap wrapfd_wrap;
 	int ret;
 
 	VM_WARN_ON_ONCE(!current->mm);
 
 	switch (cmd) {
 	case WRAPFD_DEV_IOC_WRAP:
-		ctx = create_wrap_ctx();
-		if (!ctx)
-			return -ENOMEM;
+		if (copy_from_user(&wrapfd_wrap, (struct wrapfd_wrap __user *)arg,
+				   sizeof(wrapfd_wrap)))
+			return -EFAULT;
 
-		ret = wrap_file(ctx, (struct wrapfd_wrap __user *)arg);
-		if (ret < 0)
-			kfree(ctx);
+		if (wrapfd_wrap.reserved)
+			return -EINVAL;
 
+		ret = __create_wrapfd(wrapfd_wrap.fd, wrapfd_wrap.prot);
+		break;
+	case WRAPFD_DEV_IOC_ADD_MONITOR:
+		ret = wrapfd_dev_add_monitor(file, arg);
+		break;
+	case WRAPFD_DEV_IOC_DEL_MONITOR:
+		ret = wrapfd_dev_del_monitor(file, arg);
+		break;
+	case WRAPFD_DEV_IOC_QUERY_EVENTS:
+		ret = wrapfd_dev_query_events(file, arg);
+		break;
+	case WRAPFD_DEV_IOC_REPOPULATE:
+		if (copy_from_user(&wrapfd_repopulate, (struct wrapfd_repopulate __user *)arg,
+				   sizeof(wrapfd_repopulate)))
+			return -EFAULT;
+
+		if (wrapfd_repopulate.reserved)
+			return -EINVAL;
+
+		ret = wrap_file_repopulate(&wrapfd_repopulate);
 		break;
 	default:
 		return -ENOIOCTLCMD;
@@ -1713,11 +2432,41 @@ static long wrapfd_dev_ioctl(struct file *file, unsigned int cmd,
 	return ret;
 }
 
+static __poll_t wrapfd_dev_poll(struct file *file, struct poll_table_struct *wait)
+{
+	struct file_monitor *file_mon = file->private_data;
+	__poll_t mask = 0;
+
+	poll_wait(file, &file_mon->wait_queue, wait);
+
+	if (atomic_read(&file_mon->events_pending))
+		mask |= (EPOLLIN | EPOLLRDNORM);
+
+	return mask;
+}
+
+#if IS_ENABLED(CONFIG_ANDROID_WRAPFD_KUNIT_TEST)
+int create_wrapfd(int fd, int prot)
+{
+	return __create_wrapfd(fd, prot);
+}
+EXPORT_SYMBOL_GPL(create_wrapfd);
+
+int empty_wrapfd(struct file *file, struct device *dev)
+{
+	return wrap_file_empty(file->private_data, dev);
+}
+EXPORT_SYMBOL_GPL(empty_wrapfd);
+#endif
+
 static const struct file_operations wrapfd_dev_fops = {
 	.owner = THIS_MODULE,
+	.open = wrapfd_dev_open,
+	.release = wrapfd_dev_release,
 	.unlocked_ioctl = wrapfd_dev_ioctl,
 	.compat_ioctl = compat_ptr_ioctl,
 	.llseek = noop_llseek,
+	.poll = wrapfd_dev_poll,
 };
 
 static struct miscdevice wrapfd_misc = {

@@ -1626,6 +1626,8 @@ TEST_F(wrapfd_tests, wrapfd_test_dmabuf_system_heap)
 	int heap_fd;
 
 	heap_fd = open("/dev/dma_heap/system", O_RDONLY);
+	if (heap_fd < 0 && errno == ENOENT)
+		SKIP(return, "Skipping system heap tests as the system heap is missing");
 	ASSERT_TRUE(heap_fd >= 0);
 	dmabuf_fd = dmabuf_heap_alloc(heap_fd, self->size, O_RDWR);
 	ASSERT_TRUE(dmabuf_fd >= 0);

@@ -192,7 +192,8 @@ int zram_writeback_slots(struct zram *zram,
 			 struct zram_wb_ctl *wb_ctl);
 int scan_slot_for_prefetch(struct zram *zram, unsigned long index,
 			   struct zram_pp_ctl *ctl);
-int zram_prefetch_slots(struct zram *zram, struct zram_pp_ctl *ctl);
+int zram_prefetch_slots(struct zram *zram, struct zram_pp_ctl *ctl,
+			u64 *read_bytes);
 #endif
 
 #if IS_ENABLED(CONFIG_ZRAM_ANDROID_IOCTL)

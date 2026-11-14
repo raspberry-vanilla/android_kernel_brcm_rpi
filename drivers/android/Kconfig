@@ -115,6 +115,19 @@ config ANDROID_WRAPFD_LEGACY
 	  file supporting ioctl API for file ownership that controls ability to
 	  map the file.
 
+config ANDROID_WRAPFD_KUNIT_TEST
+	tristate "KUnit test for wrapfd driver" if !KUNIT_ALL_TESTS
+	depends on KUNIT
+	depends on ANDROID_WRAPFD || ANDROID_WRAPFD_LEGACY
+	default KUNIT_ALL_TESTS
+	help
+	  This builds the wrapfd driver unit test.
+	  Tests the wrapfd driver functionality.
+	  For more information on KUnit and unit tests in general please refer
+	  to the KUnit documentation in Documentation/dev-tools/kunit/.
+
+	  If unsure, say N.
+
 config GUEST_DMA_PROXY
 	tristate "Guest DMA-Buf Proxy Driver"
 	select DMA_SHARED_BUFFER

@@ -76,6 +76,7 @@ pub(crate) struct WrapInfo {
     vma_file: VmaFile,
     num_pending_mmaps: usize,
     state: WrapState,
+    num_mappable_refs: usize,
 }
 
 impl WrapInfo {
@@ -87,6 +88,7 @@ impl WrapInfo {
             vma_file: VmaFile::None,
             num_pending_mmaps: 0,
             state: WrapState::Available,
+            num_mappable_refs: 0,
         }
     }
 
@@ -173,10 +175,14 @@ impl WrapInfo {
             self.vma_file = VmaFile::None;
         }
 
-        map_count
+        map_count + self.num_mappable_refs
     }
 
     fn is_mapped(&mut self) -> bool {
+        if self.num_mappable_refs > 0 {
+            return true;
+        }
+
         let vma_file_ptr = match self.vma_file {
             VmaFile::None => return false,
             VmaFile::Internal(file_ptr) => file_ptr,
@@ -836,16 +842,8 @@ unsafe extern "C" fn wrapfd_get_mappable(
         // safely increments its reference count.
         let device = unsafe { device::Device::get_device(dev) };
 
-        if guard.has_owner() && !guard.owned_by_device(&device) {
+        if guard.has_owner() && !guard.owned_by_device(&device) && !guard.owned_by_current_task() {
             return Err(EBUSY);
-        }
-
-        if guard.content.is_none() {
-            return Err(ENOENT);
-        }
-
-        if matches!(guard.state, WrapState::InUse(_)) || guard.is_mapped() {
-            return Err(EINVAL);
         }
 
         let Some(ref content) = guard.content else {
@@ -862,7 +860,7 @@ unsafe extern "C" fn wrapfd_get_mappable(
             (*mappable).dmabuf = content.dmabuf.as_ptr();
         }
 
-        guard.owner = WrapOwner::Device(device);
+        guard.num_mappable_refs += 1;
 
         Ok(())
     });
@@ -898,14 +896,6 @@ unsafe extern "C" fn wrapfd_put_mappable(
 
         let mut guard = wrap.inner.lock();
 
-        // SAFETY: `dev` is verified non-null and points to a valid C `struct device`.
-        // It's valid for the duration of this call.
-        let device = unsafe { device::Device::from_raw(dev) };
-
-        if !guard.owned_by_device(&device) {
-            return Err(EBUSY);
-        }
-
         let Some(ref content) = guard.content else {
             // This really should not happen as `wrapfd_get_mappable` would've failed.
             return Err(EINVAL);
@@ -916,14 +906,18 @@ unsafe extern "C" fn wrapfd_put_mappable(
             return Err(EINVAL);
         }
 
+        if guard.num_mappable_refs == 0 {
+            return Err(EINVAL);
+        }
+
         // SAFETY: We've acquired an extra reference in `wrapfd_get_mappable` that we now no
         // longer need. We retain our own reference to `content.dmabuf` through ARef<>.
         unsafe {
             <DmaBuf as AlwaysRefCounted>::dec_ref(NonNull::from(&*content.dmabuf));
         }
 
-        guard.owner = WrapOwner::None;
-        guard.allow_guests = false;
+        guard.num_mappable_refs -= 1;
+
         Ok(())
     });
 

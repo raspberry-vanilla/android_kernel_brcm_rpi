@@ -31,7 +31,6 @@
 #include <sys/stat.h>
 #include <sys/syscall.h>
 #include <sys/uio.h>
-#include <sys/utsname.h>
 #include <sys/vfs.h>
 #include <sys/wait.h>
 #include <sys/xattr.h>
@@ -45,10 +44,10 @@
 #include "../../kselftest_harness.h"
 
 #ifndef RENAME_NOREPLACE
-#define RENAME_NOREPLACE	(1U << 0)
+#define RENAME_NOREPLACE	0x01
 #endif
 #ifndef RENAME_EXCHANGE
-#define RENAME_EXCHANGE		(1U << 1)
+#define RENAME_EXCHANGE		0x02
 #endif
 #ifndef FUSE_SUPER_MAGIC
 #define FUSE_SUPER_MAGIC	0x65735546
@@ -118,6 +117,32 @@ static void close_fd(int *fd)
 		close(*fd);
 		*fd = -1;
 	}
+}
+
+/* readlink("/proc/self/fd/<fd>") into buf; returns its length or -errno. */
+static ssize_t fd_link(int fd, char *buf, size_t len)
+{
+	char proc_fd_path[64];
+	ssize_t n;
+
+	snprintf(proc_fd_path, sizeof(proc_fd_path), "/proc/self/fd/%d", fd);
+	n = readlink(proc_fd_path, buf, len - 1);
+	if (n < 0)
+		return -errno;
+	buf[n] = '\0';
+	return n;
+}
+
+/*
+ * Kernels whose "no_daemon" mount option still sets fd_present fget() fd 0
+ * in fuse_get_tree() and fail the mount with -EINVAL when it is closed.
+ * Keep fd 0 open. Returns the fd to close afterwards, or -1 if it was open.
+ */
+static int ensure_fd0_open(void)
+{
+	if (fcntl(STDIN_FILENO, F_GETFD) >= 0)
+		return -1;
+	return open("/dev/null", O_RDONLY);	/* lowest free fd: 0 */
 }
 
 static int read_sysfs_str(const char *path, char *buf, size_t len)
@@ -194,7 +219,7 @@ static int load_fuse_bpf_prog(const struct bpf_insn *insns, size_t insn_cnt)
 }
 
 static int load_fuse_bpf_prog_quiet(const struct bpf_insn *insns,
-				     size_t insn_cnt)
+				    size_t insn_cnt)
 {
 	return load_fuse_bpf_prog_impl(insns, insn_cnt, false);
 }
@@ -430,8 +455,15 @@ FIXTURE(fuse_bpf)
 	int fuse_dev_fd, stop_pipe[2], bpf_fd, lock_fd, daemon_err;
 	bool mounted, thread_started, unpriv_mp;
 	pthread_t daemon_tid;
-	uint32_t lookup_cnt, rw_cnt, unlink_cnt, canonical_cnt;
+	uint32_t lookup_cnt, rw_cnt, unlink_cnt, canonical_cnt, prefilter_cnt;
 };
+
+static void daemon_reply_err(struct _test_data_fuse_bpf *self,
+			     uint64_t unique, int err)
+{
+	__atomic_store_n(&self->daemon_err, err, __ATOMIC_SEQ_CST);
+	fuse_reply(self->fuse_dev_fd, unique, err, NULL, 0, NULL, 0);
+}
 
 static void daemon_lookup(struct _test_data_fuse_bpf *self,
 			  const struct fuse_in_header *ih, const char *name)
@@ -452,8 +484,7 @@ static void daemon_lookup(struct _test_data_fuse_bpf *self,
 		int ret;
 
 		if (dir_fd < 0) {
-			fuse_reply(self->fuse_dev_fd, ih->unique, -errno,
-				   NULL, 0, NULL, 0);
+			daemon_reply_err(self, ih->unique, -errno);
 			return;
 		}
 		bo.backing_fd = (uint64_t)(uint32_t)dir_fd;
@@ -466,12 +497,8 @@ static void daemon_lookup(struct _test_data_fuse_bpf *self,
 		ret = fuse_reply(self->fuse_dev_fd, ih->unique, 0,
 				 &eo, sizeof(eo), &bo, sizeof(bo));
 		close(dir_fd);
-		if (ret < 0) {
-			__atomic_store_n(&self->daemon_err, ret,
-					 __ATOMIC_SEQ_CST);
-			fuse_reply(self->fuse_dev_fd, ih->unique, ret,
-				   NULL, 0, NULL, 0);
-		}
+		if (ret < 0)
+			daemon_reply_err(self, ih->unique, ret);
 	} else if (ih->nodeid == FUSE_ROOT_ID && !strcmp(name, "secret")) {
 		char spath[PATH_MAX];
 		int ret, sfd;
@@ -491,12 +518,8 @@ static void daemon_lookup(struct _test_data_fuse_bpf *self,
 		      fuse_reply(self->fuse_dev_fd, ih->unique, 0,
 				 &eo, sizeof(eo), &bo, sizeof(bo));
 		close_fd(&sfd);
-		if (ret < 0) {
-			__atomic_store_n(&self->daemon_err, ret,
-					 __ATOMIC_SEQ_CST);
-			fuse_reply(self->fuse_dev_fd, ih->unique, ret,
-				   NULL, 0, NULL, 0);
-		}
+		if (ret < 0)
+			daemon_reply_err(self, ih->unique, ret);
 	} else if (ih->nodeid == FUSE_ROOT_ID && !strcmp(name, "redacted")) {
 		char rpath[PATH_MAX];
 		struct stat st;
@@ -509,8 +532,7 @@ static void daemon_lookup(struct _test_data_fuse_bpf *self,
 			int err = -errno;
 
 			close_fd(&ffd);
-			fuse_reply(self->fuse_dev_fd, ih->unique, err,
-				   NULL, 0, NULL, 0);
+			daemon_reply_err(self, ih->unique, err);
 			return;
 		}
 		bo.backing_fd = (uint64_t)(uint32_t)ffd;
@@ -526,8 +548,7 @@ static void daemon_lookup(struct _test_data_fuse_bpf *self,
 		int pfd = open("/proc/self/mounts", O_RDONLY | O_CLOEXEC);
 
 		if (pfd < 0) {
-			fuse_reply(self->fuse_dev_fd, ih->unique, -errno,
-				   NULL, 0, NULL, 0);
+			daemon_reply_err(self, ih->unique, -errno);
 			return;
 		}
 		bo.backing_fd = (uint64_t)(uint32_t)pfd;
@@ -605,8 +626,7 @@ static void *fuse_mini_daemon(void *arg)
 				   &out, sizeof(out), NULL, 0);
 		} else if (op == FUSE_GETATTR &&
 			   (ih->nodeid == FUSE_ROOT_ID ||
-			    ih->nodeid == FUSE_UNBACKED_NODEID ||
-			    ih->nodeid == FUSE_REDACTED_NODEID)) {
+			    ih->nodeid == FUSE_UNBACKED_NODEID)) {
 			bool root = ih->nodeid == FUSE_ROOT_ID;
 			struct fuse_attr_out ao = {
 				.attr_valid = 3600, .attr.ino = ih->nodeid,
@@ -632,6 +652,8 @@ static void *fuse_mini_daemon(void *arg)
 			fuse_reply(self->fuse_dev_fd, ih->unique, 0,
 				   &oo, sizeof(oo), NULL, 0);
 		} else if (op == FUSE_READ && (ih->opcode & FUSE_PREFILTER)) {
+			__atomic_add_fetch(&self->prefilter_cnt, 1,
+					   __ATOMIC_SEQ_CST);
 			fuse_reply(self->fuse_dev_fd, ih->unique, 0,
 				   body, sizeof(struct fuse_read_in), NULL, 0);
 		} else if (op == FUSE_READ || op == FUSE_WRITE) {
@@ -810,14 +832,37 @@ TEST_F(fuse_bpf, sysfs_and_verifier_gate)
 		FUSE_BPF_MOV64_IMM(BPF_REG_0, FUSE_BPF_BACKING),
 		FUSE_BPF_EXIT_INSN(),
 	};
+	/* b/508702133: the arg value pointers are read-only too. */
+	const struct bpf_insn in_value_write_prog[] = {
+		FUSE_BPF_MOV64_IMM(BPF_REG_2, 0),
+		FUSE_BPF_STX_MEM(BPF_DW, BPF_REG_1, BPF_REG_2,
+				 offsetof(struct fuse_bpf_args,
+					  in_args[0].value)),
+		FUSE_BPF_MOV64_IMM(BPF_REG_0, FUSE_BPF_BACKING),
+		FUSE_BPF_EXIT_INSN(),
+	};
+	const struct bpf_insn out_value_write_prog[] = {
+		FUSE_BPF_MOV64_IMM(BPF_REG_2, 0),
+		FUSE_BPF_STX_MEM(BPF_DW, BPF_REG_1, BPF_REG_2,
+				 offsetof(struct fuse_bpf_args,
+					  out_args[0].value)),
+		FUSE_BPF_MOV64_IMM(BPF_REG_0, FUSE_BPF_BACKING),
+		FUSE_BPF_EXIT_INSN(),
+	};
+	char prog_type[32] = { 0 }, want[32];
 	char feat[32] = { 0 };
 	int bad_fd, prog_fd;
 
 	ASSERT_EQ(0, read_sysfs_str(FUSE_BPF_FEAT_PATH, feat, sizeof(feat)));
 	ASSERT_STREQ("supported\n", feat);
+	/* bpfloader reads the program type from here. */
+	snprintf(want, sizeof(want), "%d\n", BPF_PROG_TYPE_FUSE);
+	ASSERT_EQ(0, read_sysfs_str(FUSE_BPF_TYPE_PATH, prog_type,
+				    sizeof(prog_type)));
+	EXPECT_STREQ(want, prog_type);
 
 	prog_fd = load_fuse_bpf_prog(valid_prog, ARRAY_SIZE(valid_prog));
-	if (prog_fd < 0 && (errno == EPERM || errno == EACCES))
+	if (prog_fd < 0 && errno == EPERM)
 		SKIP(return, "CAP_BPF required");
 	ASSERT_GE(prog_fd, 0);
 	close_fd(&prog_fd);
@@ -828,7 +873,7 @@ TEST_F(fuse_bpf, sysfs_and_verifier_gate)
 	if (bad_fd >= 0)
 		close(bad_fd);
 	ASSERT_LT(bad_fd, 0);
-	EXPECT_TRUE(errno == EACCES || errno == EINVAL);
+	EXPECT_EQ(EACCES, errno);
 
 	errno = 0;
 	bad_fd = load_fuse_bpf_prog_quiet(ro_write_prog,
@@ -836,13 +881,29 @@ TEST_F(fuse_bpf, sysfs_and_verifier_gate)
 	if (bad_fd >= 0)
 		close(bad_fd);
 	ASSERT_LT(bad_fd, 0);
-	EXPECT_TRUE(errno == EACCES || errno == EINVAL);
+	EXPECT_EQ(EACCES, errno);
+
+	errno = 0;
+	bad_fd = load_fuse_bpf_prog_quiet(in_value_write_prog,
+					  ARRAY_SIZE(in_value_write_prog));
+	if (bad_fd >= 0)
+		close(bad_fd);
+	ASSERT_LT(bad_fd, 0);
+	EXPECT_EQ(EACCES, errno);
+
+	errno = 0;
+	bad_fd = load_fuse_bpf_prog_quiet(out_value_write_prog,
+					  ARRAY_SIZE(out_value_write_prog));
+	if (bad_fd >= 0)
+		close(bad_fd);
+	ASSERT_LT(bad_fd, 0);
+	EXPECT_EQ(EACCES, errno);
 }
 
 TEST_F(fuse_bpf, backed_file_rw_mmap)
 {
 	char fuse_file[PATH_MAX], back_file[PATH_MAX], unbacked_file[PATH_MAX];
-	char buf[32] = { 0 };
+	char buf[32] = { 0 }, link_buf[PATH_MAX];
 	int bfd = -1, fd = -1, prog_fd;
 	struct stat st;
 	void *map;
@@ -859,13 +920,16 @@ TEST_F(fuse_bpf, backed_file_rw_mmap)
 
 	fd = open(fuse_file, O_CREAT | O_RDWR | O_TRUNC | O_CLOEXEC, 0644);
 	ASSERT_GE(fd, 0);
+	/* b/498773402: fuse-bpf O_CREAT must leave a hashed dentry. */
+	ASSERT_GT(fd_link(fd, link_buf, sizeof(link_buf)), (ssize_t)0);
+	EXPECT_EQ(NULL, strstr(link_buf, " (deleted)"));
 	ASSERT_EQ((ssize_t)14, write(fd, "hello-fuse-bpf", 14));
 	ASSERT_EQ((ssize_t)14, pread(fd, buf, sizeof(buf) - 1, 0));
 	EXPECT_STREQ("hello-fuse-bpf", buf);
 	ASSERT_EQ(0, ftruncate(fd, 4096));
 
 	map = mmap(NULL, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
-	ASSERT_TRUE(map != MAP_FAILED);
+	ASSERT_NE(MAP_FAILED, map);
 	memcpy(map, "MMAP-BPF", 8);
 	EXPECT_EQ(0, msync(map, 4096, MS_SYNC));
 	EXPECT_EQ(0, munmap(map, 4096));
@@ -956,8 +1020,7 @@ TEST_F(fuse_bpf, no_daemon_mount)
 	ASSERT_GE(dir_fd, 0);
 	prog_fd = load_default_backing_prog();
 	ASSERT_GE(prog_fd, 0);
-	if (fcntl(STDIN_FILENO, F_GETFD) < 0)
-		null_fd = open("/dev/null", O_RDONLY);
+	null_fd = ensure_fd0_open();
 
 	snprintf(opts, sizeof(opts), "no_daemon,root_dir=%d,root_bpf=-1,%s",
 		 dir_fd, tail);
@@ -1024,6 +1087,8 @@ TEST_F(fuse_bpf, canonical_path_inotify)
 	ASSERT_GE(ifd, 0);
 	wd = inotify_add_watch(ifd, fuse_file, IN_MODIFY | IN_CLOSE_WRITE);
 	ASSERT_GE(wd, 0);
+	/* fuse-bpf gives the lower file's path without asking the daemon. */
+	EXPECT_EQ(0U, __atomic_load_n(&self->canonical_cnt, __ATOMIC_SEQ_CST));
 
 	fd = open(fuse_file, O_WRONLY | O_CLOEXEC);
 	ASSERT_GE(fd, 0);
@@ -1042,6 +1107,8 @@ TEST_F(fuse_bpf, canonical_path_inotify)
 
 		if (ev->wd == wd)
 			mask |= ev->mask;
+		/* No name: the watch is on the file, not on its directory. */
+		EXPECT_EQ(0U, ev->len);
 		off += (ssize_t)sizeof(*ev) + (ssize_t)ev->len;
 	}
 	EXPECT_NE(0U, mask & IN_MODIFY);
@@ -1062,6 +1129,7 @@ TEST_F(fuse_bpf, canonical_path_inotify)
 
 		if (ev->wd == wd)
 			mask |= ev->mask;
+		EXPECT_EQ(0U, ev->len);
 		off += (ssize_t)sizeof(*ev) + (ssize_t)ev->len;
 	}
 	EXPECT_NE(0U, mask & IN_MODIFY);
@@ -1214,10 +1282,13 @@ TEST_F(fuse_bpf, xattr_operations)
 	ASSERT_GE(fd, 0);
 	close_fd(&fd);
 
-	ret = setxattr(fuse_file, xname, "xattr-val", 9, 0);
+	/* Decide the SKIP on the lower file, so a FUSE failure still fails. */
+	ret = setxattr(back_file, xname, "probe", 5, 0);
 	if (ret < 0 && (errno == EOPNOTSUPP || errno == ENOTSUP))
 		SKIP(return, "user xattr unsupported on backing fs");
 	ASSERT_EQ(0, ret);
+	ASSERT_EQ(0, removexattr(back_file, xname));
+	ASSERT_EQ(0, setxattr(fuse_file, xname, "xattr-val", 9, 0));
 
 	ASSERT_EQ((ssize_t)9, getxattr(fuse_file, xname, val, sizeof(val) - 1));
 	EXPECT_STREQ("xattr-val", val);
@@ -1299,7 +1370,7 @@ TEST_F(fuse_bpf, readdir_and_excl_race)
 	close_fd(&fd);
 
 	dir = opendir(backed_dir);
-	ASSERT_TRUE(dir != NULL);
+	ASSERT_NE(NULL, dir);
 	while ((de = readdir(dir)) != NULL) {
 		if (!strcmp(de->d_name, "d_one"))
 			saw_one = true;
@@ -1441,12 +1512,15 @@ TEST_F(fuse_bpf, bpf_user_filter_daemon_fallback)
 	ASSERT_GE(fd, 0);
 	ASSERT_EQ((ssize_t)9, write(fd, "secret-9\n", 9));
 	EXPECT_EQ(0U, __atomic_load_n(&self->rw_cnt, __ATOMIC_SEQ_CST));
+	EXPECT_EQ(0U, __atomic_load_n(&self->prefilter_cnt, __ATOMIC_SEQ_CST));
+	/* No daemon GETATTR for this node: stat() uses the lower file. */
 	ASSERT_EQ(0, stat(fuse_file, &st));
 	EXPECT_EQ((off_t)9, st.st_size);
 
 	ASSERT_EQ((ssize_t)9, pread(fd, buf, sizeof(buf) - 1, 0));
 	EXPECT_STREQ("redacted\n", buf);
 	EXPECT_GE(__atomic_load_n(&self->rw_cnt, __ATOMIC_SEQ_CST), 1U);
+	EXPECT_GE(__atomic_load_n(&self->prefilter_cnt, __ATOMIC_SEQ_CST), 1U);
 	close_fd(&fd);
 
 	memset(buf, 0, sizeof(buf));
@@ -1460,18 +1534,26 @@ TEST_F(fuse_bpf, bpf_user_filter_daemon_fallback)
 TEST_F(fuse_bpf, stacking_depth_eloop)
 {
 	const char *tail = "rootmode=040755,user_id=0,group_id=0";
-	int fuse_dir_fd = -1, null_fd = -1, proc_fd = -1, prog_fd;
-	char eloop_path[PATH_MAX], st_mnt[256], opts[160];
-	struct utsname uts;
-	struct stat st;
+	int dir_fd = -1, fuse_dir_fd = -1, null_fd = -1, proc_fd = -1, prog_fd;
+	char st_back[256], st_mnt[256], opts[160];
 
+	snprintf(st_back, sizeof(st_back), "%s/st_back", self->tmp_dir);
 	snprintf(st_mnt, sizeof(st_mnt), "%s/st_mnt", self->tmp_dir);
+	ASSERT_EQ(0, mkdir(st_back, 0755));
 	ASSERT_EQ(0, mkdir(st_mnt, 0755));
 
 	prog_fd = load_default_backing_prog();
 	ASSERT_GE(prog_fd, 0);
-	if (fcntl(STDIN_FILENO, F_GETFD) < 0)
-		null_fd = open("/dev/null", O_RDONLY);
+	null_fd = ensure_fd0_open();
+
+	/* Positive control: the same options with a plain root_dir mount. */
+	dir_fd = open(st_back, O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+	ASSERT_GE(dir_fd, 0);
+	snprintf(opts, sizeof(opts), "no_daemon,root_dir=%d,root_bpf=%d,%s",
+		 dir_fd, prog_fd, tail);
+	ASSERT_EQ(0, mount("fuse", st_mnt, "fuse", MS_NOSUID | MS_NODEV, opts));
+	EXPECT_EQ(0, umount2(st_mnt, MNT_DETACH));
+	close_fd(&dir_fd);
 
 	proc_fd = open("/proc", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
 	ASSERT_GE(proc_fd, 0);
@@ -1495,22 +1577,39 @@ TEST_F(fuse_bpf, stacking_depth_eloop)
 	close_fd(&null_fd);
 
 	__atomic_store_n(&self->bpf_fd, prog_fd, __ATOMIC_SEQ_CST);
-	ASSERT_EQ(0, uname(&uts));
-	if ((strncmp(uts.release, "6.18.", 5) != 0 &&
-	     strncmp(uts.release, "6.12.", 5) != 0) ||
-	    getenv("FUSE_BPF_TEST_LOOKUP_ELOOP") != NULL) {
-		snprintf(eloop_path, sizeof(eloop_path), "%s/eloop_node",
-			 self->mnt_dir);
-		errno = 0;
-		EXPECT_EQ(-1, stat(eloop_path, &st));
-		EXPECT_EQ(ELOOP, errno);
-	}
+}
+
+TEST_F(fuse_bpf, stacking_depth_lookup_eloop)
+{
+	char eloop_path[PATH_MAX];
+	struct stat st;
+	int prog_fd;
+
+	/*
+	 * TODO(b/508701917): Drop this SKIP once "ANDROID: fuse-bpf: fix
+	 * file reference leaks in lookup paths" lands on this branch.
+	 * Until then, fuse_lookup_name() calls fput(ERR_PTR(-ELOOP)) on the
+	 * rejected backing file and oopses the kernel. Set
+	 * FUSE_BPF_TEST_LOOKUP_ELOOP=1 to force the check on a fixed kernel.
+	 */
+	if (!getenv("FUSE_BPF_TEST_LOOKUP_ELOOP"))
+		SKIP(return, "b/508701917: needs lookup ERR_PTR fput() fix");
+
+	prog_fd = load_default_backing_prog();
+	ASSERT_GE(prog_fd, 0);
+	__atomic_store_n(&self->bpf_fd, prog_fd, __ATOMIC_SEQ_CST);
+
+	snprintf(eloop_path, sizeof(eloop_path), "%s/eloop_node",
+		 self->mnt_dir);
+	errno = 0;
+	EXPECT_EQ(-1, stat(eloop_path, &st));
+	EXPECT_EQ(ELOOP, errno);
 }
 
 TEST_F(fuse_bpf, file_ops_lseek_flock_fallocate)
 {
-	char fuse_file[PATH_MAX];
-	int fd1 = -1, fd2 = -1, prog_fd;
+	char fuse_file[PATH_MAX], back_file[PATH_MAX];
+	int bfd = -1, fd1 = -1, fd2 = -1, prog_fd;
 	long psize;
 
 	prog_fd = load_default_backing_prog();
@@ -1523,6 +1622,8 @@ TEST_F(fuse_bpf, file_ops_lseek_flock_fallocate)
 
 	snprintf(fuse_file, sizeof(fuse_file), "%s/backed/fops.bin",
 		 self->mnt_dir);
+	snprintf(back_file, sizeof(back_file), "%s/fops.bin",
+		 self->backing_dir);
 	fd1 = open(fuse_file, O_CREAT | O_RDWR | O_TRUNC | O_CLOEXEC, 0644);
 	ASSERT_GE(fd1, 0);
 
@@ -1537,13 +1638,25 @@ TEST_F(fuse_bpf, file_ops_lseek_flock_fallocate)
 
 	fd2 = open(fuse_file, O_RDWR | O_CLOEXEC);
 	ASSERT_GE(fd2, 0);
+	bfd = open(back_file, O_RDONLY | O_CLOEXEC);
+	ASSERT_GE(bfd, 0);
 	ASSERT_EQ(0, flock(fd1, LOCK_EX | LOCK_NB));
 	errno = 0;
 	EXPECT_EQ(-1, flock(fd2, LOCK_EX | LOCK_NB));
 	EXPECT_EQ(EWOULDBLOCK, errno);
+	/* The lock is on the lower file, so a lower fd contends with it. */
+	errno = 0;
+	EXPECT_EQ(-1, flock(bfd, LOCK_EX | LOCK_NB));
+	EXPECT_EQ(EWOULDBLOCK, errno);
 	EXPECT_EQ(0, flock(fd1, LOCK_UN));
+	EXPECT_EQ(0, flock(bfd, LOCK_EX | LOCK_NB));
+	errno = 0;
+	EXPECT_EQ(-1, flock(fd2, LOCK_EX | LOCK_NB));
+	EXPECT_EQ(EWOULDBLOCK, errno);
+	EXPECT_EQ(0, flock(bfd, LOCK_UN));
 	EXPECT_EQ(0, flock(fd2, LOCK_EX | LOCK_NB));
 	EXPECT_EQ(0, flock(fd2, LOCK_UN));
+	close_fd(&bfd);
 	close_fd(&fd2);
 	close_fd(&fd1);
 }
@@ -1556,9 +1669,10 @@ TEST_F(fuse_bpf, epoch_invalidation)
 		.unique = 0,
 	};
 	char after_file[PATH_MAX], link_buf[PATH_MAX] = { 0 };
-	char backed_dir[384], proc_fd_path[64];
+	char pre_back[PATH_MAX], pre_file[PATH_MAX];
+	char backed_dir[384];
 	uint32_t cnt_before, cnt_cached;
-	int fd = -1, prog_fd;
+	int fd = -1, pre_fd = -1, prog_fd;
 	struct stat st;
 	ssize_t n;
 
@@ -1573,16 +1687,43 @@ TEST_F(fuse_bpf, epoch_invalidation)
 
 	ASSERT_EQ(0, stat(backed_dir, &st));
 	cnt_cached = __atomic_load_n(&self->lookup_cnt, __ATOMIC_SEQ_CST);
-	EXPECT_EQ(cnt_before, cnt_cached);
+	/* ASSERT, not EXPECT: the SKIP below would hide an EXPECT failure. */
+	ASSERT_EQ(cnt_before, cnt_cached);
+
+	/* Look up an existing lower file before the bump and keep it open. */
+	snprintf(pre_back, sizeof(pre_back), "%s/epoch_pre.txt",
+		 self->backing_dir);
+	snprintf(pre_file, sizeof(pre_file), "%s/epoch_pre.txt", backed_dir);
+	fd = open(pre_back, O_CREAT | O_WRONLY | O_TRUNC | O_CLOEXEC, 0644);
+	ASSERT_GE(fd, 0);
+	close_fd(&fd);
+	pre_fd = open(pre_file, O_RDONLY | O_CLOEXEC);
+	ASSERT_GE(pre_fd, 0);
 
 	n = write(self->fuse_dev_fd, &oh, sizeof(oh));
-	if (n < 0 && errno == EINVAL)
+	if (n < 0 && errno == EINVAL) {
+		close_fd(&pre_fd);
 		SKIP(return, "FUSE_NOTIFY_INC_EPOCH unsupported");
+	}
 	ASSERT_EQ((ssize_t)sizeof(oh), n);
 
 	ASSERT_EQ(0, stat(backed_dir, &st));
 	EXPECT_GT(__atomic_load_n(&self->lookup_cnt, __ATOMIC_SEQ_CST),
 		  cnt_cached);
+
+	/* The bump invalidates the lookup done before it ... */
+	ASSERT_EQ(0, stat(pre_file, &st));
+	ASSERT_GT(fd_link(pre_fd, link_buf, sizeof(link_buf)), (ssize_t)0);
+	EXPECT_NE(NULL, strstr(link_buf, " (deleted)"));
+	close_fd(&pre_fd);
+
+	/* ... and fuse_lookup_finalize() stamps the new epoch on a new one. */
+	fd = open(pre_file, O_RDONLY | O_CLOEXEC);
+	ASSERT_GE(fd, 0);
+	ASSERT_EQ(0, stat(pre_file, &st));
+	ASSERT_GT(fd_link(fd, link_buf, sizeof(link_buf)), (ssize_t)0);
+	EXPECT_EQ(NULL, strstr(link_buf, " (deleted)"));
+	close_fd(&fd);
 
 	snprintf(after_file, sizeof(after_file), "%s/epoch_after.txt",
 		 backed_dir);
@@ -1591,11 +1732,8 @@ TEST_F(fuse_bpf, epoch_invalidation)
 	ASSERT_EQ((ssize_t)6, write(fd, "epoch\n", 6));
 	ASSERT_EQ(0, stat(after_file, &st));
 
-	snprintf(proc_fd_path, sizeof(proc_fd_path), "/proc/self/fd/%d", fd);
-	n = readlink(proc_fd_path, link_buf, sizeof(link_buf) - 1);
-	ASSERT_GT(n, (ssize_t)0);
-	link_buf[n] = '\0';
-	EXPECT_TRUE(strstr(link_buf, " (deleted)") == NULL);
+	ASSERT_GT(fd_link(fd, link_buf, sizeof(link_buf)), (ssize_t)0);
+	EXPECT_EQ(NULL, strstr(link_buf, " (deleted)"));
 	close_fd(&fd);
 }
 
@@ -1664,6 +1802,7 @@ struct fuse_ksft_cap_hdr {
 	uint32_t version;
 	int pid;
 };
+
 struct fuse_ksft_cap_data {
 	uint32_t effective, permitted, inheritable;
 };
@@ -1781,11 +1920,15 @@ TEST_F(fuse_bpf, vold_mediaprovider_unpriv_model)
 
 	mp = mmap(NULL, sizeof(*mp), PROT_READ | PROT_WRITE,
 		  MAP_SHARED | MAP_ANONYMOUS, -1, 0);
-	ASSERT_TRUE(mp != MAP_FAILED);
+	ASSERT_NE(MAP_FAILED, mp);
 	prog_fd = load_fuse_bpf_prog(deny_unlink_prog,
 				     ARRAY_SIZE(deny_unlink_prog));
+	if (prog_fd < 0) {
+		setup_err = errno ? -errno : -EIO;
+		goto cleanup;
+	}
 	dev_fd = open("/dev/fuse", O_RDWR | O_CLOEXEC);
-	if (prog_fd < 0 || dev_fd < 0 || pipe2(stop_p, O_CLOEXEC)) {
+	if (dev_fd < 0 || pipe2(stop_p, O_CLOEXEC)) {
 		setup_err = errno ? -errno : -EIO;
 		goto cleanup;
 	}

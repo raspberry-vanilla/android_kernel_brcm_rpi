@@ -29,7 +29,8 @@ static inline bool is_wrapfd_vma(struct vm_area_struct *vma)
 #if defined(CONFIG_ANDROID_WRAPFD_LEGACY) || defined(CONFIG_ANDROID_WRAPFD)
 
 /*
- * Get mappable object. Caller also gets buffer ownership.
+ * Get mappable object. Buffer does not have to be owned by the caller
+ * but should not have any other owner.
  * Function does not take file references, therefore the caller should
  * ensure the file is stable until wrapfd_put_mappable() is called.
  *
@@ -40,7 +41,7 @@ static inline bool is_wrapfd_vma(struct vm_area_struct *vma)
  * On success returns mappable object. On error returns:
  * -EBADF: file is invalid.
  * -ENODEV: device is invalid.
- * -EINVAL: buffer is mapped or mappable is NULL.
+ * -EINVAL: mappable is invalid.
  * -EBUSY: buffer is owned by another device.
  * -ENOENT: wrap is empty (buffer got freed or moved)
  * -EOPNOTSUPP: wrapfd driver is not enabled
@@ -49,7 +50,8 @@ int wrapfd_get_mappable(struct file *file, struct device *dev,
 			union wrapfd_mappable *mappable);
 
 /*
- * Release mappable object and buffer ownership. Caller should own the buffer.
+ * Release mappable object. The caller should have gotten the mappable object
+ * by calling wrapfd_get_mappable().
  * Note that the caller might still keep the buffer mapped. If the buffer
  * is reused or freed then the next wrapfd_get_mappable() call will fail with
  * -ENOENT and the mapping should be invalidated. If wrapfd_get_mappable()
@@ -63,7 +65,6 @@ int wrapfd_get_mappable(struct file *file, struct device *dev,
  * -EBADF: file is invalid.
  * -ENODEV: device is invalid.
  * -EOPNOTSUPP: wrapfd driver is not enabled
- * -EBUSY: buffer is not owned by the caller.
  * -EINVAL: wrap is empty or mappable is NULL or mappable's contents does not
  *	    match the one passed to wrapfd_get_mappable.
  */
@@ -118,7 +119,7 @@ int wrapfd_del_listener(struct file *file, void *handle);
  * Function does not take file references, therefore the caller should
  * ensure the file is stable until wrapfd_put_ownership() is called.
  *
- * file: wrap file to get the mappable object.
+ * file: wrap file to take ownership of.
  * dev: device requesting the operation.
  *
  * On success returns 0. On error returns:
@@ -134,11 +135,12 @@ int wrapfd_acquire_ownership(struct file *file, struct device *dev);
 /*
  * Release buffer ownership. The caller should own the buffer.
  *
- * file: wrap file associated with the mappable object.
+ * file: wrap file to release ownership of.
  * dev: device requesting the operation.
  *
  * -EBADF: file is invalid.
  * -ENODEV: device is invalid.
+ * -EINVAL: buffer is mapped.
  * -EBUSY: buffer is not owned by the caller.
  * -EOPNOTSUPP: wrapfd driver is not enabled
  */

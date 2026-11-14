@@ -50,9 +50,33 @@ struct zram_android_ioc_process_range_writeback {
 	__u64		written_bytes;
 };
 
+/*
+ * Extensible argument of ZRAM_ANDROID_IOC_PROCESS_PREFETCH.
+ *
+ * The struct is append-only. The kernel takes the size of the user struct
+ * from _IOC_SIZE(cmd), so userspace built against an older (smaller) or
+ * newer (larger) version of this struct keeps working:
+ *  - Fields unknown to userspace are treated as zero by the kernel.
+ *  - Fields unknown to the kernel must be zero, otherwise -E2BIG is
+ *    returned.
+ *  - Output fields are copied back only if the cmd has _IOC_READ, and at
+ *    most min(user size, kernel size) bytes are copied.
+ */
 struct zram_android_ioc_process_prefetch {
+	/* in: the pidfd of the process to scan for prefetch candidates */
 	__aligned_u64	pidfd;
+	/* in: must be zero */
+	__u32		flags;
+	/* out: size of this struct known by the kernel */
+	__u32		size;
+	/* out: total number of bytes successfully prefetched */
+	__u64		read_bytes;
 };
+
+/* sizeof first published struct, used by the legacy _IOW cmd */
+#define ZRAM_ANDROID_IOC_PROCESS_PREFETCH_SIZE_VER0	8
+/* adds flags, size and read_bytes */
+#define ZRAM_ANDROID_IOC_PROCESS_PREFETCH_SIZE_VER1	24
 
 #define ZRAM_ANDROID_IOC_MAGIC 0xBB
 
@@ -63,8 +87,12 @@ struct zram_android_ioc_process_prefetch {
 #define ZRAM_ANDROID_IOC_PROCESS_RANGE_WRITEBACK \
 	_IOWR(ZRAM_ANDROID_IOC_MAGIC, 2, struct zram_android_ioc_process_range_writeback)
 
+/*
+ * Matched by _IOC_TYPE/_IOC_NR only. Binaries built with the previous
+ * _IOW definition (SIZE_VER0) are still accepted, but get no output.
+ */
 #define ZRAM_ANDROID_IOC_PROCESS_PREFETCH \
-	_IOW(ZRAM_ANDROID_IOC_MAGIC, 3, struct zram_android_ioc_process_prefetch)
+	_IOWR(ZRAM_ANDROID_IOC_MAGIC, 3, struct zram_android_ioc_process_prefetch)
 
 #define ZRAM_ANDROID_IOC_GET_VERSION _IO(ZRAM_ANDROID_IOC_MAGIC, 4)
 

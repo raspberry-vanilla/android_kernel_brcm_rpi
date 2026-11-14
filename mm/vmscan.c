@@ -895,7 +895,10 @@ enum folio_references {
 static inline bool is_exec_file_folio(struct folio *folio,
 		vm_flags_t vm_flags)
 {
-	return (vm_flags & VM_EXEC) && folio_is_file_lru(folio);
+	bool is_exec = (vm_flags & VM_EXEC) && folio_is_file_lru(folio);
+
+	trace_android_vh_is_exec_file_folio(folio, vm_flags, &is_exec);
+	return is_exec;
 }
 
 #ifdef CONFIG_LRU_GEN
@@ -4664,6 +4667,7 @@ static bool sort_folio(struct lruvec *lruvec, struct folio *folio, struct scan_c
 {
 	bool success;
 	bool dirty, writeback;
+	bool protect = false;
 	int gen = folio_lru_gen(folio);
 	int type = folio_is_file_lru(folio);
 	int zone = folio_zonenum(folio);
@@ -4724,6 +4728,13 @@ static bool sort_folio(struct lruvec *lruvec, struct folio *folio, struct scan_c
 	/* waiting for writeback */
 	if (writeback || (type == LRU_GEN_FILE && dirty)) {
 		gen = folio_inc_gen(lruvec, folio, true);
+		list_move(&folio->lru, &lrugen->folios[gen][type][zone]);
+		return true;
+	}
+
+	trace_android_vh_sort_folio_protect(lruvec, folio, tier_idx, &protect);
+	if (protect) {
+		gen = folio_inc_gen(lruvec, folio, false);
 		list_move(&folio->lru, &lrugen->folios[gen][type][zone]);
 		return true;
 	}
@@ -5130,6 +5141,8 @@ static bool should_abort_scan(struct lruvec *lruvec, struct scan_control *sc)
 		struct zone *zone = lruvec_pgdat(lruvec)->node_zones + i;
 		unsigned long size = wmark_pages(zone, mark) + MIN_LRU_BATCH;
 
+		trace_android_vh_mm_get_zone_mark_mglru(zone, &size);
+
 		if (managed_zone(zone) && !zone_watermark_ok(zone, 0, size, sc->reclaim_idx, 0))
 			return false;
 	}
@@ -5271,6 +5284,7 @@ restart:
 		}
 
 		trace_android_vh_should_memcg_bypass(memcg, sc->priority, &bypass);
+		trace_android_vh_should_memcg_bypass_ext(memcg, sc->priority, &bypass, &op);
 		if (bypass)
 			continue;
 

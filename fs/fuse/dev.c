@@ -457,7 +457,7 @@ static void request_wait_answer(struct fuse_req *req)
 		/* Only fatal signals may interrupt this */
 		err = wait_event_state(req->waitq,
 					test_bit(FR_FINISHED, &req->flags),
-					TASK_KILLABLE | TASK_FREEZABLE);
+					(TASK_KILLABLE | TASK_FREEZABLE));
 		if (!err)
 			return;
 
@@ -481,7 +481,7 @@ static void request_wait_answer(struct fuse_req *req)
 	 */
 	wait_event_state(req->waitq,
 			 test_bit(FR_FINISHED, &req->flags),
-			 TASK_UNINTERRUPTIBLE | TASK_FREEZABLE);
+			 (TASK_UNINTERRUPTIBLE | TASK_FREEZABLE));
 }
 
 static void __fuse_request_send(struct fuse_req *req)

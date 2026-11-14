@@ -1519,3 +1519,9 @@
 # preserved by --additions-only
   down_write
   up_write
+
+# required by pkvm_iommu_temp.ko
+  __pkvm_load_el2_module
+  kvm_iommu_init_hyp
+  kvm_iommu_register_driver
+

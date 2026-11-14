@@ -917,14 +917,15 @@ int pkvm_enable_smc_forwarding(struct file *kvm_file)
 	if (!file_is_kvm(kvm_file))
 		return -EINVAL;
 
-	if (!kvm_get_kvm_safe(kvm_file->private_data))
-		return -EINVAL;
-
 	host_kvm = kvm_file->private_data;
 	if (!host_kvm)
 		return -EINVAL;
 
+	if (!kvm_get_kvm_safe(host_kvm))
+		return -EINVAL;
+
 	host_kvm->arch.pkvm.smc_forwarded = true;
+	kvm_put_kvm(host_kvm);
 
 	return 0;
 }
