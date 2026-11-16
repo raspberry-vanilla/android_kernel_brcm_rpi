@@ -1050,10 +1050,12 @@
   in6_dev_finish_destroy
   of_graph_get_port_parent
   of_graph_get_remote_endpoint
+  of_reserved_mem_region_to_resource_byname
   panic_notifier_list
   pskb_put
   si_meminfo
   skb_cow_data
+  skb_pull_data
   system_bh_wq
 
 # required by bam_dma.ko
@@ -1223,6 +1225,7 @@
   reservation_ww_class
 
 # required by drm_gpuvm.ko
+  drm_dev_get
   __rb_erase_color
   __rb_insert_augmented
   rb_prev
@@ -1412,6 +1415,7 @@
   __skb_gso_segment
   strncpy
   tasklet_unlock_wait
+  timer_shutdown_sync
   unregister_inet6addr_notifier
   unregister_inetaddr_notifier
 
@@ -1932,8 +1936,10 @@
 
 # required by qcom-scm.ko
   __arm_smccc_smc
+  irq_create_fwspec_mapping
   kimage_voffset
   kstrtobool
+  of_reserved_mem_device_release
   __sysfs_match_string
 
 # required by qcom-spmi-adc-tm5.ko
@@ -1992,6 +1998,7 @@
   of_find_compatible_node
 
 # required by qcom_pmic_tcpm.ko
+  disable_delayed_work_sync
   tcpm_cc_change
   tcpm_pd_hard_reset
   tcpm_pd_receive
@@ -2019,6 +2026,7 @@
 # required by qcom_rpmh.ko
   arch_timer_read_counter
   cpu_pm_register_notifier
+  cpu_pm_unregister_notifier
   dev_pm_genpd_get_next_hrtimer
   __num_online_cpus
   _raw_spin_trylock
@@ -2032,6 +2040,8 @@
   pm_suspend_target_state
 
 # required by qcom_tzmem.ko
+  __do_once_done
+  __do_once_start
   gen_pool_add_owner
   gen_pool_alloc_algo_owner
   gen_pool_best_fit
@@ -2212,6 +2222,7 @@
 
 # required by snd-soc-rt5682s.ko
   clk_get_parent
+  disable_delayed_work_sync
   regmap_get_device
   snd_soc_dapm_get_bias_level
 
@@ -2300,6 +2311,7 @@
 
 # required by ucsi_glink.ko
   devm_gpiod_get_index_optional
+  disable_work_sync
   typec_set_orientation
   ucsi_create
   ucsi_destroy

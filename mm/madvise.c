@@ -16,6 +16,7 @@
 #include <linux/page_idle.h>
 #include <linux/userfaultfd_k.h>
 #include <linux/hugetlb.h>
+#include <linux/ptshare.h>
 #include <linux/falloc.h>
 #include <linux/fadvise.h>
 #include <linux/sched.h>
@@ -181,9 +182,19 @@ static int madvise_update_vma(vm_flags_t new_flags,
 
 	madv_behavior->vma = vma;
 
+	new_flags = ptshare_sync_vm_flags(vma, new_flags);
+
 	/* vm_flags is protected by the mmap_lock held in write mode. */
 	vma_start_write(vma);
 	vm_flags_reset(vma, new_flags);
+	/*
+	 * If the vma become good for khugepaged to scan,
+	 * register it here without waiting a page fault that
+	 * may not happen any time soon.
+	 */
+	if (new_flags & VM_HUGEPAGE)
+		khugepaged_enter_vma(vma, new_flags);
+
 	if (set_new_anon_name)
 		return replace_anon_vma_name(vma, anon_name);
 
@@ -406,7 +417,7 @@ static int madvise_cold_or_pageout_pte_range(pmd_t *pmd,
 
 		if (unlikely(!pmd_present(orig_pmd))) {
 			VM_BUG_ON(thp_migration_supported() &&
-					!is_pmd_migration_entry(orig_pmd));
+					!pmd_is_migration_entry(orig_pmd));
 			goto huge_unlock;
 		}
 
@@ -621,6 +632,9 @@ static long madvise_cold(struct madvise_behavior *madv_behavior)
 	if (!can_madv_lru_vma(vma))
 		return -EINVAL;
 
+	if (vma_is_ptshare_client(vma))
+		return 0;
+
 	lru_add_drain();
 	tlb_gather_mmu(&tlb, madv_behavior->mm);
 	madvise_cold_page_range(&tlb, madv_behavior);
@@ -663,6 +677,9 @@ static long madvise_pageout(struct madvise_behavior *madv_behavior)
 
 	if (!can_madv_lru_vma(vma))
 		return -EINVAL;
+
+	if (vma_is_ptshare_client(vma))
+		return 0;
 
 	/*
 	 * If the VMA belongs to a private file mapping, there can be private
@@ -1101,6 +1118,9 @@ static bool is_valid_guard_vma(struct vm_area_struct *vma, bool allow_locked)
 	 */
 	if (!allow_locked)
 		disallowed |= VM_LOCKED;
+
+	if (vma_is_ptshare_client(vma))
+		return false;
 
 	return !(vma->vm_flags & disallowed);
 }

@@ -4,7 +4,7 @@
 
 use core::{mem::MaybeUninit, ptr::NonNull};
 
-use crate::{content::DmaBufContent, THIS_MODULE};
+use crate::{content::DmaBufContent, poll::FileMonitor, THIS_MODULE};
 
 use kernel::{
     alloc::{AllocError, Flags},
@@ -26,7 +26,7 @@ use kernel::{
     uapi,
 };
 
-static WRAP_FOPS: AnonInodeFileVTable<Wrap> = AnonInodeFileVTable::new(&THIS_MODULE);
+pub(crate) static WRAP_FOPS: AnonInodeFileVTable<Wrap> = AnonInodeFileVTable::new(&THIS_MODULE);
 
 pub(crate) fn create_wrap_file(
     name: &CStr,
@@ -76,10 +76,20 @@ pub(crate) struct WrapInfo {
     vma_file: VmaFile,
     num_pending_mmaps: usize,
     state: WrapState,
+    monitors: KVec<(Arc<FileMonitor>, usize)>,
+    pub(crate) close_on_exec: bool,
+}
+
+impl Drop for WrapInfo {
+    fn drop(&mut self) {
+        for (filemon, slot) in core::mem::take(&mut self.monitors) {
+            _ = filemon.free_slot(slot);
+        }
+    }
 }
 
 impl WrapInfo {
-    fn new() -> Self {
+    fn new(close_on_exec: bool) -> Self {
         Self {
             content: None,
             owner: WrapOwner::None,
@@ -87,13 +97,15 @@ impl WrapInfo {
             vma_file: VmaFile::None,
             num_pending_mmaps: 0,
             state: WrapState::Available,
+            monitors: KVec::default(),
+            close_on_exec,
         }
     }
 
     fn get_valid_owner(&mut self) -> Option<&Task> {
         if let WrapOwner::Task(task) = &self.owner {
             if !task.has_mm() {
-                self.owner = WrapOwner::None;
+                self.reset_owner();
                 self.allow_guests = false;
             }
         };
@@ -110,6 +122,16 @@ impl WrapInfo {
             WrapOwner::Task(_task) => self.get_valid_owner().is_some(),
             WrapOwner::Device(_dev) => true,
         }
+    }
+
+    fn reset_owner(&mut self) {
+        self.owner = WrapOwner::None;
+        self.generate_event(uapi::WRAPFD_EVENT_UNOWN);
+    }
+
+    fn reset_vmafile(&mut self) {
+        self.vma_file = VmaFile::None;
+        self.generate_event(uapi::WRAPFD_EVENT_UNMAP);
     }
 
     fn owned_by_current_task(&mut self) -> bool {
@@ -170,7 +192,7 @@ impl WrapInfo {
         });
 
         if map_count == 0 && self.num_pending_mmaps == 0 {
-            self.vma_file = VmaFile::None;
+            self.reset_vmafile();
         }
 
         map_count
@@ -200,7 +222,7 @@ impl WrapInfo {
         });
 
         if !is_mapped {
-            self.vma_file = VmaFile::None;
+            self.reset_vmafile();
         }
 
         is_mapped
@@ -235,6 +257,43 @@ impl WrapInfo {
 
         Ok(())
     }
+
+    pub(crate) fn get_slot(&self, filemon: &FileMonitor) -> Option<usize> {
+        self.monitors.iter().find_map(|(existing_filemon, slot)| {
+            (existing_filemon.as_ref() == filemon).then_some(*slot)
+        })
+    }
+
+    pub(crate) fn attach_monitor(&mut self, filemon: Arc<FileMonitor>, slot: usize) -> Result<()> {
+        if let Some(_entry) = self
+            .monitors
+            .iter()
+            .find(|(existing_filemon, _)| existing_filemon.as_ref() == filemon.as_ref())
+        {
+            return Err(EEXIST);
+        }
+
+        self.monitors.push((filemon, slot), GFP_KERNEL)?;
+
+        Ok(())
+    }
+
+    pub(crate) fn detach_monitor(&mut self, filemon: &FileMonitor) -> Result<()> {
+        let index = self
+            .monitors
+            .iter()
+            .position(|(existing_filemon, _)| existing_filemon.as_ref() == filemon)
+            .ok_or(EINVAL)?;
+
+        _ = self.monitors.remove(index);
+        Ok(())
+    }
+
+    fn generate_event(&self, event: u32) {
+        for (filemon, slot) in &self.monitors {
+            _ = filemon.generate_wrap_event(*slot, event);
+        }
+    }
 }
 
 enum AllowState {
@@ -245,10 +304,6 @@ enum AllowState {
 #[pin_data]
 pub(crate) struct Wrap {
     pub(crate) inner: Arc<Mutex<WrapInfo>>,
-
-    // Set once on construction, never modified afterwards, does not need to be guarded by
-    // the lock.
-    pub(crate) close_on_exec: bool,
 }
 
 struct UseGuard<'a>(&'a Wrap);
@@ -267,8 +322,7 @@ impl<'a> Drop for UseGuard<'a> {
 impl Wrap {
     pub(crate) fn new(close_on_exec: bool) -> impl PinInit<Self, Error> {
         try_pin_init!(Self {
-            inner: Arc::pin_init(new_mutex!(WrapInfo::new()), GFP_KERNEL)?,
-            close_on_exec,
+            inner: Arc::pin_init(new_mutex!(WrapInfo::new(close_on_exec)), GFP_KERNEL)?,
         })
     }
 
@@ -339,6 +393,7 @@ impl Wrap {
         }
 
         guard.owner = WrapOwner::Task(ARef::from(current!().group_leader()));
+        guard.generate_event(uapi::WRAPFD_EVENT_OWN);
 
         Ok(0)
     }
@@ -350,7 +405,7 @@ impl Wrap {
             return Err(EBUSY);
         }
 
-        guard.owner = WrapOwner::None;
+        guard.reset_owner();
         guard.allow_guests = false;
 
         Ok(0)
@@ -403,9 +458,18 @@ impl Wrap {
 
         let (_use_guard, dmabuf) = {
             let mut guard = self.inner.lock();
-            let content = guard.check_accessible()?;
+            guard.generate_event(uapi::WRAPFD_EVENT_LOAD);
+
+            let content = match guard.check_accessible() {
+                Ok(content) => content,
+                Err(err) => {
+                    guard.generate_event(uapi::WRAPFD_EVENT_LOAD_DONE);
+                    return Err(err);
+                }
+            };
 
             if !content.is_writable() {
+                guard.generate_event(uapi::WRAPFD_EVENT_LOAD_DONE);
                 return Err(EACCES);
             }
 
@@ -413,7 +477,11 @@ impl Wrap {
             (self.begin_use(&mut guard), dmabuf)
         };
 
-        DmaBufContent::load(&dmabuf, localfile, file_offset, buf_offset, len)
+        let result = DmaBufContent::load(&dmabuf, localfile, file_offset, buf_offset, len);
+        self.inner
+            .lock()
+            .generate_event(uapi::WRAPFD_EVENT_LOAD_DONE);
+        result
     }
 
     fn rewrap(&self, user_slice: UserSlice) -> Result<u32> {
@@ -428,23 +496,30 @@ impl Wrap {
             return Err(EINVAL);
         }
 
-        let mut guard = self.inner.lock();
-        guard.check_modifiable()?;
+        let (_use_guard, content, close_on_exec, was_writable) = {
+            let mut guard = self.inner.lock();
+            guard.check_modifiable()?;
 
-        let Some(mut content) = guard.content.take() else {
-            return Err(ENOENT);
-        };
+            let Some(mut content) = guard.content.take() else {
+                return Err(ENOENT);
+            };
 
-        let was_writable = content.is_writable();
-        match content.make_writable((rewrap_args.prot & bindings::PROT_WRITE) != 0) {
-            Ok(()) => {}
-            Err(err) => {
-                guard.content = Some(content);
-                return Err(err);
+            let was_writable = content.is_writable();
+            match content.make_writable((rewrap_args.prot & bindings::PROT_WRITE) != 0) {
+                Ok(()) => {}
+                Err(err) => {
+                    guard.content = Some(content);
+                    return Err(err);
+                }
             }
-        }
 
-        let close_on_exec = self.close_on_exec;
+            (
+                self.begin_use(&mut guard),
+                content,
+                guard.close_on_exec,
+                was_writable,
+            )
+        };
 
         let result = match KBox::pin_init(Wrap::new(close_on_exec), GFP_KERNEL) {
             Ok(new_wrap) => DmaBufContent::publish_wrap(new_wrap, content, close_on_exec, true),
@@ -455,7 +530,7 @@ impl Wrap {
             Err((err, mut content)) => {
                 // Restore original wrap.
                 _ = content.make_writable(was_writable);
-                guard.content = Some(content);
+                self.inner.lock().content = Some(content);
 
                 Err(err)
             }
@@ -479,6 +554,61 @@ impl Wrap {
         guard.allow_guests = matches!(allow, AllowState::AllowGuests);
 
         Ok(0)
+    }
+
+    pub(crate) fn repopulate(&self, wrap_file: &File, fd: u32) -> Result<bool> {
+        let f_mode = wrap_file.mode();
+
+        let mut prot = 0;
+        if (f_mode & mode::FMODE_READ) != 0 {
+            prot |= bindings::PROT_READ;
+        }
+        if (f_mode & mode::FMODE_WRITE) != 0 {
+            prot |= bindings::PROT_WRITE;
+        }
+        if prot == 0 {
+            return Err(EINVAL);
+        }
+
+        let _use_guard = {
+            let mut guard = self.inner.lock();
+
+            if guard.has_owner() && !guard.owned_by_current_task() {
+                return Err(EBUSY);
+            }
+
+            if matches!(guard.state, WrapState::InUse(_))
+                || guard.is_mapped()
+                || guard.content.is_some()
+            {
+                return Err(EINVAL);
+            }
+
+            self.begin_use(&mut guard)
+        };
+
+        let content = DmaBufContent::new(fd, prot)?;
+
+        let size = content.dmabuf.size();
+        let size = Offset::try_from(size)?;
+
+        // SAFETY: `args.fd` is a valid file descriptor, otherwise `DmaBufContent::new` would have
+        // failed.
+        let close_on_exec = unsafe { bindings::get_close_on_exec(fd) };
+
+        // SAFETY: `file` is a valid `kernel::fs::File` reference, ensuring `file.as_ptr()` is
+        // non-null and points to an active `struct file`.
+        let inode = unsafe { bindings::file_inode(wrap_file.as_ptr()) };
+
+        // SAFETY: `file_inode` on a valid `struct file` returns a non-null, valid pointer to its
+        // `struct inode`.
+        unsafe { bindings::i_size_write(inode, size) };
+
+        let mut guard = self.inner.lock();
+        guard.content = Some(content);
+        guard.close_on_exec = close_on_exec;
+
+        Ok(close_on_exec)
     }
 }
 
@@ -506,7 +636,6 @@ impl AnonInodeFileInterface for Wrap {
             let dmabuf = content.dmabuf.clone();
             (wrap.begin_use(&mut guard), dmabuf)
         };
-
         DmaBufContent::llseek(&dmabuf, offs, whence)
     }
 
@@ -592,6 +721,8 @@ impl AnonInodeFileInterface for Wrap {
 
             guard.vma_file = VmaFile::External(vma_file);
         }
+
+        guard.generate_event(uapi::WRAPFD_EVENT_MAP);
 
         Ok(())
     }
@@ -855,6 +986,7 @@ unsafe extern "C" fn wrapfd_get_mappable(
         // We acquire an additional reference on `dmabuf` here that will be released in a matching
         // call to `wrapfd_put_mappable`.
         content.dmabuf.inc_ref();
+        guard.generate_event(uapi::WRAPFD_EVENT_MAP);
 
         // SAFETY: `mappable` is a valid, writable pointer to `struct wrapfd_mappable` per caller
         // contract.
@@ -921,8 +1053,9 @@ unsafe extern "C" fn wrapfd_put_mappable(
         unsafe {
             <DmaBuf as AlwaysRefCounted>::dec_ref(NonNull::from_ref(&content.dmabuf));
         }
+        guard.generate_event(uapi::WRAPFD_EVENT_UNMAP);
 
-        guard.owner = WrapOwner::None;
+        guard.reset_owner();
         guard.allow_guests = false;
         Ok(())
     });
@@ -1032,7 +1165,7 @@ unsafe extern "C" fn wrapfd_acquire_ownership(
     file: *mut bindings::file,
     dev: *mut bindings::device,
 ) -> ffi::c_int {
-    let result = with_wrap_helper(file, "wrapfd_get_ownership", |wrap| {
+    let result = with_wrap_helper(file, "wrapfd_acquire_ownership", |wrap| {
         if dev.is_null() {
             return Err(ENODEV);
         }
@@ -1060,7 +1193,7 @@ unsafe extern "C" fn wrapfd_acquire_ownership(
         }
 
         guard.owner = WrapOwner::Device(device);
-
+        guard.generate_event(uapi::WRAPFD_EVENT_OWN);
         Ok(())
     });
 
@@ -1075,7 +1208,7 @@ unsafe extern "C" fn wrapfd_release_ownership(
     file: *mut bindings::file,
     dev: *mut bindings::device,
 ) -> ffi::c_int {
-    let result = with_wrap_helper(file, "wrapfd_put_ownership", |wrap| {
+    let result = with_wrap_helper(file, "wrapfd_release_ownership", |wrap| {
         if dev.is_null() {
             return Err(ENODEV);
         }
@@ -1090,7 +1223,7 @@ unsafe extern "C" fn wrapfd_release_ownership(
             return Err(EBUSY);
         }
 
-        guard.owner = WrapOwner::None;
+        guard.reset_owner();
 
         Ok(())
     });

@@ -328,6 +328,7 @@ int pkvm_host_ept_init(struct pkvm_pgtable *pgt, void *pool_base,
 		.allowed_pgsz = 1 << PG_LEVEL_4K,
 		.table_prot = VMX_EPT_RWX_MASK,
 		.flush_tlb_lazy = true,
+		.coalesce_on_map = true,
 	};
 	int ret;
 
@@ -453,7 +454,7 @@ static void handle_host_ept_violation_failure(struct kvm_vcpu *vcpu)
 	fault.address = vmcs_readl(GUEST_LINEAR_ADDRESS);
 	fault.exit_qualification = exit_qualification;
 
-	kvm_inject_page_fault(vcpu, &fault);
+	kvm_inject_page_fault(vcpu, &fault, false);
 }
 
 void pkvm_handle_host_ept_violation(struct kvm_vcpu *vcpu)
@@ -479,6 +480,7 @@ void pkvm_guest_ept_setup(void)
 		.allowed_pgsz = 1 << PG_LEVEL_4K,
 		.table_prot = VMX_EPT_RWX_MASK,
 		.flush_tlb_lazy = true,
+		.coalesce_on_map = true,
 	};
 
 	if (cpu_has_vmx_ept_2m_page())

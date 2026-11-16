@@ -15,6 +15,7 @@
 
 #include <linux/fcntl.h>
 #include <linux/mm.h>
+#include <linux/ptshare.h>
 #include <linux/swap.h>
 #include <linux/swapops.h>
 #include <asm-generic/pgtable_uffd.h>
@@ -214,7 +215,11 @@ static inline bool vma_can_userfault(struct vm_area_struct *vma,
 {
 	vm_flags &= __VM_UFFD_FLAGS;
 
-	if (vma->vm_flags & VM_DROPPABLE)
+	if (vma->vm_flags & (VM_DROPPABLE | VM_SHADOW_STACK) ||
+	    vma_is_ptshare_client(vma))
+		return false;
+
+	if (!is_vm_hugetlb_page(vma) && (vma->vm_flags & VM_SPECIAL))
 		return false;
 
 	if ((vm_flags & VM_UFFD_MINOR) &&

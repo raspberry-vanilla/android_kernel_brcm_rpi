@@ -257,6 +257,10 @@ static void dpm_wait(struct device *dev, bool async)
 	if (!dev)
 		return;
 
+	/* Devices with no PM support don't use the completion. */
+	if (dev->power.no_pm)
+		return;
+
 	if (async || (pm_async_enabled && dev->power.async_suspend)) {
 		trace_android_vh_dpm_wait_start(dev);
 		wait_for_completion(&dev->power.completion);
@@ -2274,6 +2278,7 @@ unlock:
 
 	if (ret < 0) {
 		suspend_report_result(dev, callback, ret);
+		pm_runtime_unblock(dev);
 		pm_runtime_put(dev);
 		return ret;
 	}

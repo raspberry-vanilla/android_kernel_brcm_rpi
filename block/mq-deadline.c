@@ -17,6 +17,7 @@
 #include <linux/sbitmap.h>
 
 #include <trace/events/block.h>
+#include <trace/hooks/blk.h>
 
 #include "elevator.h"
 #include "blk.h"
@@ -475,7 +476,12 @@ static struct request *dd_dispatch_request(struct blk_mq_hw_ctx *hctx)
 	 * requests if any higher priority requests are pending.
 	 */
 	for (prio = 0; prio <= DD_PRIO_MAX; prio++) {
+		bool bypass = false;
 		rq = __dd_dispatch_request(dd, &dd->per_prio[prio], now);
+		trace_android_vh_dd_dispatch_request_bypass(hctx, rq,
+				dd_queued(dd, prio), &bypass);
+		if (bypass)
+			continue;
 		if (rq || dd_queued(dd, prio))
 			break;
 	}
@@ -709,7 +715,7 @@ static void dd_insert_requests(struct blk_mq_hw_ctx *hctx,
 	blk_mq_free_requests(&free);
 }
 
-/* Callback from inside blk_mq_rq_ctx_init(). */
+/* Callback from inside blk_mq_rq_late_init(). */
 static void dd_prepare_request(struct request *rq)
 {
 	rq->elv.priv[0] = NULL;

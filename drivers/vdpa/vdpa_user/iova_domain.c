@@ -12,10 +12,16 @@
 #include <linux/file.h>
 #include <linux/anon_inodes.h>
 #include <linux/highmem.h>
+#include <linux/moduleparam.h>
 #include <linux/vmalloc.h>
 #include <linux/vdpa.h>
 
 #include "iova_domain.h"
+
+static int max_iotlb_entries = 2048;
+module_param(max_iotlb_entries, int, 0444);
+MODULE_PARM_DESC(max_iotlb_entries,
+		 "Maximum number of iotlb entries. (default: 2048)");
 
 static int vduse_iotlb_add_range(struct vduse_iova_domain *domain,
 				 u64 start, u64 last,
@@ -528,13 +534,11 @@ err:
 }
 
 void vduse_domain_free_coherent(struct vduse_iova_domain *domain, size_t size,
-				void *vaddr, dma_addr_t dma_addr,
-				unsigned long attrs)
+				dma_addr_t dma_addr, unsigned long attrs)
 {
 	struct iova_domain *iovad = &domain->consistent_iovad;
 	struct vhost_iotlb_map *map;
 	struct vdpa_map_file *map_file;
-	phys_addr_t pa;
 
 	spin_lock(&domain->iotlb_lock);
 	map = vhost_iotlb_itree_first(domain->iotlb, (u64)dma_addr,
@@ -546,12 +550,10 @@ void vduse_domain_free_coherent(struct vduse_iova_domain *domain, size_t size,
 	map_file = (struct vdpa_map_file *)map->opaque;
 	fput(map_file->file);
 	kfree(map_file);
-	pa = map->addr;
 	vhost_iotlb_map_free(domain->iotlb, map);
 	spin_unlock(&domain->iotlb_lock);
 
 	vduse_domain_free_iova(iovad, dma_addr, size);
-	free_pages_exact(phys_to_virt(pa), size);
 }
 
 static vm_fault_t vduse_domain_mmap_fault(struct vm_fault *vmf)
@@ -633,11 +635,14 @@ vduse_domain_create(unsigned long iova_limit, size_t bounce_size)
 	if (iova_limit <= bounce_size)
 		return NULL;
 
+	if (max_iotlb_entries <= 0)
+		return NULL;
+
 	domain = kzalloc(sizeof(*domain), GFP_KERNEL);
 	if (!domain)
 		return NULL;
 
-	domain->iotlb = vhost_iotlb_alloc(0, 0);
+	domain->iotlb = vhost_iotlb_alloc(max_iotlb_entries, 0);
 	if (!domain->iotlb)
 		goto err_iotlb;
 

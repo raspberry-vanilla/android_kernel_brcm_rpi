@@ -70,27 +70,36 @@ static phys_addr_t stage2_range_addr_end(phys_addr_t addr, phys_addr_t end)
  * long will also starve other vCPUs. We have to also make sure that the page
  * tables are not freed while we released the lock.
  */
-static int stage2_apply_range(struct kvm_s2_mmu *mmu, phys_addr_t addr,
+static int stage2_apply_range(struct kvm_s2_mmu *mmu, phys_addr_t start,
 			      phys_addr_t end,
 			      int (*fn)(struct kvm_pgtable *, u64, u64),
 			      bool resched)
 {
 	struct kvm *kvm = kvm_s2_mmu_to_kvm(mmu);
+	bool lock_dropped = false;
+	phys_addr_t addr = start;
 	int ret;
 	u64 next;
 
 	do {
 		struct kvm_pgtable *pgt = mmu->pgt;
+		/*
+		 * We may be raced on PGT teardown when we release the
+		 * kvm->mmu_lock. That's fine as the PGT is legitimately no
+		 * longer present.
+		 */
 		if (!pgt)
-			return -EINVAL;
+			return lock_dropped ? 0 : -EINVAL;
 
 		next = stage2_range_addr_end(addr, end);
 		ret = fn(pgt, addr, next - addr);
 		if (ret)
 			break;
 
-		if (resched && next != end)
+		if (resched && next != end) {
 			cond_resched_rwlock_write(&kvm->mmu_lock);
+			lock_dropped = true;
+		}
 	} while (addr = next, addr != end);
 
 	return ret;
@@ -1459,31 +1468,10 @@ transparent_hugepage_adjust(struct kvm *kvm, struct kvm_memory_slot *memslot,
 	return PAGE_SIZE;
 }
 
-static int get_vma_page_shift(struct vm_area_struct *vma, unsigned long hva)
+static int get_vma_page_shift(struct vm_area_struct *vma)
 {
-	unsigned long pa;
-
-	if (is_vm_hugetlb_page(vma) && !(vma->vm_flags & VM_PFNMAP))
+	if (is_vm_hugetlb_page(vma))
 		return huge_page_shift(hstate_vma(vma));
-
-	if (!(vma->vm_flags & VM_PFNMAP))
-		return PAGE_SHIFT;
-
-	VM_BUG_ON(is_vm_hugetlb_page(vma));
-
-	pa = (vma->vm_pgoff << PAGE_SHIFT) + (hva - vma->vm_start);
-
-#ifndef __PAGETABLE_PMD_FOLDED
-	if ((hva & (PUD_SIZE - 1)) == (pa & (PUD_SIZE - 1)) &&
-	    ALIGN_DOWN(hva, PUD_SIZE) >= vma->vm_start &&
-	    ALIGN(hva, PUD_SIZE) <= vma->vm_end)
-		return PUD_SHIFT;
-#endif
-
-	if ((hva & (PMD_SIZE - 1)) == (pa & (PMD_SIZE - 1)) &&
-	    ALIGN_DOWN(hva, PMD_SIZE) >= vma->vm_start &&
-	    ALIGN(hva, PMD_SIZE) <= vma->vm_end)
-		return PMD_SHIFT;
 
 	return PAGE_SHIFT;
 }
@@ -1795,10 +1783,12 @@ err_free_pages:
 }
 
 static int __pkvm_mem_abort_dmabuf(struct kvm_vcpu *vcpu, struct kvm_memory_slot *memslot,
-				   gfn_t gfn, u64 nr_pages, struct list_head *ppages)
+				   gfn_t gfn, long *__nr_pages, struct list_head *ppages)
 {
 	unsigned long hva = gfn_to_hva_memslot_prot(memslot, gfn, NULL);
+	long nr_ppages = 0, nr_pages = *__nr_pages;
 	struct kvm_pinned_page *ppage;
+	struct kvm *kvm = vcpu->kvm;
 	struct file *file;
 	struct page *page;
 	bool writable;
@@ -1807,7 +1797,16 @@ static int __pkvm_mem_abort_dmabuf(struct kvm_vcpu *vcpu, struct kvm_memory_slot
 	if (kvm_is_error_hva(hva))
 		return -EFAULT;
 
-	while (nr_pages--) {
+	while (nr_pages) {
+		read_lock(&kvm->mmu_lock);
+		while (nr_pages && find_ppage(kvm, gfn << PAGE_SHIFT)) {
+			gfn++;
+			nr_pages--;
+		}
+		read_unlock(&kvm->mmu_lock);
+		if (!nr_pages)
+			break;
+
 		pfn = ___kvm_faultin_pfn(memslot, gfn, FOLL_WRITE, &writable, &page, &file);
 		if (is_error_pfn(pfn))
 			return -EFAULT;
@@ -1834,9 +1833,12 @@ static int __pkvm_mem_abort_dmabuf(struct kvm_vcpu *vcpu, struct kvm_memory_slot
 		ppage->slot = memslot;
 		list_add_tail(&ppage->list_node, ppages);
 
+		nr_ppages++;
 		gfn++;
-		hva += PAGE_SIZE;
+		nr_pages--;
 	}
+
+	*__nr_pages = nr_ppages;
 
 	return 0;
 }
@@ -2176,10 +2178,10 @@ static int pkvm_mem_abort(struct kvm_vcpu *vcpu, phys_addr_t fault_ipa, size_t s
 		if (!ret)
 			return ret;
 
-		ret = __pkvm_mem_abort_dmabuf(vcpu, memslot, gfn, nr_pages, &ppages);
+		ret = __pkvm_mem_abort_dmabuf(vcpu, memslot, gfn, &nr_pages, &ppages);
 		if (ret)
 			goto free_ppages;
-		goto topup;
+		goto donation;
 	} else if (ret) {
 		mmap_read_unlock(mm);
 		return ret;
@@ -2191,12 +2193,14 @@ static int pkvm_mem_abort(struct kvm_vcpu *vcpu, phys_addr_t fault_ipa, size_t s
 	if (ret) {
 		unpin_user_pages(pages, nr_pages);
 		goto free_pages;
-	} else if (list_empty(&ppages)) {
+	}
+
+donation:
+	if (list_empty(&ppages)) {
 		ret = 0;
 		goto free_pages;
 	}
 
-topup:
 	ret = __pkvm_topup_stage2_memcache(vcpu, &ppages);
 	if (ret)
 		goto free_ppages;
@@ -2433,10 +2437,6 @@ static int user_mem_abort(struct kvm_vcpu *vcpu, phys_addr_t fault_ipa,
 	if (ret)
 		return ret;
 
-	/*
-	 * Let's check if we will get back a huge page backed by hugetlbfs, or
-	 * get block mapping for device MMIO region.
-	 */
 	mmap_read_lock(current->mm);
 	vma = vma_lookup(current->mm, hva);
 	if (unlikely(!vma)) {
@@ -2448,7 +2448,7 @@ static int user_mem_abort(struct kvm_vcpu *vcpu, phys_addr_t fault_ipa,
 	if (force_pte)
 		vma_shift = PAGE_SHIFT;
 	else
-		vma_shift = get_vma_page_shift(vma, hva);
+		vma_shift = get_vma_page_shift(vma);
 
 	switch (vma_shift) {
 #ifndef __PAGETABLE_PMD_FOLDED
@@ -2564,16 +2564,6 @@ static int user_mem_abort(struct kvm_vcpu *vcpu, phys_addr_t fault_ipa,
 			if (!kvm_supports_cacheable_pfnmap())
 				ret = -EFAULT;
 		} else {
-			/*
-			 * If the page was identified as device early by looking at
-			 * the VMA flags, vma_pagesize is already representing the
-			 * largest quantity we can map.  If instead it was mapped
-			 * via __kvm_faultin_pfn(), vma_pagesize is set to PAGE_SIZE
-			 * and must not be upgraded.
-			 *
-			 * In both cases, we don't let transparent_hugepage_adjust()
-			 * change things at the last minute.
-			 */
 			s2_force_noncacheable = true;
 		}
 	} else if (logging_active && !write_fault) {
@@ -2604,9 +2594,10 @@ static int user_mem_abort(struct kvm_vcpu *vcpu, phys_addr_t fault_ipa,
 
 	/*
 	 * If we are not forced to use page mapping, check if we are
-	 * backed by a THP and thus use block mapping if possible.
+	 * backed by a huge stage-1 mapping and thus use block mapping if
+	 * possible.
 	 */
-	if (vma_pagesize == PAGE_SIZE && !(force_pte || s2_force_noncacheable)) {
+	if (vma_pagesize == PAGE_SIZE && !force_pte) {
 		if (fault_is_perm && fault_granule > PAGE_SIZE)
 			vma_pagesize = fault_granule;
 		else
@@ -3100,6 +3091,10 @@ int kvm_arch_prepare_memory_region(struct kvm *kvm,
 	 * there aren't any CoCo VMs that support only private memory on arm64.
 	 */
 	if (kvm_slot_has_gmem(new) && !kvm_memslot_is_gmem_only(new))
+		return -EINVAL;
+
+	/* guest_memfd is incompatible with MTE. */
+	if (kvm_slot_has_gmem(new) && kvm_has_mte(kvm))
 		return -EINVAL;
 
 	hva = new->userspace_addr;

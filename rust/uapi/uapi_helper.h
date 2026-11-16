@@ -6,13 +6,18 @@
  * Sorted alphabetically.
  */
 
-#include <uapi/asm-generic/ioctl.h>
 #include <uapi/drm/drm.h>
 #include <uapi/drm/nova_drm.h>
 #include <uapi/drm/panthor_drm.h>
 #include <uapi/linux/android/binder.h>
 #include <uapi/linux/android/binder_netlink.h>
+#include <uapi/linux/ioctl.h>
 #include <uapi/linux/mdio.h>
 #include <uapi/linux/mii.h>
 #include <uapi/linux/ethtool.h>
 #include <uapi/linux/wrapfd.h>
+
+#ifdef CONFIG_ANDROID_WRAPFD
+const size_t RUST_CONST_HELPER_WRAPFD_MAX_NR_MONITORS = WRAPFD_MAX_NR_MONITORS;
+const size_t RUST_CONST_HELPER_WRAPFD_MAX_NR_EVENTS = WRAPFD_MAX_NR_EVENTS;
+#endif

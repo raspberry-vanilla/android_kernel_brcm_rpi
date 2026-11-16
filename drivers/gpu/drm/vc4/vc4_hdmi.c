@@ -654,7 +654,7 @@ static int vc4_hdmi_write_infoframe(struct drm_connector *connector,
 	if (!drm_dev_enter(drm, &idx))
 		return 0;
 
-	if (len > sizeof(buffer)) {
+	if (len > VC4_HDMI_PACKET_SIZE) {
 		ret = -ENOMEM;
 		goto out;
 	}
@@ -679,6 +679,9 @@ static int vc4_hdmi_write_infoframe(struct drm_connector *connector,
 		       buffer[i + 2] << 16,
 		       base + packet_reg);
 		packet_reg += 4;
+
+		if (packet_reg >= packet_reg_next)
+			break;
 
 		writel(buffer[i + 3] << 0 |
 		       buffer[i + 4] << 8 |
@@ -1730,6 +1733,9 @@ static int vc4_hdmi_encoder_atomic_check(struct drm_encoder *encoder,
 		tmds_char_rate = mode->clock * 1000;
 	}
 
+	/* Rebuilds every crtc_* field, so CRTC_INTERLACE_HALVE_V is needed too */
+	drm_mode_set_crtcinfo(mode, CRTC_INTERLACE_HALVE_V | CRTC_STEREO_DOUBLE);
+
 	return 0;
 }
 
@@ -1853,7 +1859,7 @@ static void vc4_hdmi_set_n_cts(struct vc4_hdmi *vc4_hdmi, unsigned int samplerat
 	lockdep_assert_held(&vc4_hdmi->hw_lock);
 
 	n = 128 * samplerate / 1000;
-	tmp = (u64)(mode->clock * 1000) * n;
+	tmp = (u64)(mode->crtc_clock * 1000) * n;
 	do_div(tmp, 128 * samplerate);
 	cts = tmp;
 
@@ -2064,6 +2070,13 @@ static int vc4_hdmi_audio_prepare(struct drm_connector *connector,
 	vc4_hdmi_audio_set_mai_clock(vc4_hdmi, sample_rate);
 
 	spin_lock_irqsave(&vc4_hdmi->hw_lock, flags);
+	/* Also reached on xrun recovery, where startup is not called */
+	HDMI_WRITE(HDMI_MAI_CTL,
+		   VC4_HD_MAI_CTL_RESET |
+		   VC4_HD_MAI_CTL_FLUSH |
+		   VC4_HD_MAI_CTL_DLATE |
+		   VC4_HD_MAI_CTL_ERRORE |
+		   VC4_HD_MAI_CTL_ERRORF);
 	HDMI_WRITE(HDMI_MAI_CTL,
 		   VC4_SET_FIELD(channels, VC4_HD_MAI_CTL_CHNUM) |
 		   VC4_HD_MAI_CTL_WHOLSMP |
@@ -2161,8 +2174,17 @@ static int vc4_hdmi_audio_cpu_dai_probe(struct snd_soc_dai *dai)
 	return 0;
 }
 
+static int vc4_hdmi_audio_cpu_dai_startup(struct snd_pcm_substream *substream,
+					  struct snd_soc_dai *dai)
+{
+	/* hdmi-codec has no channel allocation for odd channel counts */
+	return snd_pcm_hw_constraint_step(substream->runtime, 0,
+					  SNDRV_PCM_HW_PARAM_CHANNELS, 2);
+}
+
 static const struct snd_soc_dai_ops vc4_snd_dai_ops = {
 	.probe  = vc4_hdmi_audio_cpu_dai_probe,
+	.startup = vc4_hdmi_audio_cpu_dai_startup,
 };
 
 static struct snd_soc_dai_driver vc4_hdmi_audio_cpu_dai_drv = {
@@ -2355,7 +2377,8 @@ static irqreturn_t vc4_hdmi_hpd_irq_thread(int irq, void *priv)
 	struct drm_connector *connector = &vc4_hdmi->connector;
 	struct drm_device *dev = connector->dev;
 
-	if (dev && dev->registered && !force_hotplug)
+	if (dev && dev->registered &&
+	    !(force_hotplug & BIT(vc4_hdmi->encoder.type - VC4_ENCODER_TYPE_HDMI0)))
 		drm_connector_helper_hpd_irq_event(connector);
 
 	return IRQ_HANDLED;
@@ -3069,7 +3092,6 @@ static int vc4_hdmi_runtime_suspend(struct device *dev)
 	HDMI_WRITE(HDMI_RAM_PACKET_CONFIG, 0);
 	spin_unlock_irqrestore(&vc4_hdmi->hw_lock, flags);
 
-
 	clk_disable_unprepare(vc4_hdmi->audio_clock);
 	/* we no longer require a minimum clock rate */
 	clk_set_min_rate(vc4_hdmi->hsm_clock, 0);
@@ -3081,9 +3103,8 @@ static int vc4_hdmi_runtime_suspend(struct device *dev)
 static int vc4_hdmi_runtime_resume(struct device *dev)
 {
 	struct vc4_hdmi *vc4_hdmi = dev_get_drvdata(dev);
-	unsigned long flags;
+	unsigned long rate, flags;
 	u32 __maybe_unused value;
-	unsigned long rate;
 	int ret;
 
 	ret = clk_prepare_enable(vc4_hdmi->hsm_clock);
@@ -3130,8 +3151,7 @@ static int vc4_hdmi_runtime_resume(struct device *dev)
 #endif
 
 	spin_lock_irqsave(&vc4_hdmi->hw_lock, flags);
-	HDMI_WRITE(HDMI_RAM_PACKET_CONFIG,
-		   VC4_HDMI_RAM_PACKET_ENABLE);
+	HDMI_WRITE(HDMI_RAM_PACKET_CONFIG, VC4_HDMI_RAM_PACKET_ENABLE);
 	spin_unlock_irqrestore(&vc4_hdmi->hw_lock, flags);
 
 	return 0;

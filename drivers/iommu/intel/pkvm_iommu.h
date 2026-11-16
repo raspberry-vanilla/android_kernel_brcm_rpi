@@ -42,6 +42,11 @@ extern unsigned int pkvm_sym(iommu_pgsz_mask);
 extern int pkvm_sym(intel_iommu_sm);
 extern int pkvm_sym(intel_iommu_superpage);
 
+extern bool __read_mostly pkvm_sym(intel_iommu_pkvm_use_nested);
+#define pkvm_nested_enabled(iommu)	(intel_iommu_pkvm_use_nested && \
+					 sm_supported(iommu) && \
+					 ecap_nest((iommu)->ecap))
+
 PKVM_DECLARE(int, prepare_iommu, (struct intel_iommu_info *info));
 
 #ifndef __PKVM_HYP__
@@ -132,6 +137,8 @@ int pkvm_domain_map(struct dmar_domain *domain, unsigned long iov_pfn,
 		    int prot, int gfp);
 int pkvm_domain_unmap(struct dmar_domain *domain, unsigned long start_pfn,
 		      unsigned long last_pfn);
+int pkvm_domain_flush(struct dmar_domain *domain, unsigned long start,
+		      unsigned long last, bool ih);
 int pkvm_modify_irte(struct intel_iommu *iommu, int index, struct irte *irte_modified);
 int pkvm_write_iommu_msi(struct intel_iommu *iommu, u32 offset, u32 data,
 			 u32 addr, u32 uaddr);
@@ -206,6 +213,7 @@ int pkvm_iommu_alloc_domain(struct alloc_domain_data *data);
 int pkvm_iommu_free_domain(u64 pgd_gpa, struct pkvm_memcache *mc);
 int pkvm_iommu_domain_map(struct domain_map_data *in, struct domain_map_data *out);
 int pkvm_iommu_domain_unmap(u64 pgd_gpa, u64 start_pfn, u64 last_pfn);
+int pkvm_iommu_domain_flush(u64 pgd_gpa, u64 start, u64 last, bool ih);
 int pkvm_iommu_modify_irte(struct modify_irte_data *data);
 
 /*
@@ -228,6 +236,10 @@ int pkvm_iommu_frcd_validate_write(struct intel_iommu *iommu,
 				   unsigned long offset, int len, u64 val);
 #endif /* !__PKVM_HYP__ */
 #else /* !CONFIG_PKVM_INTEL */
+static inline bool pkvm_nested_enabled(struct intel_iommu *iommu)
+{
+	return false;
+}
 static inline int pkvm_iec_flush(struct intel_iommu *iommu, bool global,
 				 int index, int mask)
 {
@@ -283,6 +295,12 @@ static inline int pkvm_domain_map(struct dmar_domain *domain, unsigned long iov_
 }
 static inline int pkvm_domain_unmap(struct dmar_domain *domain, unsigned long start_pfn,
 				    unsigned long last_pfn)
+{
+	return -EOPNOTSUPP;
+}
+static inline int pkvm_domain_flush(struct dmar_domain *domain,
+				    unsigned long start, unsigned long last,
+				    bool ih)
 {
 	return -EOPNOTSUPP;
 }

@@ -70,7 +70,7 @@ static int rwbf_quirk;
  * (used when kernel is launched w/ TXT)
  */
 static int force_on = 0;
-static int intel_iommu_tboot_noforce;
+int intel_iommu_tboot_noforce;
 static int no_platform_optin;
 
 #define ROOT_ENTRY_NR (VTD_PAGE_SIZE/sizeof(struct root_entry))
@@ -170,7 +170,10 @@ static void device_rbtree_remove(struct device_domain_info *info)
 	unsigned long flags;
 
 	spin_lock_irqsave(&iommu->device_rbtree_lock, flags);
-	rb_erase(&info->node, &iommu->device_rbtree);
+	if (!RB_EMPTY_NODE(&info->node)) {
+		rb_erase(&info->node, &iommu->device_rbtree);
+		RB_CLEAR_NODE(&info->node);
+	}
 	spin_unlock_irqrestore(&iommu->device_rbtree_lock, flags);
 }
 
@@ -213,6 +216,16 @@ int dmar_disabled = !IS_ENABLED(CONFIG_INTEL_IOMMU_DEFAULT_ON);
 #endif /* !__PKVM_HYP__ */
 int intel_iommu_sm = IS_ENABLED(CONFIG_INTEL_IOMMU_SCALABLE_MODE_DEFAULT_ON);
 int intel_iommu_superpage = 1;
+
+#ifdef CONFIG_PKVM_INTEL
+/*
+ * Enable pKVM hypervisor to configure devices for nested translation (if IOMMU
+ * supports nested feature), when host configures a device for first level
+ * translation. Host EPT is used as the second stage page table for nested
+ * translation. Can be disabled via intel_iommu=pkvm_nested_off.
+ */
+bool intel_iommu_pkvm_use_nested = true;
+#endif
 
 #ifndef __PKVM_HYP__
 int intel_iommu_enabled = 0;
@@ -280,6 +293,11 @@ static int __init intel_iommu_setup(char *str)
 		} else if (!strncmp(str, "tboot_noforce", 13)) {
 			pr_info("Intel-IOMMU: not forcing on after tboot. This could expose security risk for tboot\n");
 			intel_iommu_tboot_noforce = 1;
+#ifdef CONFIG_PKVM_INTEL
+		} else if (!strncmp(str, "pkvm_nested_off", 15)) {
+			pr_info("Disable nested translation in pKVM\n");
+			intel_iommu_pkvm_use_nested = false;
+#endif
 		} else {
 			pr_notice("Unknown option - '%s'\n", str);
 		}
@@ -723,7 +741,9 @@ void dmar_fault_dump_ptes(struct intel_iommu *iommu, u16 source_id,
 		return;
 	}
 
-	if (pasid_pte_get_pgtt(pte) == PASID_ENTRY_PGTT_FL_ONLY) {
+	if (pasid_pte_get_pgtt(pte) == PASID_ENTRY_PGTT_FL_ONLY ||
+	    (pkvm_enabled() &&
+	     pasid_pte_get_pgtt(pte) == PASID_ENTRY_PGTT_NESTED)) {
 		level = pte->val[2] & BIT_ULL(2) ? 5 : 4;
 		pgtable = phys_to_virt(pte->val[2] & VTD_PAGE_MASK);
 	} else {
@@ -1613,7 +1633,8 @@ static void copied_context_tear_down(struct intel_iommu *iommu,
 	assert_spin_locked(&iommu->lock);
 
 	did_old = context_domain_id(context);
-	context_clear_entry(context);
+	context_clear_present(context);
+	__iommu_flush_cache(iommu, context, sizeof(*context));
 
 	if (did_old < cap_ndoms(iommu->cap)) {
 		iommu->flush.flush_context(iommu, did_old,
@@ -1623,6 +1644,9 @@ static void copied_context_tear_down(struct intel_iommu *iommu,
 		iommu->flush.flush_iotlb(iommu, did_old, 0, 0,
 					 DMA_TLB_DSI_FLUSH);
 	}
+
+	context_clear_entry(context);
+	__iommu_flush_cache(iommu, context, sizeof(*context));
 
 	clear_context_copied(iommu, bus, devfn);
 }
@@ -2080,7 +2104,7 @@ void domain_context_clear_one(struct device_domain_info *info, u8 bus, u8 devfn,
 #ifndef __PKVM_HYP__
 	spin_unlock(&iommu->lock);
 #endif
-	intel_context_flush_no_pasid(info, context, did);
+	intel_context_flush_no_pasid(info, context, did, PCI_DEVID(bus, devfn));
 	context_clear_entry(context);
 #ifdef __PKVM_HYP__
 	spin_unlock(&iommu->lock);
@@ -2308,7 +2332,7 @@ static int copy_context_table(struct intel_iommu *iommu,
 			      struct context_entry **tbl,
 			      int bus, bool ext)
 {
-	int tbl_idx, pos = 0, idx, devfn, ret = 0, did;
+	int tbl_idx, tbl_slot = 0, idx, devfn, ret = 0, did;
 	struct context_entry *new_ce = NULL, ce;
 	struct context_entry *old_ce = NULL;
 	struct root_entry re;
@@ -2324,10 +2348,9 @@ static int copy_context_table(struct intel_iommu *iommu,
 		if (idx == 0) {
 			/* First save what we may have and clean up */
 			if (new_ce) {
-				tbl[tbl_idx] = new_ce;
+				tbl[tbl_idx + tbl_slot] = new_ce;
 				__iommu_flush_cache(iommu, new_ce,
 						    VTD_PAGE_SIZE);
-				pos = 1;
 			}
 
 			if (old_ce)
@@ -2348,6 +2371,9 @@ static int copy_context_table(struct intel_iommu *iommu,
 					goto out;
 				}
 			}
+
+			/* Track if saving UCTP or LCTP entries in scalable mode */
+			tbl_slot = ext && devfn >= 0x80 ? 1 : 0;
 
 			ret = -ENOMEM;
 			old_ce = memremap(old_ce_phys, PAGE_SIZE,
@@ -2377,7 +2403,7 @@ static int copy_context_table(struct intel_iommu *iommu,
 		new_ce[idx] = ce;
 	}
 
-	tbl[tbl_idx + pos] = new_ce;
+	tbl[tbl_idx + tbl_slot] = new_ce;
 
 	__iommu_flush_cache(iommu, new_ce, VTD_PAGE_SIZE);
 
@@ -3406,11 +3432,11 @@ static bool has_external_pci(void)
 
 static int __init platform_optin_force_iommu(void)
 {
-	if ((!dmar_platform_optin() || no_platform_optin || !has_external_pci()) &&
-	    !pkvm_enabled())
+	if ((no_iommu || !dmar_platform_optin() || no_platform_optin ||
+	     !has_external_pci()) && !pkvm_enabled())
 		return 0;
 
-	if (no_iommu || dmar_disabled)
+	if (dmar_disabled)
 		pr_info("Intel-IOMMU force enabled due to platform opt in\n");
 
 	/*
@@ -3421,7 +3447,6 @@ static int __init platform_optin_force_iommu(void)
 		iommu_set_default_passthrough(false);
 
 	dmar_disabled = 0;
-	no_iommu = 0;
 
 	return 1;
 }
@@ -3724,6 +3749,10 @@ static struct dmar_domain *paging_domain_alloc(struct device *dev, bool first_st
 
 	domain->nid = dev_to_node(dev);
 	domain->use_first_level = first_stage;
+#ifdef CONFIG_PKVM_INTEL
+	if (pkvm_enabled() && pkvm_nested_enabled(iommu) && first_stage)
+		domain->pkvm_nested = true;
+#endif
 
 	domain->domain.type = IOMMU_DOMAIN_UNMANAGED;
 
@@ -3773,9 +3802,10 @@ static struct dmar_domain *paging_domain_alloc(struct device *dev, bool first_st
 			kfree(domain);
 			return ERR_PTR(ret);
 		}
-	} else {
-		domain_flush_cache(domain, domain->pgd, PAGE_SIZE);
 	}
+
+	if (!pkvm_enabled() || domain_pkvm_nested(domain))
+		domain_flush_cache(domain, domain->pgd, PAGE_SIZE);
 
 	return domain;
 }
@@ -3883,14 +3913,16 @@ static void intel_iommu_domain_free(struct iommu_domain *domain)
 	if (dmar_domain->pgd) {
 		struct iommu_pages_list freelist =
 			IOMMU_PAGES_LIST_INIT(freelist);
+		int ret = 0;
 
 		if (pkvm_enabled()) {
-			int ret = pkvm_free_domain(dmar_domain);
-
+			ret = pkvm_free_domain(dmar_domain);
 			if (ret)
 				pr_err("pkvm_free_domain failed [pgd=%p] (err=%d)\n",
 					dmar_domain->pgd, ret);
-		} else {
+		}
+
+		if (!ret && (!pkvm_enabled() || domain_pkvm_nested(dmar_domain))) {
 			domain_unmap(dmar_domain, 0, DOMAIN_MAX_PFN(dmar_domain->gaw),
 				     &freelist);
 			iommu_put_pages_list(&freelist);
@@ -3910,6 +3942,10 @@ static int paging_domain_compatible_first_stage(struct dmar_domain *dmar_domain,
 
 	/* Only SL is available in legacy mode */
 	if (!sm_supported(iommu) || !ecap_flts(iommu->ecap))
+		return -EINVAL;
+
+	if (pkvm_enabled() &&
+	    domain_pkvm_nested(dmar_domain) != pkvm_nested_enabled(iommu))
 		return -EINVAL;
 
 	/* Same page size support */
@@ -4052,7 +4088,7 @@ static int intel_iommu_map(struct iommu_domain *domain,
 	   the low bits of hpa would take us onto the next page */
 	size = aligned_nrpages(hpa, size);
 
-	if (pkvm_enabled())
+	if (pkvm_enabled() && !domain_pkvm_nested(dmar_domain))
 		return pkvm_domain_map(dmar_domain, iova >> VTD_PAGE_SHIFT,
 				       hpa >> VTD_PAGE_SHIFT, size, prot, gfp);
 
@@ -4086,6 +4122,7 @@ static size_t intel_iommu_unmap(struct iommu_domain *domain,
 				unsigned long iova, size_t size,
 				struct iommu_iotlb_gather *gather)
 {
+	struct iommu_pages_list freelist = IOMMU_PAGES_LIST_INIT(freelist);
 	struct dmar_domain *dmar_domain = to_dmar_domain(domain);
 	unsigned long start_pfn, last_pfn;
 	struct dma_pte *pte;
@@ -4104,7 +4141,7 @@ static size_t intel_iommu_unmap(struct iommu_domain *domain,
 	start_pfn = iova >> VTD_PAGE_SHIFT;
 	last_pfn = (iova + size - 1) >> VTD_PAGE_SHIFT;
 
-	if (pkvm_enabled()) {
+	if (pkvm_enabled() && !domain_pkvm_nested(dmar_domain)) {
 		int ret = pkvm_domain_unmap(dmar_domain, start_pfn, last_pfn);
 
 		if (ret)
@@ -4113,7 +4150,7 @@ static size_t intel_iommu_unmap(struct iommu_domain *domain,
 		return size;
 	}
 
-	domain_unmap(dmar_domain, start_pfn, last_pfn, &gather->freelist);
+	domain_unmap(dmar_domain, start_pfn, last_pfn, &freelist);
 
 	if (dmar_domain->max_addr == iova + size)
 		dmar_domain->max_addr = iova;
@@ -4124,6 +4161,14 @@ static size_t intel_iommu_unmap(struct iommu_domain *domain,
 	 */
 	if (!iommu_iotlb_gather_queued(gather))
 		iommu_iotlb_gather_add_page(domain, gather, iova, size);
+
+	/*
+	 * iommu_iotlb_gather_add_page() may have synced, which frees
+	 * gather->freelist. Hand this range's page tables over only after
+	 * that call. A queued gather frees them from the flush queue
+	 * instead.
+	 */
+	iommu_pages_list_splice(&freelist, &gather->freelist);
 
 	return size;
 }
@@ -4142,17 +4187,9 @@ static size_t intel_iommu_unmap_pages(struct iommu_domain *domain,
 static void intel_iommu_tlb_sync(struct iommu_domain *domain,
 				 struct iommu_iotlb_gather *gather)
 {
-	/*
-	 * pKVM unconditionally performs the flush on unmap to close a security
-	 * gap where device will be able to read contents of a donated page which
-	 * was previously mapped for dma and then unmapped but iotlb not yet
-	 * flushed.
-	 * So, since pKVM already flushed the iotlb, don't bother doing it here.
-	 */
-	if (!pkvm_enabled())
-		cache_tag_flush_range(to_dmar_domain(domain), gather->start,
-				      gather->end,
-				      iommu_pages_list_empty(&gather->freelist));
+	cache_tag_flush_range(to_dmar_domain(domain), gather->start,
+			      gather->end,
+			      iommu_pages_list_empty(&gather->freelist));
 	iommu_put_pages_list(&gather->freelist);
 }
 
@@ -4279,6 +4316,7 @@ static struct iommu_device *intel_iommu_probe_device(struct device *dev)
 
 	info->dev = dev;
 	info->iommu = iommu;
+	RB_CLEAR_NODE(&info->node);
 	if (dev_is_pci(dev)) {
 		if (ecap_dev_iotlb_support(iommu->ecap) &&
 		    pci_ats_supported(pdev) &&
@@ -4337,6 +4375,7 @@ static struct iommu_device *intel_iommu_probe_device(struct device *dev)
 
 	return &iommu->iommu;
 free_table:
+	intel_pasid_teardown_sm_context(dev);
 	intel_pasid_free_table(dev);
 clear_rbtree:
 	device_rbtree_remove(info);
@@ -4536,6 +4575,14 @@ static int intel_iommu_iotlb_sync_map(struct iommu_domain *domain,
 				      unsigned long iova, size_t size)
 {
 	struct dmar_domain *dmar_domain = to_dmar_domain(domain);
+
+	/*
+	 * Host controls first level page table in pKVM's nested mode, but since pKVM
+	 * assumes !rwbf_required(), iotlb_sync on map is not required and not supported.
+	 */
+	if (WARN_ON_ONCE(domain_pkvm_nested(dmar_domain) &&
+			 dmar_domain->iotlb_sync_map))
+		return -EOPNOTSUPP;
 
 	/* pKVM performs iotlb flush after map if required */
 	if (!pkvm_enabled() && dmar_domain->iotlb_sync_map)

@@ -511,7 +511,7 @@ predicate_parse(const char *str, int nr_parens, int nr_preds,
 
 		switch (*next) {
 		case '(':					/* #2 */
-			if (top - op_stack > nr_parens) {
+			if (top - op_stack >= nr_parens - 1) {
 				ret = -EINVAL;
 				goto out_free;
 			}
@@ -594,6 +594,12 @@ predicate_parse(const char *str, int nr_parens, int nr_preds,
 			}
 			top--;					/* #12 */
 		}
+	}
+	/* Only the inner loop can complete a non-empty expression. */
+	if (N) {
+		ret = -EINVAL;
+		parse_error(pe, FILT_ERR_INVALID_FILTER, ptr - str);
+		goto out_free;
 	}
  out:
 	if (top != op_stack) {
@@ -1025,6 +1031,9 @@ static int regex_match_full(char *str, struct regex *r, int len)
 	/* len of zero means str is dynamic and ends with '\0' */
 	if (!len)
 		return strcmp(str, r->pattern) == 0;
+
+	if (len < r->len)
+		return 0;
 
 	return strncmp(str, r->pattern, len) == 0;
 }

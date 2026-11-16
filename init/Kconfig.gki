@@ -220,6 +220,7 @@ config GKI_HIDDEN_RPMSG_CONFIGS
 
 config GKI_HIDDEN_GPU_CONFIGS
 	bool "Hidden GPU configuration needed for GKI"
+	select TEGRA_HOST1X_CONTEXT_BUS if ARCH_TEGRA
 	select TRACE_GPU_MEM
 	help
 	  Dummy config option used to enable the hidden GPU config.

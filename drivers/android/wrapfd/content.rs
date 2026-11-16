@@ -78,8 +78,8 @@ impl DmaBufContent {
     }
 
     pub(crate) fn publish_wrap(
-        context: Pin<KBox<Wrap>>,
-        content: DmaBufContent,
+        wrap: Pin<KBox<Wrap>>,
+        mut content: DmaBufContent,
         close_on_exec: bool,
         clear_content: bool,
     ) -> Result<u32, (Error, DmaBufContent)> {
@@ -110,26 +110,19 @@ impl DmaBufContent {
             Ok(reservation) => reservation,
         };
 
-        let inner_clone = Arc::clone(&context.inner);
-        let mut guard = inner_clone.lock();
-        guard.content = Some(content);
+        let inner_clone = Arc::clone(&wrap.inner);
 
-        let file =
-            create_wrap_file(c_str!("[wrapfd]"), context, flags).map_err(|(err, _context)| {
-                let content = guard
-                    .content
-                    .take()
-                    .expect("We put a Some() in, we expect it still to be there");
-                (err, content)
-            })?;
+        let file = match create_wrap_file(c_str!("[wrapfd]"), wrap, flags) {
+            Ok(file) => file,
+            Err((err, _wrap)) => return Err((err, content)),
+        };
 
         if clear_content {
-            let content = guard.content.as_mut().unwrap();
             content.notify_listeners();
             _ = content.clear();
         }
 
-        drop(guard);
+        inner_clone.lock().content = Some(content);
 
         // SAFETY: `file` is a valid `kernel::fs::File` reference, ensuring `file.as_ptr()` is
         // non-null and points to an active `struct file`.

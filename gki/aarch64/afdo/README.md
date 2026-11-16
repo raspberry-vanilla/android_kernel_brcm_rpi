@@ -20,19 +20,22 @@ matures.
 
 Benchmark results were tested on Pixel 8.
 
-| Benchmark             | Improvement (Mean / Best-case)* |
+| Benchmark             | Improvement (Best-case)*        |
 | --------------------- | ------------------------------- |
-| Boot time             | 1.6%                            |
-| Cold App launch time  | 3.3%                            |
-| Binder-rpc            | 6.7% (up to 20.7%)*             |
-| Binder-addints        | 4.1% (up to 30.6%)*             |
-| Hwbinder              | 7.1% (up to 26.0%)*             |
+| Boot time             | 1.6%**                          |
+| Cold App launch time  | 3.3%**                          |
+| Binder-rpc            | 13.5%*                          |
+| Binder-addints        | 4.7%*                           |
+| Hwbinder              | 16.6%*                          |
 
-\* For binder benchmarks, both the average improvement (mean_diff) and the best observed improvement
-(min_diff) are reported. The benchmark results currently exhibit variance because the 6.18 kernel
-is in an early bringup stage on Pixel test devices (where power management, CPU frequency scaling,
-and scheduler tuning are still maturing), which introduces scheduling jitter and tail latency spikes
-that affect the mean improvement despite substantial peak and median gains.
+\* For binder benchmarks, the reported values represent the best observed improvement (min_diff)
+across multiple runs to account for variance. The benchmark results currently exhibit variance
+because the 6.18 kernel is in an early bringup stage on Pixel test devices (where power management,
+CPU frequency scaling, and scheduler tuning are still maturing), which introduces scheduling jitter
+and tail latency spikes that affect the mean improvement despite substantial peak and median gains.
+
+\** Right now we are not able to run the art benchmarks due to the tests are currently broken,
+will run them later.
 
 ## Steps to reproduce the profile
 

@@ -27,6 +27,7 @@
 #include <linux/migrate.h>
 #include <linux/perf_event.h>
 #include <linux/pkeys.h>
+#include <linux/ptshare.h>
 #include <linux/ksm.h>
 #include <linux/uaccess.h>
 #include <linux/mm_inline.h>
@@ -700,6 +701,7 @@ long change_protection(struct mmu_gather *tlb,
 	long pages;
 
 	BUG_ON((cp_flags & MM_CP_UFFD_WP_ALL) == MM_CP_UFFD_WP_ALL);
+	VM_WARN_ON_ONCE_VMA(vma_is_ptshare_client(vma), vma);
 
 #ifdef CONFIG_NUMA_BALANCING
 	/*
@@ -814,6 +816,11 @@ mprotect_fixup(struct vma_iterator *vmi, struct mmu_gather *tlb,
 		   !vma->anon_vma) {
 		newflags &= ~VM_ACCOUNT;
 	}
+
+	error = ptshare_unshare_vma_locked(vma);
+	if (error)
+		goto fail;
+	newflags = ptshare_sync_vm_flags(vma, newflags);
 
 	vma = vma_modify_flags(vmi, *pprev, vma, start, end, &newflags);
 	if (IS_ERR(vma)) {

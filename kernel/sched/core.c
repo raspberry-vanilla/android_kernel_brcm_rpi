@@ -521,6 +521,17 @@ static void __sched_core_flip(bool enabled)
 
 		sched_core_lock(cpu, &flags);
 
+		/*
+		 * A core-wide selection may have the shared rq lock temporarily
+		 * released by a lock-dropping ->pick_task(). Flipping would
+		 * rebind rq_lockp() under it. Wait it out.
+		 */
+		while (cpu_rq(cpu)->core->core_pick_in_flight) {
+			sched_core_unlock(cpu, &flags);
+			cpu_relax();
+			sched_core_lock(cpu, &flags);
+		}
+
 		for_each_cpu(t, smt_mask)
 			cpu_rq(t)->core_enabled = enabled;
 
@@ -2289,7 +2300,8 @@ void __proxy_remove_from_sleeping_owner(struct task_struct *owner, struct task_s
 	if (p->sleeping_owner == owner) {
 		list_del_init(&p->blocked_node);
 		WRITE_ONCE(p->sleeping_owner, NULL);
-		put_task_struct(owner); // matches get in proxy_enqueue_on_owner
+		put_task_struct(owner); // matches get in proxy_enqueue_on_owner()
+		put_task_struct(p);	// matchet get in proxy_enqueue_on_owner()
 	}
 }
 
@@ -3542,6 +3554,19 @@ void relax_compatible_cpus_allowed_ptr(struct task_struct *p)
 
 #ifdef CONFIG_SMP
 
+static void __do_migrate_task_rq(struct task_struct *p, unsigned int new_cpu)
+{
+	if (task_cpu(p) != new_cpu) {
+		if (p->sched_class->migrate_task_rq)
+			p->sched_class->migrate_task_rq(p, new_cpu);
+		p->se.nr_migrations++;
+		rseq_migrate(p);
+		sched_mm_cid_migrate_from(p);
+		perf_event_task_migrate(p);
+		trace_android_rvh_set_task_cpu(p, new_cpu);
+	}
+}
+
 void set_task_cpu(struct task_struct *p, unsigned int new_cpu)
 {
 	unsigned int state = READ_ONCE(p->__state);
@@ -3584,16 +3609,7 @@ void set_task_cpu(struct task_struct *p, unsigned int new_cpu)
 
 	trace_sched_migrate_task(p, new_cpu);
 
-	if (task_cpu(p) != new_cpu) {
-		if (p->sched_class->migrate_task_rq)
-			p->sched_class->migrate_task_rq(p, new_cpu);
-		p->se.nr_migrations++;
-		rseq_migrate(p);
-		sched_mm_cid_migrate_from(p);
-		perf_event_task_migrate(p);
-		trace_android_rvh_set_task_cpu(p, new_cpu);
-	}
-
+	__do_migrate_task_rq(p, new_cpu);
 	__set_task_cpu(p, new_cpu);
 }
 EXPORT_SYMBOL_GPL(set_task_cpu);
@@ -3974,6 +3990,7 @@ static inline void proxy_set_task_cpu(struct task_struct *p, int cpu)
 	 * was previously runnable.
 	 */
 	wake_cpu = p->wake_cpu;
+	__do_migrate_task_rq(p, cpu);
 	__set_task_cpu(p, cpu);
 	p->wake_cpu = wake_cpu;
 }
@@ -3988,6 +4005,10 @@ static void do_activate_blocked_waiter(struct rq *target_rq, struct task_struct 
 		state = READ_ONCE(p->__state);
 		/* Avoid racing with ttwu */
 		if (state == TASK_WAKING)
+			return;
+
+		/* Dead tasks don't activate */
+		if (state == TASK_DEAD || READ_ONCE(p->exit_state))
 			return;
 
 		if (READ_ONCE(p->on_rq)) {
@@ -4119,6 +4140,7 @@ static void activate_blocked_waiters(struct rq *target_rq,
 					     blocked_node);
 			WARN_ON(p == owner);
 			WARN_ON(p->sleeping_owner != owner);
+			get_task_struct(p);
 			__proxy_remove_from_sleeping_owner(owner, p);
 			raw_spin_unlock_irqrestore(&owner->blocked_lock, flags);
 
@@ -4131,6 +4153,7 @@ static void activate_blocked_waiters(struct rq *target_rq,
 				list_add_tail(&p->blocked_activation_node, &bal_head);
 			}
 			raw_spin_unlock_irqrestore(&p->blocked_lock, flags);
+			put_task_struct(p);
 
 			raw_spin_lock_irqsave(&owner->blocked_lock, flags);
 		}
@@ -6314,8 +6337,8 @@ void sched_tick(void)
 {
 	int cpu = smp_processor_id();
 	struct rq *rq = cpu_rq(cpu);
-	/* accounting goes to the donor task */
-	struct task_struct *donor;
+	/* scheduler accounting goes to the donor task */
+	struct task_struct *curr, *donor;
 	struct rq_flags rf;
 	unsigned long hw_pressure;
 	u64 resched_latency;
@@ -6326,9 +6349,10 @@ void sched_tick(void)
 	sched_clock_tick();
 
 	rq_lock(rq, &rf);
+	curr = rq->curr;
 	donor = rq->donor;
 
-	psi_account_irqtime(rq, donor, NULL);
+	psi_account_irqtime(rq, curr, NULL);
 
 	update_rq_clock(rq);
 	trace_android_rvh_tick_entry(rq);
@@ -6353,8 +6377,8 @@ void sched_tick(void)
 
 	perf_event_task_tick();
 
-	if (donor->flags & PF_WQ_WORKER)
-		wq_worker_tick(donor);
+	if (curr->flags & PF_WQ_WORKER)
+		wq_worker_tick(curr);
 
 	if (!scx_switched_all()) {
 		rq->idle_balance = idle_cpu(cpu);
@@ -6805,6 +6829,8 @@ pick_next_task(struct rq *rq, struct rq_flags *rf)
 		return __pick_next_task(rq, rf);
 	}
 
+	rq->core->core_pick_in_flight++;
+
 	/*
 	 * If there were no {en,de}queues since we picked (IOW, the task
 	 * pointers are all still valid), and we haven't scheduled the last
@@ -7019,6 +7045,7 @@ restart:
 	}
 
 out_set_next:
+	rq->core->core_pick_in_flight--;
 	put_prev_set_next_task(rq, rq->donor, next);
 	if (rq->core->core_forceidle_count && next == rq->idle)
 		queue_core_balance(rq);
@@ -7211,6 +7238,13 @@ static void sched_core_cpu_deactivate(unsigned int cpu)
 	core_rq->core_forceidle_count      = rq->core_forceidle_count;
 	core_rq->core_forceidle_seq        = rq->core_forceidle_seq;
 	core_rq->core_forceidle_occupation = rq->core_forceidle_occupation;
+
+	/*
+	 * A stale leftover would bias the count forever if this CPU later
+	 * returns as its own leader. Move, don't copy.
+	 */
+	core_rq->core_pick_in_flight       = rq->core_pick_in_flight;
+	rq->core_pick_in_flight            = 0;
 
 	/*
 	 * Accounting edge for forced idle is handled in pick_next_task().
@@ -7416,6 +7450,7 @@ static void proxy_enqueue_on_owner(struct rq *rq, struct task_struct *owner,
 	WARN_ON(!p->on_rq);
 	WARN_ON(p->sleeping_owner);
 	get_task_struct(owner);
+	get_task_struct(p);
 	WRITE_ONCE(p->sleeping_owner, owner);
 	/*
 	 * ttwu_do_activate must not have a chance to activate p
@@ -7452,6 +7487,9 @@ DEFINE_LOCK_GUARD_1(blocked_on_lock, struct blocked_on_lock,
     lock_blocked_on_lock(_T->lock),
     unlock_blocked_on_lock(_T->lock))
 
+
+#define MAX_PROXY_CHAIN_DEPTH 1024
+
 /*
  * Find runnable lock owner to proxy for mutex blocked donor
  *
@@ -7484,10 +7522,14 @@ find_proxy_task(struct rq *rq, struct task_struct *donor, struct rq_flags *rf)
 {
 	struct blocked_on_lock bo, *blocked_on;
 	struct task_struct *owner = NULL;
+	struct task_struct *cycle_checkpoint = donor;
+	unsigned int cycle_power = 1;
+	unsigned int cycle_span = 0;
 	bool curr_in_chain = false;
 	int this_cpu = cpu_of(rq);
 	struct task_struct *p;
 	int owner_cpu;
+	int chain_depth = 0;
 
 	/* Follow blocked_on chain. */
 	for (p = donor; task_is_blocked(p); p = owner) {
@@ -7496,6 +7538,13 @@ find_proxy_task(struct rq *rq, struct task_struct *donor, struct rq_flags *rf)
 		bo = p->blocked_on;
 		raw_spin_unlock(&p->blocked_lock);
 		blocked_on = &bo;
+
+		/* Keep Brent's checkpoint state local to this owner walk. */
+		if (cycle_span == cycle_power) {
+			cycle_checkpoint = p;
+			cycle_power <<= 1;
+			cycle_span = 0;
+		}
 
 		/* Something changed in the chain, so pick again */
 		if (!blocked_on->lock)
@@ -7642,6 +7691,18 @@ find_proxy_task(struct rq *rq, struct task_struct *donor, struct rq_flags *rf)
 			 */
 			return proxy_resched_idle(rq);
 		}
+
+		/*
+		 * Check for cycles, and worst case limit the depth
+		 * we'll proxy to avoid cyclic deadlocks
+		 */
+		cycle_span++;
+		if ((owner == cycle_checkpoint) ||
+		    (++chain_depth > MAX_PROXY_CHAIN_DEPTH)) {
+			__clear_task_blocked_on(p, NULL);
+			goto deactivate;
+		}
+
 		/*
 		 * OK, now we're absolutely sure @owner is on this
 		 * rq, therefore holding @rq->lock is sufficient to
@@ -8264,6 +8325,17 @@ void rt_mutex_pre_schedule(void)
 	sched_submit_work(current);
 }
 
+/*
+ * Used within the futex syscall context, skips sched_submit_work() because none
+ * its work will be done. Asserts ensure that it is indeed the case.
+ */
+void rt_mutex_futex_pre_schedule(void)
+{
+	lockdep_assert(!(current->flags & (PF_WQ_WORKER | PF_IO_WORKER)));
+	lockdep_assert(!current->plug);
+	lockdep_assert(!fetch_and_set(current->sched_rt_mutex, 1));
+}
+
 void rt_mutex_schedule(void)
 {
 	lockdep_assert(current->sched_rt_mutex);
@@ -8273,6 +8345,11 @@ void rt_mutex_schedule(void)
 void rt_mutex_post_schedule(void)
 {
 	sched_update_worker(current);
+	lockdep_assert(fetch_and_set(current->sched_rt_mutex, 0));
+}
+
+void rt_mutex_futex_post_schedule(void)
+{
 	lockdep_assert(fetch_and_set(current->sched_rt_mutex, 0));
 }
 
@@ -9743,6 +9820,7 @@ void __init sched_init(void)
 		rq->core_forceidle_count = 0;
 		rq->core_forceidle_occupation = 0;
 		rq->core_forceidle_start = 0;
+		rq->core_pick_in_flight = 0;
 
 		rq->core_cookie = 0UL;
 #endif
@@ -11545,7 +11623,7 @@ int __sched_mm_cid_migrate_from_try_steal_cid(struct rq *src_rq,
 	 *
 	 * The implicit barrier after cmpxchg per-mm/cpu cid before loading
 	 * rq->curr->mm_cid_active matches the barrier in
-	 * sched_mm_cid_exit_signals(), sched_mm_cid_before_execve(), and
+	 * sched_mm_cid_exit(), sched_mm_cid_before_execve(), and
 	 * sched_mm_cid_after_execve() between store to t->mm_cid_active and
 	 * load of per-mm/cpu cid.
 	 */
@@ -11665,7 +11743,7 @@ static void sched_mm_cid_remote_clear(struct mm_struct *mm, struct mm_cid *pcpu_
 	 *
 	 * The implicit barrier after cmpxchg per-mm/cpu cid before loading
 	 * rq->curr->mm_cid_active matches the barrier in
-	 * sched_mm_cid_exit_signals(), sched_mm_cid_before_execve(), and
+	 * sched_mm_cid_exit(), sched_mm_cid_before_execve(), and
 	 * sched_mm_cid_after_execve() between store to t->mm_cid_active and
 	 * load of per-mm/cpu cid.
 	 */
@@ -11810,7 +11888,7 @@ void task_tick_mm_cid(struct rq *rq, struct task_struct *curr)
 	task_work_add(curr, work, TWA_RESUME);
 }
 
-void sched_mm_cid_exit_signals(struct task_struct *t)
+void sched_mm_cid_exit(struct task_struct *t)
 {
 	struct mm_struct *mm = t->mm;
 	struct rq *rq;

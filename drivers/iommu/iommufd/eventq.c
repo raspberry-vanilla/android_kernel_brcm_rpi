@@ -272,8 +272,10 @@ iommufd_veventq_deliver_fetch(struct iommufd_veventq *veventq)
 		/* Make a copy of the lost_events_header for copy_to_user */
 		if (next == &veventq->lost_events_header) {
 			vevent = kzalloc(sizeof(*vevent), GFP_ATOMIC);
-			if (!vevent)
+			if (!vevent) {
+				vevent = ERR_PTR(-ENOMEM);
 				goto out_unlock;
+			}
 		}
 		list_del(&next->node);
 		if (vevent)
@@ -323,6 +325,12 @@ static ssize_t iommufd_veventq_fops_read(struct file *filep, char __user *buf,
 		return -EINVAL;
 
 	while ((cur = iommufd_veventq_deliver_fetch(veventq))) {
+		if (IS_ERR(cur)) {
+			if (done == 0)
+				rc = PTR_ERR(cur);
+			break;
+		}
+
 		/* Validate the remaining bytes against the header size */
 		if (done >= count || sizeof(*hdr) > count - done) {
 			iommufd_veventq_deliver_restore(veventq, cur);
@@ -388,9 +396,11 @@ static __poll_t iommufd_eventq_fops_poll(struct file *filep,
 static int iommufd_eventq_fops_release(struct inode *inode, struct file *filep)
 {
 	struct iommufd_eventq *eventq = filep->private_data;
+	/* eventq may be freed once the users reference is dropped. */
+	struct iommufd_ctx *ictx = eventq->ictx;
 
 	refcount_dec(&eventq->obj.users);
-	iommufd_ctx_put(eventq->ictx);
+	iommufd_ctx_put(ictx);
 	return 0;
 }
 
@@ -475,6 +485,8 @@ int iommufd_fault_iopf_handler(struct iopf_group *group)
 
 	hwpt = group->attach_handle->domain->iommufd_hwpt;
 	fault = hwpt->fault;
+
+	iopf_group_dequeue(group);
 
 	spin_lock(&fault->common.lock);
 	list_add_tail(&group->node, &fault->common.deliver);

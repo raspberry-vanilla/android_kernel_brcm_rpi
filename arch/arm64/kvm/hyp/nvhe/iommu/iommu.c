@@ -936,8 +936,10 @@ int kvm_iommu_iotlb_sync_map(pkvm_handle_t domain_id,
 		return -EINVAL;
 
 	kvm_iommu_ops = domain->driver;
-	if (!kvm_iommu_ops || !kvm_iommu_ops->iotlb_sync_map)
+	if (!kvm_iommu_ops || !kvm_iommu_ops->iotlb_sync_map) {
+		domain_put(domain);
 		return -ENODEV;
+	}
 
 	ret = kvm_iommu_ops->iotlb_sync_map(domain, iova, size);
 	domain_put(domain);

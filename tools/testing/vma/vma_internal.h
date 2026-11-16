@@ -1461,4 +1461,21 @@ static inline vm_flags_t ksm_vma_flags(const struct mm_struct *mm,
 	return vm_flags;
 }
 
+static inline void ptshare_vma_init_from(struct vm_area_struct *dest,
+					 const struct vm_area_struct *src)
+{
+}
+
+#define vmg_is_ptshare_client(vmg)	((void)(vmg), false)
+
+static inline bool vma_is_ptshare_shadow(const struct vm_area_struct *vma)
+{
+	return false;
+}
+
+static inline int ptshare_unshare_vma_locked(struct vm_area_struct *vma)
+{
+	return 0;
+}
+
 #endif	/* __MM_VMA_INTERNAL_H */

@@ -591,7 +591,7 @@ int sd_zbc_revalidate_zones(struct scsi_disk *sdkp)
 int sd_zbc_read_zones(struct scsi_disk *sdkp, struct queue_limits *lim,
 		u8 buf[SD_BUF_SIZE])
 {
-	unsigned int nr_zones;
+	u64 nr_zones;
 	u32 zone_blocks = 0;
 	int ret;
 
@@ -623,6 +623,12 @@ int sd_zbc_read_zones(struct scsi_disk *sdkp, struct queue_limits *lim,
 		goto err;
 
 	nr_zones = div64_u64(sdkp->capacity + zone_blocks - 1, zone_blocks);
+	if (nr_zones > INT_MAX) {
+		sd_printk(KERN_ERR, sdkp, "Too many zones (%llu)\n",
+			  nr_zones);
+		ret = -EINVAL;
+		goto err;
+	}
 	sdkp->early_zone_info.nr_zones = nr_zones;
 	sdkp->early_zone_info.zone_blocks = zone_blocks;
 

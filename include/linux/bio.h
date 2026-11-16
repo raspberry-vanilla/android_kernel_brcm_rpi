@@ -391,17 +391,27 @@ static inline bool bio_in_atomic(void)
 
 extern void bio_endio(struct bio *);
 
+/**
+ * bio_endio_status - end I/O on a bio with a specific status
+ * @bio:	bio
+ * @status:	status to set
+ *
+ * Set @bio->bi_status to @status and call bio_endio().
+ **/
+static inline void bio_endio_status(struct bio *bio, blk_status_t status)
+{
+	bio->bi_status = status;
+	bio_endio(bio);
+}
+
 static inline void bio_io_error(struct bio *bio)
 {
-	bio->bi_status = BLK_STS_IOERR;
-	bio_endio(bio);
+	bio_endio_status(bio, BLK_STS_IOERR);
 }
 
 static inline void bio_wouldblock_error(struct bio *bio)
 {
-	bio_set_flag(bio, BIO_QUIET);
-	bio->bi_status = BLK_STS_AGAIN;
-	bio_endio(bio);
+	bio_endio_status(bio, BLK_STS_AGAIN);
 }
 
 /*
@@ -691,20 +701,6 @@ struct bio_set {
 static inline bool bioset_initialized(struct bio_set *bs)
 {
 	return bs->bio_slab != NULL;
-}
-
-/*
- * Mark a bio as polled. Note that for async polled IO, the caller must
- * expect -EWOULDBLOCK if we cannot allocate a request (or other resources).
- * We cannot block waiting for requests on polled IO, as those completions
- * must be found by the caller. This is different than IRQ driven IO, where
- * it's safe to wait for IO to complete.
- */
-static inline void bio_set_polled(struct bio *bio, struct kiocb *kiocb)
-{
-	bio->bi_opf |= REQ_POLLED;
-	if (kiocb->ki_flags & IOCB_NOWAIT)
-		bio->bi_opf |= REQ_NOWAIT;
 }
 
 static inline void bio_clear_polled(struct bio *bio)

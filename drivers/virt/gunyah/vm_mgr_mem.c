@@ -6,6 +6,7 @@
 #define pr_fmt(fmt) "gunyah_vm_mgr: " fmt
 
 #include <asm/gunyah.h>
+#include <linux/falloc.h>
 #include <linux/mm.h>
 #include <linux/pagemap.h>
 
@@ -837,10 +838,94 @@ int gunyah_reclaim_parcels(struct gunyah_vm *ghvm, u64 start_gfn,
 	return ret2;
 }
 
+/*
+ * Remove the pvmfw range from its backing file before releasing its GUP pins.
+ * The pins keep the folios alive until the subsequent parcel reclaim drops
+ * them.
+ */
+static int gunyah_vm_punch_fw_hole(struct gunyah_vm *ghvm)
+{
+	struct gunyah_vm_binding *b;
+	struct vm_area_struct *vma;
+	unsigned long uaddr, end;
+	struct file *file;
+	u64 offset;
+	loff_t foffset;
+	int ret;
+
+	if (!ghvm->fw.config.size)
+		return 0;
+
+	down_read(&ghvm->bindings_lock);
+	b = mtree_load(&ghvm->bindings,
+		       gunyah_gpa_to_gfn(ghvm->fw.config.guest_phys_addr));
+	if (!b) {
+		ret = -ENOENT;
+		goto unlock_bindings;
+	}
+
+	if (b->mem_type != VM_MEM_USER || b->share_type != VM_MEM_LEND) {
+		ret = -EINVAL;
+		goto unlock_bindings;
+	}
+
+	if (ghvm->fw.config.guest_phys_addr < b->guest_phys_addr ||
+	    ghvm->fw.config.size > b->size ||
+	    ghvm->fw.config.guest_phys_addr - b->guest_phys_addr >
+		    b->size - ghvm->fw.config.size) {
+		ret = -EINVAL;
+		goto unlock_bindings;
+	}
+
+	offset = ghvm->fw.config.guest_phys_addr - b->guest_phys_addr;
+	if (offset > ULONG_MAX - b->userspace_addr ||
+	    ghvm->fw.config.size > ULONG_MAX - (b->userspace_addr + offset)) {
+		ret = -EOVERFLOW;
+		goto unlock_bindings;
+	}
+
+	uaddr = b->userspace_addr + offset;
+	end = uaddr + ghvm->fw.config.size;
+	up_read(&ghvm->bindings_lock);
+
+	mmap_read_lock(ghvm->mm_s);
+	vma = vma_lookup(ghvm->mm_s, uaddr);
+	if (!vma || end > vma->vm_end || !vma->vm_file) {
+		ret = -EINVAL;
+		goto unlock_mmap;
+	}
+
+	file = vma->vm_file;
+	get_file(file);
+	foffset = ((loff_t)vma->vm_pgoff << PAGE_SHIFT) +
+		  (uaddr - vma->vm_start);
+	mmap_read_unlock(ghvm->mm_s);
+
+	ret = vfs_fallocate(file, FALLOC_FL_PUNCH_HOLE | FALLOC_FL_KEEP_SIZE,
+			    foffset, ghvm->fw.config.size);
+	fput(file);
+
+	return ret;
+
+unlock_mmap:
+	mmap_read_unlock(ghvm->mm_s);
+	return ret;
+
+unlock_bindings:
+	up_read(&ghvm->bindings_lock);
+	return ret;
+}
+
 int gunyah_reclaim_fw_parcel(struct gunyah_vm *ghvm, u32 mem_handle)
 {
+	int ret;
+
 	if (ghvm->fw.parcel.parcel.mem_handle != mem_handle)
 		return -EINVAL;
+
+	ret = gunyah_vm_punch_fw_hole(ghvm);
+	if (ret)
+		dev_warn(ghvm->parent, "Failed to punch fw hole: %d\n", ret);
 
 	return gunyah_reclaim_parcel(ghvm, &ghvm->fw.parcel);
 }

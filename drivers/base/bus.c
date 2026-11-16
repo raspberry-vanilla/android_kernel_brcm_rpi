@@ -565,6 +565,24 @@ out_put:
 	return error;
 }
 
+static void __bus_probe_device(struct device *dev)
+{
+	struct subsys_private *sp = bus_to_subsys(dev->bus);
+	struct subsys_interface *sif;
+
+	if (!sp)
+		return;
+
+	device_initial_probe(dev);
+
+	mutex_lock(&sp->mutex);
+	list_for_each_entry(sif, &sp->interfaces, node)
+		if (sif->add_dev)
+			sif->add_dev(dev, sif);
+	mutex_unlock(&sp->mutex);
+	subsys_put(sp);
+}
+
 /**
  * bus_probe_device - probe drivers for a new device
  * @dev: device to probe
@@ -573,21 +591,16 @@ out_put:
  */
 void bus_probe_device(struct device *dev)
 {
-	struct subsys_private *sp = bus_to_subsys(dev->bus);
-	struct subsys_interface *sif;
+	__bus_probe_device(dev);
+}
 
-	if (!sp)
-		return;
-
-	if (sp->drivers_autoprobe)
-		device_initial_probe(dev);
-
-	mutex_lock(&sp->mutex);
-	list_for_each_entry(sif, &sp->interfaces, node)
-		if (sif->add_dev)
-			sif->add_dev(dev, sif);
-	mutex_unlock(&sp->mutex);
-	subsys_put(sp);
+void bus_probe_device_deferred(struct device *dev)
+{
+	if (dev->parent && dev->bus->need_parent_lock)
+		device_lock(dev->parent);
+	__bus_probe_device(dev);
+	if (dev->parent && dev->bus->need_parent_lock)
+		device_unlock(dev->parent);
 }
 
 /**

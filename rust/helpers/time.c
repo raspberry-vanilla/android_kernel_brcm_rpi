@@ -33,3 +33,8 @@ __rust_helper s64 rust_helper_ktime_to_ms(const ktime_t kt)
 {
 	return ktime_to_ms(kt);
 }
+
+__rust_helper u64 rust_helper_ktime_get_ns(void)
+{
+	return ktime_get_ns();
+}

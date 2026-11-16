@@ -217,6 +217,7 @@
   errseq_set
   filemap_invalidate_inode
   iov_iter_folio_queue
+  ufshcd_mcq_poll_n_cqe_lock
   mempool_init_noprof
   netfs_write_subrequest_terminated
   __filemap_set_wb_err
@@ -325,6 +326,8 @@
   __traceiter_android_vh_f2fs_create
   __tracepoint_android_vh_io_statistics
   __traceiter_android_vh_io_statistics
+  __traceiter_android_vh_dd_dispatch_request_bypass
+  __tracepoint_android_vh_dd_dispatch_request_bypass
   wb_wakeup
   redirty_tail_locked
   bdi_list

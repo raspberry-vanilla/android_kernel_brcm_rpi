@@ -174,7 +174,13 @@ void fuse_set_initialized(struct fuse_conn *fc)
 
 static bool fuse_block_alloc(struct fuse_conn *fc, bool for_background)
 {
-	return !fc->initialized || (for_background && fc->blocked) ||
+	if (!fc->initialized)
+		return true;
+
+	/* Pairs with smp_wmb() in fuse_set_initialized() */
+	smp_rmb();
+
+	return (for_background && fc->blocked) ||
 	       (fc->io_uring && fc->connected && !fuse_uring_ready(fc));
 }
 
@@ -214,8 +220,6 @@ static struct fuse_req *fuse_get_req(struct mnt_idmap *idmap,
 				(TASK_KILLABLE | TASK_FREEZABLE)))
 			goto out;
 	}
-	/* Matches smp_wmb() in fuse_set_initialized() */
-	smp_rmb();
 
 	err = -ENOTCONN;
 	if (!fc->connected)
@@ -599,7 +603,7 @@ static void request_wait_answer(struct fuse_req *req)
 
 		if (req->args->abort_on_kill) {
 			fuse_abort_conn(fc);
-			return;
+			goto wait_for_finish;
 		}
 
 		if (test_bit(FR_URING, &req->flags))
@@ -610,6 +614,7 @@ static void request_wait_answer(struct fuse_req *req)
 			return;
 	}
 
+wait_for_finish:
 	/*
 	 * Either request is already in userspace, or it was forced.
 	 * Wait it out.
@@ -957,7 +962,8 @@ static int fuse_copy_fill(struct fuse_copy_state *cs)
 		err = iov_iter_get_pages2(cs->iter, &page, PAGE_SIZE, 1, &off);
 		if (err < 0)
 			return err;
-		BUG_ON(!err);
+		if (!err)
+			return -EIO;
 		cs->len = err;
 		cs->offset = off;
 		cs->pg = page;

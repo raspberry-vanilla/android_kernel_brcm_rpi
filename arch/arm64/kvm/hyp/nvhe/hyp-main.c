@@ -43,6 +43,9 @@ DEFINE_PER_CPU(struct kvm_nvhe_init_params, kvm_init_params);
  */
 DEFINE_PER_CPU(struct kvm_hyp_req, host_hyp_reqs);
 
+/* Number of implemented GICv3 LRs. Used by flush_hyp_vcpu(). */
+unsigned int hyp_gicv3_nr_lr;
+
 void __kvm_hyp_host_forward_smc(struct kvm_cpu_context *host_ctxt);
 
 static bool (*default_trap_handler)(struct user_pt_regs *regs);
@@ -817,6 +820,13 @@ static void flush_hyp_vcpu(struct pkvm_hyp_vcpu *hyp_vcpu)
 
 		hyp_vcpu->vcpu.arch.mdcr_el2 = host_vcpu->arch.mdcr_el2;
 		hyp_vcpu->vcpu.arch.vsesr_el2 = host_vcpu->arch.vsesr_el2;
+
+		/* Bound used_lrs by the number of implemented list registers. */
+		hyp_vcpu->vcpu.arch.vgic_cpu.vgic_v3.used_lrs =
+			min_t(unsigned int,
+			      hyp_vcpu->vcpu.arch.vgic_cpu.vgic_v3.used_lrs,
+			      hyp_gicv3_nr_lr);
+
 		flush_debug_state(hyp_vcpu);
 	}
 

@@ -22,6 +22,7 @@
 #include <linux/mm_inline.h>
 #include <linux/ksm.h>
 #include <linux/rmap.h>
+#include <linux/ptshare.h>
 #include <linux/topology.h>
 #include <linux/cpu.h>
 #include <linux/cpuset.h>
@@ -383,7 +384,11 @@ static bool remove_migration_pte(struct folio *folio,
 			continue;
 		}
 #endif
-		old_pte = ptep_get(pvmw.pte);
+		if (folio_test_hugetlb(folio))
+			old_pte = huge_ptep_get(vma->vm_mm, pvmw.address,
+						pvmw.pte);
+		else
+			old_pte = ptep_get(pvmw.pte);
 		if (rmap_walk_arg->map_unused_to_zeropage &&
 		    try_to_map_unused_to_zeropage(&pvmw, folio, old_pte, idx))
 			continue;
@@ -464,11 +469,12 @@ static bool remove_migration_pte(struct folio *folio,
  * Get rid of all migration entries and replace them by
  * references to the indicated page.
  */
-void remove_migration_ptes(struct folio *src, struct folio *dst, int flags)
+void remove_migration_ptes(struct folio *src, struct folio *dst,
+		enum ttu_flags flags)
 {
 	struct rmap_walk_arg rmap_walk_arg = {
 		.folio = src,
-		.map_unused_to_zeropage = flags & RMP_USE_SHARED_ZEROPAGE,
+		.map_unused_to_zeropage = flags & TTU_USE_SHARED_ZEROPAGE,
 	};
 
 	struct rmap_walk_control rwc = {
@@ -476,9 +482,9 @@ void remove_migration_ptes(struct folio *src, struct folio *dst, int flags)
 		.arg = &rmap_walk_arg,
 	};
 
-	VM_BUG_ON_FOLIO((flags & RMP_USE_SHARED_ZEROPAGE) && (src != dst), src);
+	VM_BUG_ON_FOLIO((flags & TTU_USE_SHARED_ZEROPAGE) && (src != dst), src);
 
-	if (flags & RMP_LOCKED)
+	if (flags & TTU_RMAP_LOCKED)
 		rmap_walk_locked(dst, &rwc);
 	else
 		rmap_walk(dst, &rwc);
@@ -559,7 +565,7 @@ void pmd_migration_entry_wait(struct mm_struct *mm, pmd_t *pmd)
 	spinlock_t *ptl;
 
 	ptl = pmd_lock(mm, pmd);
-	if (!is_pmd_migration_entry(*pmd))
+	if (!pmd_is_migration_entry(*pmd))
 		goto unlock;
 	migration_entry_wait_on_locked(pmd_to_swp_entry(*pmd), ptl);
 	return;
@@ -1549,8 +1555,7 @@ static int unmap_and_move_huge_page(new_folio_t get_new_folio,
 		rc = move_to_new_folio(dst, src, mode);
 
 	if (page_was_mapped)
-		remove_migration_ptes(src, !rc ? dst : src,
-				ttu ? RMP_LOCKED : 0);
+		remove_migration_ptes(src, !rc ? dst : src, ttu);
 
 	if (ttu & TTU_RMAP_LOCKED)
 		i_mmap_unlock_write(mapping);
@@ -1848,7 +1853,7 @@ static int migrate_pages_batch(struct list_head *from,
 			is_thp = folio_test_pmd_mappable(folio);
 			nr_pages = folio_nr_pages(folio);
 
-			cond_resched();
+			cond_resched_tasks_rcu_qs();
 
 			/*
 			 * The rare folio on the deferred split list should
@@ -2281,7 +2286,8 @@ static int do_move_pages_to_node(struct list_head *pagelist, int node)
 }
 
 static int __add_folio_for_migration(struct folio *folio, int node,
-		struct list_head *pagelist, bool migrate_all)
+		struct list_head *pagelist, bool migrate_all,
+		struct vm_area_struct *vma)
 {
 	if (is_zero_folio(folio) || is_huge_zero_folio(folio))
 		return -EFAULT;
@@ -2291,6 +2297,9 @@ static int __add_folio_for_migration(struct folio *folio, int node,
 
 	if (folio_nid(folio) == node)
 		return 0;
+
+	if (vma_is_ptshare_client(vma) && !migrate_all)
+		return -EACCES;
 
 	if (folio_maybe_mapped_shared(folio) && !migrate_all)
 		return -EACCES;
@@ -2334,7 +2343,7 @@ static int add_folio_for_migration(struct mm_struct *mm, const void __user *p,
 		folio = folio_walk_start(&fw, vma, addr, FW_ZEROPAGE);
 		if (folio) {
 			err = __add_folio_for_migration(folio, node, pagelist,
-							migrate_all);
+							migrate_all, vma);
 			folio_walk_end(&fw, vma);
 		} else {
 			err = -ENOENT;

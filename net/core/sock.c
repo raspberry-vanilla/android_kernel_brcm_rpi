@@ -144,6 +144,7 @@
 #include <trace/hooks/sched.h>
 #include <trace/hooks/net.h>
 
+#include <net/psp.h>
 #include <net/tcp.h>
 #include <net/busy_poll.h>
 #include <net/phonet/phonet.h>
@@ -788,7 +789,6 @@ bool sk_mc_loop(const struct sock *sk)
 		return inet6_test_bit(MC6_LOOP, sk);
 #endif
 	}
-	WARN_ON_ONCE(1);
 	return true;
 }
 EXPORT_SYMBOL(sk_mc_loop);
@@ -1034,7 +1034,7 @@ static int sock_reserve_memory(struct sock *sk, int bytes)
 	bool charged;
 	int pages;
 
-	if (!mem_cgroup_sk_enabled(sk) || !sk_has_account(sk))
+	if (!mem_cgroup_sk_enabled(sk) || !sk_is_tcp(sk))
 		return -EOPNOTSUPP;
 
 	if (!bytes)
@@ -1655,7 +1655,7 @@ set_sndbuf:
 	{
 		int delta;
 
-		if (val < 0) {
+		if (val < 0 || val > SZ_1G) {
 			ret = -EINVAL;
 			break;
 		}
@@ -2481,6 +2481,12 @@ struct sock *sk_clone_lock(const struct sock *sk, const gfp_t priority)
 	trace_android_vh_sk_clone_lock(newsk);
 
 	newsk->sk_prot_creator = prot;
+#ifdef CONFIG_BPF_SYSCALL
+	RCU_INIT_POINTER(newsk->sk_bpf_storage, NULL);
+#endif
+#if IS_ENABLED(CONFIG_INET_PSP)
+	RCU_INIT_POINTER(newsk->psp_assoc, NULL);
+#endif
 
 	/* SANITY */
 	if (likely(newsk->sk_net_refcnt)) {
@@ -2530,6 +2536,11 @@ struct sock *sk_clone_lock(const struct sock *sk, const gfp_t priority)
 
 	cgroup_sk_clone(&newsk->sk_cgrp_data);
 
+	RCU_INIT_POINTER(newsk->sk_reuseport_cb, NULL);
+
+	if (sock_needs_netstamp(sk) && newsk->sk_flags & SK_FLAGS_TIMESTAMP)
+		net_enable_timestamp();
+
 	rcu_read_lock();
 	filter = rcu_dereference(sk->sk_filter);
 	if (filter != NULL)
@@ -2551,8 +2562,6 @@ struct sock *sk_clone_lock(const struct sock *sk, const gfp_t priority)
 
 		goto free;
 	}
-
-	RCU_INIT_POINTER(newsk->sk_reuseport_cb, NULL);
 
 	if (bpf_sk_storage_clone(sk, newsk))
 		goto free;
@@ -2580,9 +2589,6 @@ struct sock *sk_clone_lock(const struct sock *sk, const gfp_t priority)
 
 	if (newsk->sk_prot->sockets_allocated)
 		sk_sockets_allocated_inc(newsk);
-
-	if (sock_needs_netstamp(sk) && newsk->sk_flags & SK_FLAGS_TIMESTAMP)
-		net_enable_timestamp();
 out:
 	return newsk;
 free:
@@ -2648,6 +2654,12 @@ void sk_setup_caps(struct sock *sk, struct dst_entry *dst)
 	rcu_read_unlock();
 }
 EXPORT_SYMBOL_GPL(sk_setup_caps);
+
+bool sk_has_decrypt_user(const struct sock *sk)
+{
+	return psp_sk_assoc(sk) ||
+	       (sk_is_inet(sk) && inet_csk_has_ulp(sk)); /* for tls */
+}
 
 /*
  *	Simple resource managers for sockets.
