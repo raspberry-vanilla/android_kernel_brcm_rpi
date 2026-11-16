@@ -31,6 +31,8 @@ struct fdtable {
 	unsigned long *open_fds;
 	unsigned long *full_fds_bits;
 	struct rcu_head rcu;
+
+	ANDROID_KABI_RESERVE(1);
 };
 
 /*
@@ -48,6 +50,7 @@ struct files_struct {
 	struct fdtable fdtab;
 
 	ANDROID_KABI_IGNORE(1, struct task_dma_buf_info *dmabuf_info);
+	ANDROID_KABI_RESERVE(1);
   /*
    * written part on a separate cache line in SMP
    */

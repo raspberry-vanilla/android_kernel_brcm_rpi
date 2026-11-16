@@ -77,7 +77,8 @@ int ucsi_sync_control_common(struct ucsi *ucsi, u64 command)
 	if (ret)
 		goto out_clear_bit;
 
-	if (!wait_for_completion_timeout(&ucsi->complete, 5 * HZ))
+	if (!wait_for_completion_timeout(&ucsi->complete,
+					 msecs_to_jiffies(UCSI_TIMEOUT_MS)))
 		ret = -ETIMEDOUT;
 
 out_clear_bit:
@@ -1541,10 +1542,21 @@ static struct fwnode_handle *ucsi_find_fwnode(struct ucsi_connector *con)
 {
 	struct fwnode_handle *fwnode;
 	int i = 1;
+	int ret;
+	u32 port;
 
-	device_for_each_child_node(con->ucsi->dev, fwnode)
-		if (i++ == con->num)
-			return fwnode;
+	device_for_each_child_node(con->ucsi->dev, fwnode) {
+		ret = fwnode_property_read_u32(fwnode, "reg", &port);
+		if (ret < 0) {
+			if (i == con->num)
+				return fwnode;
+		} else {
+			if (port == con->num - 1)
+				return fwnode;
+		}
+
+		i++;
+	}
 	return NULL;
 }
 
@@ -1718,42 +1730,6 @@ out_unlock:
 	return ret;
 }
 
-static void ucsi_unregister_port(struct ucsi_connector *con)
-{
-	struct ucsi_work *uwork;
-
-	if (con->wq) {
-		mutex_lock(&con->lock);
-		ucsi_unregister_partner(con);
-		/*
-		 * queue delayed items immediately so they can execute
-		 * and free themselves before the wq is destroyed
-		 */
-		list_for_each_entry(uwork, &con->partner_tasks, node) {
-			if (cancel_delayed_work(&uwork->work))
-				queue_delayed_work(con->wq, &uwork->work, 0);
-		}
-		mutex_unlock(&con->lock);
-
-		destroy_workqueue(con->wq);
-		con->wq = NULL;
-	} else {
-		ucsi_unregister_partner(con);
-	}
-
-	ucsi_unregister_altmodes(con, UCSI_RECIPIENT_CON);
-	ucsi_unregister_port_psy(con);
-
-	usb_power_delivery_unregister_capabilities(con->port_sink_caps);
-	con->port_sink_caps = NULL;
-	usb_power_delivery_unregister_capabilities(con->port_source_caps);
-	con->port_source_caps = NULL;
-	usb_power_delivery_unregister(con->pd);
-	con->pd = NULL;
-	typec_unregister_port(con->port);
-	con->port = NULL;
-}
-
 static u64 ucsi_get_supported_notifications(struct ucsi *ucsi)
 {
 	u16 features = ucsi->cap.features;
@@ -1873,8 +1849,22 @@ static int ucsi_init(struct ucsi *ucsi)
 	return 0;
 
 err_unregister:
-	for (con = connector; con->port; con++)
-		ucsi_unregister_port(con);
+	for (con = connector; con->port; con++) {
+		if (con->wq)
+			destroy_workqueue(con->wq);
+		ucsi_unregister_partner(con);
+		ucsi_unregister_altmodes(con, UCSI_RECIPIENT_CON);
+		ucsi_unregister_port_psy(con);
+
+		usb_power_delivery_unregister_capabilities(con->port_sink_caps);
+		con->port_sink_caps = NULL;
+		usb_power_delivery_unregister_capabilities(con->port_source_caps);
+		con->port_source_caps = NULL;
+		usb_power_delivery_unregister(con->pd);
+		con->pd = NULL;
+		typec_unregister_port(con->port);
+		con->port = NULL;
+	}
 	kfree(connector);
 err_reset:
 	memset(&ucsi->cap, 0, sizeof(ucsi->cap));
@@ -2094,6 +2084,8 @@ void ucsi_unregister(struct ucsi *ucsi)
 	cancel_delayed_work_sync(&ucsi->work);
 	cancel_work_sync(&ucsi->resume_work);
 
+	ucsi_debugfs_unregister(ucsi);
+
 	/* Disable notifications */
 	ucsi->ops->async_control(ucsi, cmd);
 
@@ -2102,7 +2094,33 @@ void ucsi_unregister(struct ucsi *ucsi)
 
 	for (i = 0; i < ucsi->cap.num_connectors; i++) {
 		cancel_work_sync(&ucsi->connector[i].work);
-		ucsi_unregister_port(&ucsi->connector[i]);
+
+		if (ucsi->connector[i].wq) {
+			struct ucsi_work *uwork;
+
+			mutex_lock(&ucsi->connector[i].lock);
+			/*
+			 * queue delayed items immediately so they can execute
+			 * and free themselves before the wq is destroyed
+			 */
+			list_for_each_entry(uwork, &ucsi->connector[i].partner_tasks, node)
+				mod_delayed_work(ucsi->connector[i].wq, &uwork->work, 0);
+			mutex_unlock(&ucsi->connector[i].lock);
+			destroy_workqueue(ucsi->connector[i].wq);
+		}
+
+		ucsi_unregister_partner(&ucsi->connector[i]);
+		ucsi_unregister_altmodes(&ucsi->connector[i],
+					 UCSI_RECIPIENT_CON);
+		ucsi_unregister_port_psy(&ucsi->connector[i]);
+
+		usb_power_delivery_unregister_capabilities(ucsi->connector[i].port_sink_caps);
+		ucsi->connector[i].port_sink_caps = NULL;
+		usb_power_delivery_unregister_capabilities(ucsi->connector[i].port_source_caps);
+		ucsi->connector[i].port_source_caps = NULL;
+		usb_power_delivery_unregister(ucsi->connector[i].pd);
+		ucsi->connector[i].pd = NULL;
+		typec_unregister_port(ucsi->connector[i].port);
 	}
 
 	kfree(ucsi->connector);

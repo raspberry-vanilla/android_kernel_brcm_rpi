@@ -8,12 +8,12 @@
  *              www.linaro.org
  */
 
+#include <linux/err.h>
 #include <linux/module.h>
 #include <linux/kernel.h>
 #include <linux/init.h>
 #include <linux/io.h>
-
-#include "../vfio_platform_private.h"
+#include <linux/vfio_platform.h>
 
 #define DRIVER_VERSION  "0.1"
 #define DRIVER_AUTHOR   "Eric Auger <eric.auger@linaro.org>"
@@ -46,22 +46,19 @@ static inline void xgmac_mac_disable(void __iomem *ioaddr)
 	writel(value, ioaddr + XGMAC_CONTROL);
 }
 
-static int vfio_platform_calxedaxgmac_reset(struct vfio_platform_device *vdev)
+static int vfio_platform_calxedaxgmac_reset(struct device *dev)
 {
-	struct vfio_platform_region *reg = &vdev->regions[0];
+	void __iomem *ioaddr;
 
-	if (!reg->ioaddr) {
-		reg->ioaddr =
-			ioremap(reg->addr, reg->size);
-		if (!reg->ioaddr)
-			return -ENOMEM;
-	}
+	ioaddr = vfio_platform_region_ioaddr(dev, 0, NULL);
+	if (IS_ERR(ioaddr))
+		return PTR_ERR(ioaddr);
 
 	/* disable IRQ */
-	writel(0, reg->ioaddr + XGMAC_DMA_INTR_ENA);
+	writel(0, ioaddr + XGMAC_DMA_INTR_ENA);
 
 	/* Disable the MAC core */
-	xgmac_mac_disable(reg->ioaddr);
+	xgmac_mac_disable(ioaddr);
 
 	return 0;
 }

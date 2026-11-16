@@ -1494,6 +1494,19 @@ setup_irq_thread(struct irqaction *new, unsigned int irq, bool secondary)
 	return 0;
 }
 
+static bool valid_percpu_irqaction(struct irqaction *old, struct irqaction *new)
+{
+	do {
+		if (cpumask_intersects(old->affinity, new->affinity) ||
+		    old->percpu_dev_id == new->percpu_dev_id)
+			return false;
+
+		old = old->next;
+	} while (old);
+
+	return true;
+}
+
 /*
  * Internal function to register an irqaction - typically used to
  * allocate special interrupts that are part of the architecture.
@@ -1514,6 +1527,7 @@ __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
 	struct irqaction *old, **old_ptr;
 	unsigned long flags, thread_mask = 0;
 	int ret, nested, shared = 0;
+	bool per_cpu_devid;
 
 	if (!desc)
 		return -EINVAL;
@@ -1522,6 +1536,8 @@ __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
 		return -ENOSYS;
 	if (!try_module_get(desc->owner))
 		return -ENODEV;
+
+	per_cpu_devid = irq_settings_is_per_cpu_devid(desc);
 
 	new->irq = irq;
 
@@ -1630,8 +1646,15 @@ __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
 		 */
 		unsigned int oldtype;
 
-		if (irq_is_nmi(desc)) {
+		if (irq_is_nmi(desc) && !per_cpu_devid) {
 			pr_err("Invalid attempt to share NMI for %s (irq %d) on irqchip %s.\n",
+				new->name, irq, desc->irq_data.chip->name);
+			ret = -EINVAL;
+			goto out_unlock;
+		}
+
+		if (per_cpu_devid && !valid_percpu_irqaction(old, new)) {
+			pr_err("Overlapping affinities for %s (irq %d) on irqchip %s.\n",
 				new->name, irq, desc->irq_data.chip->name);
 			ret = -EINVAL;
 			goto out_unlock;
@@ -1787,7 +1810,7 @@ __setup_irq(unsigned int irq, struct irq_desc *desc, struct irqaction *new)
 		if (!(new->flags & IRQF_NO_AUTOEN) &&
 		    irq_settings_can_autoenable(desc)) {
 			irq_startup(desc, IRQ_RESEND, IRQ_START_COND);
-		} else {
+		} else if (!per_cpu_devid) {
 			/*
 			 * Shared interrupts do not go well with disabling
 			 * auto enable. The sharing interrupt might request
@@ -2467,7 +2490,7 @@ void disable_percpu_nmi(unsigned int irq)
 static struct irqaction *__free_percpu_irq(unsigned int irq, void __percpu *dev_id)
 {
 	struct irq_desc *desc = irq_to_desc(irq);
-	struct irqaction *action;
+	struct irqaction *action, **action_ptr;
 	unsigned long flags;
 
 	WARN(in_interrupt(), "Trying to free IRQ %d from IRQ context!\n", irq);
@@ -2477,11 +2500,33 @@ static struct irqaction *__free_percpu_irq(unsigned int irq, void __percpu *dev_
 
 	raw_spin_lock_irqsave(&desc->lock, flags);
 
-	action = desc->action;
-	if (!action || action->percpu_dev_id != dev_id) {
-		WARN(1, "Trying to free already-free IRQ %d\n", irq);
+	action_ptr = &desc->action;
+	for (;;) {
+		action = *action_ptr;
+
+		if (!action) {
+			WARN(1, "Trying to free already-free IRQ %d\n", irq);
+			goto bad;
+		}
+
+		if (action->percpu_dev_id == dev_id)
+			break;
+
+		action_ptr = &action->next;
+	}
+
+	if (cpumask_intersects(desc->percpu_enabled, action->affinity)) {
+		WARN(1, "percpu IRQ %d still enabled on CPU%d!\n", irq,
+		     cpumask_first_and(desc->percpu_enabled, action->affinity));
 		goto bad;
 	}
+
+	/* Found it - now remove it from the list of entries: */
+	*action_ptr = action->next;
+
+	/* Demote from NMI if we killed the last action */
+	if (!desc->action)
+		desc->istate &= ~IRQS_NMI;
 
 	if (!cpumask_empty(desc->percpu_enabled)) {
 		WARN(1, "percpu IRQ %d still enabled on CPU%d!\n",
@@ -2579,6 +2624,9 @@ int setup_percpu_irq(unsigned int irq, struct irqaction *act)
 	if (retval < 0)
 		return retval;
 
+	if (!act->affinity)
+		act->affinity = cpu_online_mask;
+
 	retval = __setup_irq(irq, desc, act);
 
 	if (retval)
@@ -2587,26 +2635,58 @@ int setup_percpu_irq(unsigned int irq, struct irqaction *act)
 	return retval;
 }
 
+static
+struct irqaction *create_percpu_irqaction(irq_handler_t handler, unsigned long flags,
+					  const char *devname, const cpumask_t *affinity,
+					  void __percpu *dev_id)
+{
+	struct irqaction *action;
+
+	if (!affinity)
+		affinity = cpu_possible_mask;
+
+	action = kzalloc(sizeof(struct irqaction), GFP_KERNEL);
+	if (!action)
+		return NULL;
+
+	action->handler = handler;
+	action->flags = flags | IRQF_PERCPU | IRQF_NO_SUSPEND;
+	action->name = devname;
+	action->percpu_dev_id = dev_id;
+	action->affinity = affinity;
+
+	/*
+	 * We allow some form of sharing for non-overlapping affinity
+	 * masks. Obviously, covering all CPUs prevents any sharing in
+	 * the first place.
+	 */
+	if (!cpumask_equal(affinity, cpu_possible_mask))
+		action->flags |= IRQF_SHARED;
+
+	return action;
+}
+
 /**
  *	__request_percpu_irq - allocate a percpu interrupt line
  *	@irq: Interrupt line to allocate
  *	@handler: Function to be called when the IRQ occurs.
  *	@flags: Interrupt type flags (IRQF_TIMER only)
  *	@devname: An ascii name for the claiming device
+ *	@affinity: A cpumask describing the target CPUs for this interrupt
  *	@dev_id: A percpu cookie passed back to the handler function
  *
- *	This call allocates interrupt resources and enables the
- *	interrupt on the local CPU. If the interrupt is supposed to be
- *	enabled on other CPUs, it has to be done on each CPU using
+ *	This call allocates interrupt resources, but doesn't enable the
+ *	interrupt on any CPU, as all percpu-devid interrupts are flagged
+ *	with IRQ_NOAUTOEN. It has to be done on each CPU using
  *	enable_percpu_irq().
  *
  *	Dev_id must be globally unique. It is a per-cpu variable, and
  *	the handler gets called with the interrupted CPU's instance of
  *	that variable.
  */
-int __request_percpu_irq(unsigned int irq, irq_handler_t handler,
+int __request_percpu_irq_NEW(unsigned int irq, irq_handler_t handler,
 			 unsigned long flags, const char *devname,
-			 void __percpu *dev_id)
+			 const cpumask_t *affinity, void __percpu *dev_id)
 {
 	struct irqaction *action;
 	struct irq_desc *desc;
@@ -2623,14 +2703,9 @@ int __request_percpu_irq(unsigned int irq, irq_handler_t handler,
 	if (flags && flags != IRQF_TIMER)
 		return -EINVAL;
 
-	action = kzalloc(sizeof(struct irqaction), GFP_KERNEL);
+	action = create_percpu_irqaction(handler, flags, devname, affinity, dev_id);
 	if (!action)
 		return -ENOMEM;
-
-	action->handler = handler;
-	action->flags = flags | IRQF_PERCPU | IRQF_NO_SUSPEND;
-	action->name = devname;
-	action->percpu_dev_id = dev_id;
 
 	retval = irq_chip_pm_get(&desc->irq_data);
 	if (retval < 0) {
@@ -2647,6 +2722,14 @@ int __request_percpu_irq(unsigned int irq, irq_handler_t handler,
 
 	return retval;
 }
+EXPORT_SYMBOL_GPL(__request_percpu_irq_NEW);
+
+int __request_percpu_irq(unsigned int irq, irq_handler_t handler,
+			 unsigned long flags, const char *devname,
+			 void __percpu *dev_id)
+{
+	return __request_percpu_irq_NEW(irq, handler, flags, devname, NULL, dev_id);
+}
 EXPORT_SYMBOL_GPL(__request_percpu_irq);
 
 /**
@@ -2654,6 +2737,7 @@ EXPORT_SYMBOL_GPL(__request_percpu_irq);
  *	@irq: Interrupt line to allocate
  *	@handler: Function to be called when the IRQ occurs.
  *	@name: An ascii name for the claiming device
+ *	@affinity: A cpumask describing the target CPUs for this interrupt
  *	@dev_id: A percpu cookie passed back to the handler function
  *
  *	This call allocates interrupt resources for a per CPU NMI. Per CPU NMIs
@@ -2670,8 +2754,8 @@ EXPORT_SYMBOL_GPL(__request_percpu_irq);
  *	If the interrupt line cannot be used to deliver NMIs, function
  *	will fail returning a negative value.
  */
-int request_percpu_nmi(unsigned int irq, irq_handler_t handler,
-		       const char *name, void __percpu *dev_id)
+int request_percpu_nmi(unsigned int irq, irq_handler_t handler, const char *name,
+		       const struct cpumask *affinity, void __percpu *dev_id)
 {
 	struct irqaction *action;
 	struct irq_desc *desc;
@@ -2689,19 +2773,15 @@ int request_percpu_nmi(unsigned int irq, irq_handler_t handler,
 	    !irq_supports_nmi(desc))
 		return -EINVAL;
 
-	/* The line cannot already be NMI */
-	if (irq_is_nmi(desc))
+	/* The line cannot be NMI already if the new request covers all CPUs */
+	if (irq_is_nmi(desc) &&
+	    (!affinity || cpumask_equal(affinity, cpu_possible_mask)))
 		return -EINVAL;
 
-	action = kzalloc(sizeof(struct irqaction), GFP_KERNEL);
+	action = create_percpu_irqaction(handler, IRQF_NO_THREAD | IRQF_NOBALANCING,
+					 name, affinity, dev_id);
 	if (!action)
 		return -ENOMEM;
-
-	action->handler = handler;
-	action->flags = IRQF_PERCPU | IRQF_NO_SUSPEND | IRQF_NO_THREAD
-		| IRQF_NOBALANCING;
-	action->name = name;
-	action->percpu_dev_id = dev_id;
 
 	retval = irq_chip_pm_get(&desc->irq_data);
 	if (retval < 0)

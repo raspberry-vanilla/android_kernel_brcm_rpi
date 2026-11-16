@@ -114,6 +114,8 @@ void drain_hyp_pool(struct hyp_pool *pool, struct kvm_hyp_memcache *mc);
 
 int module_change_host_page_prot(u64 pfn, enum kvm_pgtable_prot prot, u64 nr_pages, bool update_iommu);
 
+int __pkvm_accept_module_prot_page(u64 ipa, u64 nr_pages);
+
 void psci_mem_protect_inc(u64 n);
 void psci_mem_protect_dec(u64 n);
 

@@ -90,8 +90,8 @@
   __init_swait_queue_head
   jiffies
   kasan_flag_enabled
-  kernel_neon_begin
-  kernel_neon_end
+  __kernel_neon_begin
+  __kernel_neon_end
   kfree
   kfree_sensitive
   __kmalloc_cache_noprof

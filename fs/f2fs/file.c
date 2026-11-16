@@ -24,6 +24,7 @@
 #include <linux/fileattr.h>
 #include <linux/fadvise.h>
 #include <linux/iomap.h>
+#include <linux/dma-buf.h>
 
 #include "f2fs.h"
 #include "node.h"
@@ -38,23 +39,69 @@
 #undef CREATE_TRACE_POINTS
 #include <trace/hooks/fs.h>
 
-static void f2fs_zero_post_eof_page(struct inode *inode,
-					loff_t new_size, bool lock)
+static int fill_zero(struct inode *inode, pgoff_t index,
+					loff_t start, loff_t len);
+
+static int do_zero_post_eof_page(struct inode *inode, loff_t new_size)
 {
 	loff_t old_size = i_size_read(inode);
+	unsigned int offset, len;
+	pgoff_t index;
+	int err;
+
+	offset = old_size & (PAGE_SIZE - 1);
+
+	if (!offset)
+		return 0;
+
+	len = min_t(loff_t, PAGE_SIZE - offset, new_size - old_size);
+	index = old_size >> PAGE_SHIFT;
+
+	if (f2fs_has_inline_data(inode)) {
+		/* data post eof should be always zero */
+		if (new_size <= MAX_INLINE_DATA(inode))
+			return 0;
+		err = f2fs_convert_inline_inode(inode);
+		if (err)
+			return err;
+	}
+
+	err = fill_zero(inode, index, offset, len);
+	if (err)
+		return err;
+	return filemap_write_and_wait_range(inode->i_mapping,
+				old_size, old_size + len - 1);
+}
+
+static int f2fs_zero_post_eof_page(struct inode *inode,
+					loff_t new_size, bool lock, bool writeback)
+{
+	loff_t old_size = i_size_read(inode);
+	bool strict =
+		F2FS_OPTION(F2FS_I_SB(inode)).fsync_mode == FSYNC_MODE_STRICT;
 
 	if (old_size >= new_size)
-		return;
+		return 0;
 
-	if (mapping_empty(inode->i_mapping))
-		return;
+	if (!strict && mapping_empty(inode->i_mapping))
+		return 0;
 
 	if (lock)
 		filemap_invalidate_lock(inode->i_mapping);
 	/* zero or drop pages only in range of [old_size, new_size] */
-	truncate_inode_pages_range(inode->i_mapping, old_size, new_size);
+	truncate_inode_pages_range(inode->i_mapping, old_size, new_size - 1);
 	if (lock)
 		filemap_invalidate_unlock(inode->i_mapping);
+
+	if (!writeback || !strict)
+		return 0;
+	/*
+	 * In fsync_mode=strict, when we expand an unaligned EOF size, we
+	 * should zero post EOF data and writeback the data immediately,
+	 * so that it can avoid exposing stale data after metadata flush
+	 * and POR.
+	 */
+	return do_zero_post_eof_page(inode, new_size);
 }
 
 static vm_fault_t f2fs_filemap_fault(struct vm_fault *vmf)
@@ -125,7 +172,10 @@ static vm_fault_t f2fs_vm_page_mkwrite(struct vm_fault *vmf)
 
 	f2fs_bug_on(sbi, f2fs_has_inline_data(inode));
 
-	f2fs_zero_post_eof_page(inode, (folio->index + 1) << PAGE_SHIFT, true);
+	err = f2fs_zero_post_eof_page(inode,
+		(folio->index + 1) << PAGE_SHIFT, true, false);
+	if (err)
+		goto out_pagefault;
 
 	file_update_time(vmf->vma->vm_file);
 	filemap_invalidate_lock_shared(inode->i_mapping);
@@ -182,7 +232,7 @@ static vm_fault_t f2fs_vm_page_mkwrite(struct vm_fault *vmf)
 
 out_sem:
 	filemap_invalidate_unlock_shared(inode->i_mapping);
-
+out_pagefault:
 	sb_end_pagefault(inode->i_sb);
 out:
 	ret = vmf_fs_error(err);
@@ -1069,9 +1119,10 @@ int f2fs_setattr(struct mnt_idmap *idmap, struct dentry *dentry,
 {
 	struct inode *inode = d_inode(dentry);
 	struct f2fs_inode_info *fi = F2FS_I(inode);
+	struct f2fs_sb_info *sbi = F2FS_I_SB(inode);
 	int err;
 
-	if (unlikely(f2fs_cp_error(F2FS_I_SB(inode))))
+	if (unlikely(f2fs_cp_error(sbi)))
 		return -EIO;
 
 	err = setattr_prepare(idmap, dentry, attr);
@@ -1079,10 +1130,6 @@ int f2fs_setattr(struct mnt_idmap *idmap, struct dentry *dentry,
 		return err;
 
 	err = fscrypt_prepare_setattr(dentry, attr);
-	if (err)
-		return err;
-
-	err = fsverity_prepare_setattr(dentry, attr);
 	if (err)
 		return err;
 
@@ -1102,6 +1149,23 @@ int f2fs_setattr(struct mnt_idmap *idmap, struct dentry *dentry,
 			!IS_ALIGNED(attr->ia_size,
 			F2FS_BLK_TO_BYTES(fi->i_cluster_size)))
 			return -EINVAL;
+
+		if (f2fs_is_pinned_file(inode)) {
+			/*
+			 * It may break section-aligned fallocate recovery
+			 * mechanism, so do not allow larger size truncation.
+			 */
+			if (attr->ia_size > i_size_read(inode))
+				return -EINVAL;
+			/*
+			 * To prevent scattered pin block generation, we don't
+			 * allow smaller/equal size unaligned truncation for
+			 * pinned file.
+			 */
+			else if (!IS_ALIGNED(attr->ia_size,
+				F2FS_BLK_TO_BYTES(CAP_BLKS_PER_SEC(sbi))))
+				return -EINVAL;
+		}
 	}
 
 	if (is_quota_modification(idmap, inode, attr)) {
@@ -1113,12 +1177,11 @@ int f2fs_setattr(struct mnt_idmap *idmap, struct dentry *dentry,
 	    i_gid_needs_update(idmap, attr, inode)) {
 		struct f2fs_lock_context lc;
 
-		f2fs_lock_op(F2FS_I_SB(inode), &lc);
+		f2fs_lock_op(sbi, &lc);
 		err = dquot_transfer(idmap, inode, attr);
 		if (err) {
-			set_sbi_flag(F2FS_I_SB(inode),
-					SBI_QUOTA_NEED_REPAIR);
-			f2fs_unlock_op(F2FS_I_SB(inode), &lc);
+			set_sbi_flag(sbi, SBI_QUOTA_NEED_REPAIR);
+			f2fs_unlock_op(sbi, &lc);
 			return err;
 		}
 		/*
@@ -1128,7 +1191,7 @@ int f2fs_setattr(struct mnt_idmap *idmap, struct dentry *dentry,
 		i_uid_update(idmap, attr, inode);
 		i_gid_update(idmap, attr, inode);
 		f2fs_mark_inode_dirty_sync(inode, true);
-		f2fs_unlock_op(F2FS_I_SB(inode), &lc);
+		f2fs_unlock_op(sbi, &lc);
 	}
 
 	if (attr->ia_valid & ATTR_SIZE) {
@@ -1154,8 +1217,12 @@ int f2fs_setattr(struct mnt_idmap *idmap, struct dentry *dentry,
 		f2fs_down_write(&fi->i_gc_rwsem[WRITE]);
 		filemap_invalidate_lock(inode->i_mapping);
 
-		if (attr->ia_size > old_size)
-			f2fs_zero_post_eof_page(inode, attr->ia_size, false);
+		if (attr->ia_size > old_size) {
+			err = f2fs_zero_post_eof_page(inode,
+				attr->ia_size, false, true);
+			if (err)
+				goto err_out;
+		}
 		truncate_setsize(inode, attr->ia_size);
 
 		if (attr->ia_size <= old_size)
@@ -1164,6 +1231,7 @@ int f2fs_setattr(struct mnt_idmap *idmap, struct dentry *dentry,
 		 * do not trim all blocks after i_size if target size is
 		 * larger than i_size.
 		 */
+err_out:
 		filemap_invalidate_unlock(inode->i_mapping);
 		f2fs_up_write(&fi->i_gc_rwsem[WRITE]);
 		if (err)
@@ -1191,7 +1259,7 @@ int f2fs_setattr(struct mnt_idmap *idmap, struct dentry *dentry,
 	f2fs_mark_inode_dirty_sync(inode, true);
 
 	/* inode change will produce dirty node pages flushed by checkpoint */
-	f2fs_balance_fs(F2FS_I_SB(inode), true);
+	f2fs_balance_fs(sbi, true);
 
 	return err;
 }
@@ -1275,7 +1343,9 @@ static int f2fs_punch_hole(struct inode *inode, loff_t offset, loff_t len)
 	if (ret)
 		return ret;
 
-	f2fs_zero_post_eof_page(inode, offset + len, true);
+	ret = f2fs_zero_post_eof_page(inode, offset + len, true, false);
+	if (ret)
+		return ret;
 
 	pg_start = ((unsigned long long) offset) >> PAGE_SHIFT;
 	pg_end = ((unsigned long long) offset + len) >> PAGE_SHIFT;
@@ -1562,7 +1632,9 @@ static int f2fs_do_collapse(struct inode *inode, loff_t offset, loff_t len)
 	f2fs_down_write(&F2FS_I(inode)->i_gc_rwsem[WRITE]);
 	filemap_invalidate_lock(inode->i_mapping);
 
-	f2fs_zero_post_eof_page(inode, offset + len, false);
+	ret = f2fs_zero_post_eof_page(inode, offset + len, false, false);
+	if (ret)
+		goto out_unlock;
 
 	f2fs_lock_op(sbi, &lc);
 	f2fs_drop_extent_tree(inode);
@@ -1570,6 +1642,7 @@ static int f2fs_do_collapse(struct inode *inode, loff_t offset, loff_t len)
 	ret = __exchange_data_block(inode, inode, end, start, nrpages - end, true);
 	f2fs_unlock_op(sbi, &lc);
 
+out_unlock:
 	filemap_invalidate_unlock(inode->i_mapping);
 	f2fs_up_write(&F2FS_I(inode)->i_gc_rwsem[WRITE]);
 	return ret;
@@ -1602,11 +1675,14 @@ static int f2fs_collapse_range(struct inode *inode, loff_t offset, loff_t len)
 
 	/* write out all moved pages, if possible */
 	filemap_invalidate_lock(inode->i_mapping);
-	filemap_write_and_wait_range(inode->i_mapping, offset, LLONG_MAX);
+	ret = filemap_write_and_wait_range(inode->i_mapping, offset, LLONG_MAX);
+	if (ret)
+		goto out_unlock;
 	truncate_pagecache(inode, offset);
 
 	new_size = i_size_read(inode) - len;
 	ret = f2fs_truncate_blocks(inode, new_size, true);
+out_unlock:
 	filemap_invalidate_unlock(inode->i_mapping);
 	if (!ret)
 		f2fs_i_size_write(inode, new_size);
@@ -1688,7 +1764,9 @@ static int f2fs_zero_range(struct inode *inode, loff_t offset, loff_t len,
 	if (ret)
 		return ret;
 
-	f2fs_zero_post_eof_page(inode, offset + len, true);
+	ret = f2fs_zero_post_eof_page(inode, offset + len, true, false);
+	if (ret)
+		return ret;
 
 	pg_start = ((unsigned long long) offset) >> PAGE_SHIFT;
 	pg_end = ((unsigned long long) offset + len) >> PAGE_SHIFT;
@@ -1823,7 +1901,9 @@ static int f2fs_insert_range(struct inode *inode, loff_t offset, loff_t len)
 	f2fs_down_write(&F2FS_I(inode)->i_gc_rwsem[WRITE]);
 	filemap_invalidate_lock(mapping);
 
-	f2fs_zero_post_eof_page(inode, offset + len, false);
+	ret = f2fs_zero_post_eof_page(inode, offset + len, false, false);
+	if (ret)
+		goto out_unlock;
 	truncate_pagecache(inode, offset);
 
 	while (!ret && idx > pg_start) {
@@ -1841,6 +1921,7 @@ static int f2fs_insert_range(struct inode *inode, loff_t offset, loff_t len)
 					idx + delta, nr, false);
 		f2fs_unlock_op(sbi, &lc);
 	}
+out_unlock:
 	filemap_invalidate_unlock(mapping);
 	f2fs_up_write(&F2FS_I(inode)->i_gc_rwsem[WRITE]);
 	if (ret)
@@ -1883,7 +1964,9 @@ static int f2fs_expand_inode_data(struct inode *inode, loff_t offset,
 	if (err)
 		return err;
 
-	f2fs_zero_post_eof_page(inode, offset + len, true);
+	err = f2fs_zero_post_eof_page(inode, offset + len, true, true);
+	if (err)
+		return err;
 
 	f2fs_balance_fs(sbi, true);
 
@@ -1904,8 +1987,9 @@ static int f2fs_expand_inode_data(struct inode *inode, loff_t offset,
 		block_t sec_len;
 
 		if (map.m_lblk % sec_blks) {
-			map.m_lblk = rounddown(map.m_lblk, sec_blks);
-			map.m_len = pg_end - map.m_lblk;
+			pg_start = rounddown(map.m_lblk, sec_blks);
+			map.m_lblk = pg_start;
+			map.m_len = pg_end - pg_start;
 			if (off_end)
 				map.m_len++;
 		}
@@ -3118,8 +3202,9 @@ static int f2fs_move_file_range(struct file *file_in, loff_t pos_in,
 	struct inode *dst = file_inode(file_out);
 	struct f2fs_sb_info *sbi = F2FS_I_SB(src);
 	struct f2fs_lock_context lc;
-	size_t olen = len, dst_max_i_size = 0;
-	size_t dst_osize;
+	size_t olen = len;
+	loff_t dst_max_i_size = 0;
+	loff_t dst_osize, dst_end;
 	int ret;
 
 	if (file_in->f_path.mnt != file_out->f_path.mnt ||
@@ -3141,8 +3226,6 @@ static int f2fs_move_file_range(struct file *file_in, loff_t pos_in,
 	if (src == dst) {
 		if (pos_in == pos_out)
 			return 0;
-		if (pos_out > pos_in && pos_out < pos_in + len)
-			return -EINVAL;
 	}
 
 	inode_lock(src);
@@ -3168,6 +3251,8 @@ static int f2fs_move_file_range(struct file *file_in, loff_t pos_in,
 		goto out_unlock;
 	if (len == 0)
 		olen = len = src->i_size - pos_in;
+	if (src == dst && pos_out > pos_in && pos_out < pos_in + len)
+		goto out_unlock;
 	if (pos_in + len == src->i_size)
 		len = ALIGN(src->i_size, F2FS_BLKSIZE) - pos_in;
 	if (len == 0) {
@@ -3176,8 +3261,15 @@ static int f2fs_move_file_range(struct file *file_in, loff_t pos_in,
 	}
 
 	dst_osize = dst->i_size;
-	if (pos_out + olen > dst->i_size)
-		dst_max_i_size = pos_out + olen;
+	if (olen > LLONG_MAX - pos_out)
+		goto out_unlock;
+	dst_end = pos_out + olen;
+	if (dst_end > dst->i_size) {
+		ret = inode_newsize_ok(dst, dst_end);
+		if (ret)
+			goto out_unlock;
+		dst_max_i_size = dst_end;
+	}
 
 	/* verify the end result is block aligned */
 	if (!IS_ALIGNED(pos_in, F2FS_BLKSIZE) ||
@@ -4650,6 +4742,8 @@ out:
 	return ret;
 }
 
+static int f2fs_ioc_load_dmabuf(struct file *filp, unsigned long arg);
+
 static long __f2fs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 {
 	switch (cmd) {
@@ -4740,6 +4834,8 @@ static long __f2fs_ioctl(struct file *filp, unsigned int cmd, unsigned long arg)
 		return f2fs_ioc_get_dev_alias_file(filp, arg);
 	case F2FS_IOC_IO_PRIO:
 		return f2fs_ioc_io_prio(filp, arg);
+	case F2FS_IOC_LOAD_DMABUF:
+		return f2fs_ioc_load_dmabuf(filp, arg);
 	default:
 		return -ENOTTY;
 	}
@@ -4868,6 +4964,237 @@ out:
 	return ret;
 }
 
+static ssize_t f2fs_file_read_iter(struct kiocb *iocb, struct iov_iter *to);
+
+/*
+ * The range is read in chunks with up to depth async direct I/Os in flight,
+ * F2FS_DMABUF_DEF_DEPTH unless the caller asks for another depth. Chunks keep
+ * bios small: a kvec of physically contiguous pages makes huge bios, and every
+ * split of a bio makes blk-crypto check every page of the rest again. The CPU
+ * moves a finished chunk while the next ones are read.
+ */
+#define F2FS_DMABUF_CHUNK	SZ_4M
+#define F2FS_DMABUF_DEF_DEPTH	4
+#define F2FS_DMABUF_MAX_DEPTH	32
+
+struct f2fs_dmabuf_chunk {
+	struct kiocb iocb;
+	struct iov_iter iter;
+	struct completion done;
+	ssize_t ret;
+	u64 off;		/* offset in the read range */
+	u64 len;
+};
+
+static void f2fs_dmabuf_chunk_done(struct kiocb *iocb, long ret)
+{
+	struct f2fs_dmabuf_chunk *c =
+		container_of(iocb, struct f2fs_dmabuf_chunk, iocb);
+
+	c->ret = ret;
+	complete(&c->done);
+}
+
+/* reads the next len bytes of iter at pos asynchronously */
+static void f2fs_dmabuf_chunk_issue(struct f2fs_dmabuf_chunk *c,
+				    struct file *filp, struct iov_iter *iter,
+				    loff_t pos, u64 off, u64 len)
+{
+	ssize_t ret;
+
+	c->off = off;
+	c->len = len;
+	c->iter = *iter;
+	iov_iter_truncate(&c->iter, len);
+	iov_iter_advance(iter, len);
+	init_completion(&c->done);
+	init_sync_kiocb(&c->iocb, filp);
+	c->iocb.ki_pos = pos;
+	c->iocb.ki_flags |= IOCB_DIRECT;
+	c->iocb.ki_complete = f2fs_dmabuf_chunk_done;
+
+	ret = f2fs_file_read_iter(&c->iocb, &c->iter);
+	if (ret != -EIOCBQUEUED)
+		f2fs_dmabuf_chunk_done(&c->iocb, ret);
+}
+
+/*
+ * F2FS_IOC_LOAD_DMABUF: direct read of a file range into a dma_buf.
+ *
+ * Like wrapfd, the dma_buf is vmapped inside dma_buf_begin/end_cpu_access()
+ * and read with f2fs_file_read_iter() and IOCB_DIRECT, so the storage DMA
+ * writes the buffer. What the CPU has to write, like zeroes for holes or a
+ * buffered fallback, goes through the same mapping, except
+ * blk-crypto-fallback, which decrypts through the linear map and so needs a
+ * cached buffer.
+ *
+ * Direct I/O needs block alignment, so when file_offset, dmabuf_offset or len
+ * is not block aligned:
+ *  - the partial first and last blocks are read into a bounce buffer, and
+ *  - if file_offset and dmabuf_offset are at different offsets in a block, the
+ *    middle is read to the next block aligned place in the dma_buf and then
+ *    moved back to where it belongs.
+ * The read never writes the dma_buf outside the requested range. It is done in
+ * F2FS_DMABUF_CHUNK chunks, and each chunk is moved while the next are read.
+ */
+static int f2fs_ioc_load_dmabuf(struct file *filp, unsigned long arg)
+{
+	struct inode *inode = file_inode(filp);
+	u64 blksize = i_blocksize(inode);
+	struct f2fs_load_dmabuf req;
+	struct dma_buf *dmabuf;
+	struct iosys_map map;
+	struct page *bounce = NULL;
+	struct f2fs_dmabuf_chunk *chunks = NULL;
+	struct kvec iov[3];
+	struct iov_iter iter;
+	unsigned int nr = 0, issued = 0, finished = 0, depth;
+	u64 total, hb, off = 0;
+	u64 head, start, end, mid, dst, land, nmid, ntail, tboff, nbounce;
+	u64 need;
+	u8 *va, *b = NULL;
+	int err, err2;
+
+	if (copy_from_user(&req, (void __user *)arg, sizeof(req)))
+		return -EFAULT;
+	if (req.flags || req.reserved || !req.len || req.len > MAX_RW_COUNT ||
+	    req.depth > F2FS_DMABUF_MAX_DEPTH)
+		return -EINVAL;
+	depth = req.depth ? req.depth : F2FS_DMABUF_DEF_DEPTH;
+	if (!(filp->f_mode & FMODE_READ))
+		return -EBADF;
+	if (!S_ISREG(inode->i_mode))
+		return -EINVAL;
+	if (req.file_offset >= inode->i_sb->s_maxbytes)
+		return -EINVAL;
+
+	dmabuf = dma_buf_get(req.dmabuf_fd);
+	if (IS_ERR(dmabuf))
+		return PTR_ERR(dmabuf);
+
+	err = -EBADF;
+	if (!(dmabuf->file->f_mode & FMODE_WRITE))
+		goto out_put;
+	err = -EINVAL;
+	if (req.dmabuf_offset > dmabuf->size ||
+	    req.len > dmabuf->size - req.dmabuf_offset)
+		goto out_put;
+	if (req.file_offset + req.len > i_size_read(inode))
+		goto out_put;
+
+	/*
+	 * File range [start, end) is read: [start, mid) into the bounce buffer
+	 * if file_offset is not block aligned, then nmid bytes to land in the
+	 * dma_buf, then ntail bytes into the bounce buffer. The data read to
+	 * land belongs at dst.
+	 */
+	head = req.file_offset & (blksize - 1);
+	start = req.file_offset - head;
+	end = round_up(req.file_offset + req.len, blksize);
+	mid = start + (head ? blksize : 0);
+	dst = req.dmabuf_offset + (mid - req.file_offset);
+	land = round_up(dst, blksize);
+	nmid = 0;
+	if (req.dmabuf_offset + req.len > land)
+		nmid = min(end - mid, round_down(req.dmabuf_offset + req.len -
+						 land, blksize));
+	ntail = end - mid - nmid;
+	tboff = head ? blksize : 0;	/* the tail follows the head block */
+	nbounce = tboff + ntail;
+
+	if (nbounce) {
+		err = -ENOMEM;
+		bounce = alloc_pages(GFP_KERNEL, get_order(nbounce));
+		if (!bounce)
+			goto out_put;
+		b = page_address(bounce);
+	}
+
+	err = dma_buf_begin_cpu_access(dmabuf, DMA_BIDIRECTIONAL);
+	if (err)
+		goto out_free;
+	/* a dma_buf that the kernel cannot map is not supported */
+	err = -EOPNOTSUPP;
+	if (dma_buf_vmap_unlocked(dmabuf, &map))
+		goto out_end;
+	if (map.is_iomem)
+		goto out_vunmap;
+	va = map.vaddr;
+
+	if (head)
+		iov[nr++] = (struct kvec){ b, blksize };
+	if (nmid)
+		iov[nr++] = (struct kvec){ va + land, nmid };
+	if (ntail)
+		iov[nr++] = (struct kvec){ b + tboff, ntail };
+	iov_iter_kvec(&iter, ITER_DEST, iov, nr, end - start);
+
+	total = end - start;
+	chunks = kcalloc(depth, sizeof(*chunks), GFP_KERNEL);
+	err = -ENOMEM;
+	if (!chunks)
+		goto out_vunmap;
+	err = 0;
+	hb = head ? blksize : 0;	/* the middle starts after the head */
+	need = req.file_offset + req.len - start;
+
+	/* chunks finish in order of issue, the moves must also be in order */
+	while (finished < issued || (off < total && !err)) {
+		struct f2fs_dmabuf_chunk *c;
+		u64 a, z;
+
+		while (off < total && !err &&
+		       issued - finished < depth) {
+			u64 n = min_t(u64, total - off, F2FS_DMABUF_CHUNK);
+
+			c = &chunks[issued % depth];
+			f2fs_dmabuf_chunk_issue(c, filp, &iter, start + off,
+						off, n);
+			issued++;
+			off += n;
+		}
+		c = &chunks[finished % depth];
+		wait_for_completion(&c->done);
+		finished++;
+		if (c->ret < 0 || (c->ret < c->len && c->off + c->ret < need)) {
+			/* error, or the file was truncated */
+			if (!err)
+				err = c->ret < 0 ? c->ret : -EINVAL;
+			continue;
+		}
+		if (err || land == dst)
+			continue;
+		/* move the middle of this chunk, later chunks land behind it */
+		a = max(c->off, hb);
+		z = min(c->off + c->len, hb + nmid);
+		if (a < z)
+			memmove(va + dst + (a - hb), va + land + (a - hb),
+				z - a);
+	}
+
+	if (!err) {
+		if (head)
+			memcpy(va + req.dmabuf_offset, b + head,
+			       min(blksize - head, req.len));
+		if (ntail)
+			memcpy(va + dst + nmid, b + tboff,
+			       req.file_offset + req.len - mid - nmid);
+	}
+	kfree(chunks);
+out_vunmap:
+	dma_buf_vunmap_unlocked(dmabuf, &map);
+out_end:
+	err2 = dma_buf_end_cpu_access(dmabuf, DMA_BIDIRECTIONAL);
+	if (!err)
+		err = err2;
+out_free:
+	if (bounce)
+		__free_pages(bounce, get_order(nbounce));
+out_put:
+	dma_buf_put(dmabuf);
+	return err;
+}
+
 static void f2fs_trace_rw_file_path(struct file *file, loff_t pos, size_t count,
 				    int rw)
 {
@@ -4970,8 +5297,10 @@ static ssize_t f2fs_write_checks(struct kiocb *iocb, struct iov_iter *from)
 	if (err)
 		return err;
 
-	f2fs_zero_post_eof_page(inode,
-		iocb->ki_pos + iov_iter_count(from), true);
+	err = f2fs_zero_post_eof_page(inode,
+		iocb->ki_pos + iov_iter_count(from), true, true);
+	if (err)
+		return err;
 	return count;
 }
 
@@ -5238,9 +5567,8 @@ static ssize_t f2fs_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
 	bool dio;
 	bool may_need_sync = true;
 	int preallocated;
-	const loff_t pos = iocb->ki_pos;
-	const ssize_t count = iov_iter_count(from);
 	ssize_t ret;
+	loff_t bufio_start_pos;
 
 	if (unlikely(f2fs_cp_error(F2FS_I_SB(inode)))) {
 		ret = -EIO;
@@ -5266,15 +5594,17 @@ static ssize_t f2fs_file_write_iter(struct kiocb *iocb, struct iov_iter *from)
 		inode_lock(inode);
 	}
 
+	ret = f2fs_write_checks(iocb, from);
+	if (ret <= 0)
+		goto out_unlock;
+
 	if (f2fs_is_pinned_file(inode) &&
-	    !f2fs_overwrite_io(inode, pos, count)) {
+	    !f2fs_overwrite_io(inode, iocb->ki_pos, iov_iter_count(from))) {
 		ret = -EIO;
 		goto out_unlock;
 	}
 
-	ret = f2fs_write_checks(iocb, from);
-	if (ret <= 0)
-		goto out_unlock;
+	bufio_start_pos = iocb->ki_pos;
 
 	/* Determine whether we will do a direct write or a buffered write. */
 	dio = f2fs_should_use_dio(inode, iocb, from);
@@ -5330,8 +5660,8 @@ out:
 	 */
 	if (ret > 0 && !dio && (iocb->ki_flags & IOCB_DIRECT))
 		f2fs_flush_buffered_write(iocb->ki_filp->f_mapping,
-					  orig_pos,
-					  orig_pos + ret - 1);
+					  bufio_start_pos,
+					  bufio_start_pos + ret - 1);
 
 	return ret;
 }
@@ -5486,6 +5816,7 @@ long f2fs_compat_ioctl(struct file *file, unsigned int cmd, unsigned long arg)
 	case F2FS_IOC_COMPRESS_FILE:
 	case F2FS_IOC_GET_DEV_ALIAS_FILE:
 	case F2FS_IOC_IO_PRIO:
+	case F2FS_IOC_LOAD_DMABUF:
 		break;
 	default:
 		return -ENOIOCTLCMD;

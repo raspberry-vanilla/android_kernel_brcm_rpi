@@ -1393,7 +1393,8 @@ struct rq {
 	unsigned int		core_forceidle_seq;
 	unsigned int		core_forceidle_occupation;
 	u64			core_forceidle_start;
-#endif
+	unsigned int		core_pick_in_flight;
+#endif /* CONFIG_SCHED_CORE */
 
 	/* Scratch cpumask to be temporarily used under rq_lock */
 	cpumask_var_t		scratch_mask;
@@ -2388,13 +2389,7 @@ static inline int task_current_donor(struct rq *rq, struct task_struct *p)
 	return rq->donor == p;
 }
 
-static inline bool task_is_blocked(struct task_struct *p)
-{
-	if (!sched_proxy_exec())
-		return false;
-
-	return !!p->blocked_on;
-}
+bool task_is_blocked(struct task_struct *p);
 
 static inline int task_on_cpu(struct rq *rq, struct task_struct *p)
 {

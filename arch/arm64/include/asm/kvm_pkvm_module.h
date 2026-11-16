@@ -20,6 +20,11 @@ enum pkvm_psci_notification {
 	PKVM_PSCI_CPU_ENTRY,
 };
 
+enum pkvm_device_context_op {
+	PKVM_DEVICE_CONTEXT_GET,
+	PKVM_DEVICE_CONTEXT_PUT,
+};
+
 struct pkvm_sglist_page {
 	u64	pfn : 40;
 	u8	order;
@@ -39,6 +44,12 @@ struct pkvm_module_trng_ops {
 
 	ANDROID_KABI_RESERVE(1);
 	ANDROID_KABI_RESERVE(2);
+};
+
+enum pkvm_smc_handler_ret {
+	GUEST_SMC_HANDLED,
+	GUEST_SMC_NOT_HANDLED,
+	GUEST_SMC_NEED_TOPUP,
 };
 
 /**
@@ -241,6 +252,13 @@ struct pkvm_module_trng_ops {
  *				for pVMs. The @ops.trng_uuid is used to advertise the
  *				identity of TRNG implementation. @ops.trng_rnd64 is used
  *				to generate entropy bits to guest.
+ * @host_device_manage_context:	Manage host context (vm == NULL) for an IOMMU stream
+ *				(@iommu_id, @endpoint_id). If @op is
+ *				PKVM_DEVICE_CONTEXT_GET, queries and acquires context
+ *				(incrementing refcount if owned by host / unassigned,
+ *				returning -EPERM if assigned to a guest VM). If @op is
+ *				PKVM_DEVICE_CONTEXT_PUT, releases context (decrementing
+ *				refcount).
  */
 struct pkvm_module_ops {
 	int (*create_private_mapping)(phys_addr_t phys, size_t size,
@@ -267,9 +285,9 @@ struct pkvm_module_ops {
 	int (*host_stage2_enable_lazy_pte)(u64 addr, u64 nr_pages);
 	int (*host_stage2_disable_lazy_pte)(u64 addr, u64 nr_pages);
 	int (*register_host_smc_handler)(bool (*cb)(struct user_pt_regs *));
-	int (*register_guest_smc_handler)(bool (*cb)(struct arm_smccc_1_2_regs *regs,
-						     struct arm_smccc_1_2_regs *res,
-						     pkvm_handle_t handle));
+	int (*register_guest_smc_handler)(enum pkvm_smc_handler_ret (*cb)(
+			struct arm_smccc_1_2_regs *regs, struct arm_smccc_1_2_regs *res,
+			pkvm_handle_t handle));
 	int (*register_default_trap_handler)(bool (*cb)(struct user_pt_regs *));
 	int (*register_illegal_abt_notifier)(void (*cb)(struct user_pt_regs *));
 	int (*register_psci_notifier)(void (*cb)(enum pkvm_psci_notification, struct user_pt_regs *));
@@ -313,6 +331,10 @@ struct pkvm_module_ops {
 	void * (*iommu_donate_pages_atomic)(u8 order);
 	void (*iommu_reclaim_pages_atomic)(void *p, u8 order);
 	int (*hyp_smp_processor_id)(void);
+	int (*guest_accept_module_prot_page)(u64 ipa, u64 nr_pages);
+	int (*register_guest_accept_module_owned_handler)(int (*cb)(
+					u64 phys, u64 ipa, u64 size,
+					pkvm_handle_t handle));
 	int (*device_register_reset)(u64 phys, void *cookie,
 				     int (*cb)(void *cookie, bool host_to_guest));
 	ANDROID_KABI_USE(1, int (*register_guest_trng_ops)(
@@ -323,7 +345,8 @@ struct pkvm_module_ops {
 	ANDROID_KABI_USE(4, int (*request_hyp_alloc)(void));
 	ANDROID_KABI_USE(5, int (*device_register_power_lock)(u64 phys, void *cookie,
 					     int(*cb)(void *cookie, bool lock)));
-	ANDROID_KABI_RESERVE(6);
+	ANDROID_KABI_USE(6, int (*host_device_manage_context)(u64 iommu_id, u32 endpoint_id,
+							      enum pkvm_device_context_op op));
 	ANDROID_KABI_RESERVE(7);
 	ANDROID_KABI_RESERVE(8);
 	ANDROID_KABI_RESERVE(9);

@@ -48,3 +48,8 @@ __rust_helper void rust_helper_vma_end_read(struct vm_area_struct *vma)
 {
 	vma_end_read(vma);
 }
+
+__rust_helper void *rust_helper_lowmem_page_address(const struct page *page)
+{
+	return lowmem_page_address(page);
+}

@@ -1,4 +1,5 @@
 [abi_symbol_list]
+  abort_creds
   add_device_randomness
   add_memory_driver_managed
   addrconf_add_linklocal
@@ -112,6 +113,7 @@
   __bitmap_intersects
   __bitmap_or
   bitmap_parselist
+  bitmap_parselist_user
   bitmap_parse_user
   bitmap_print_to_pagebuf
   __bitmap_replace
@@ -489,6 +491,7 @@
   dev_get_stats
   dev_get_tstats64
   dev_graft_qdisc
+  devm_regulator_bulk_get_exclusive
   dev_pm_opp_get_required_pstate
   device_add
   device_add_disk
@@ -1264,6 +1267,7 @@
   folio_wait_private_2_killable
   folio_wait_writeback
   folio_wait_writeback_killable
+  follow_down
   follow_pfnmap_end
   follow_pfnmap_start
   __fortify_panic
@@ -1283,6 +1287,8 @@
   free_percpu_irq
   freezer_active
   freezing_slow_path
+  from_vfsgid
+  from_vfsuid
   fs_bio_set
   fs_context_for_submount
   fs_ftype_to_dtype
@@ -1384,6 +1390,8 @@
   gether_set_qmult
   gether_setup_name_default
   get_inode_acl
+  get_max_files
+  getname_kernel
   get_net_ns_by_fd
   get_net_ns_by_pid
   get_pid_task
@@ -1440,11 +1448,25 @@
   gpio_request
   gpio_to_desc
   graph_util_card_probe
+  graph_util_parse_link_direction
+  graph_util_parse_trigger_order
   gre_add_protocol
   gre_del_protocol
   gro_cells_destroy
   gro_cells_init
   gro_cells_receive
+  groups_alloc
+  groups_free
+  groups_sort
+  gspca_coarse_grained_expo_autogain
+  gspca_debug
+  gspca_dev_probe
+  gspca_dev_probe2
+  gspca_disconnect
+  gspca_expo_autogain
+  gspca_frame_add
+  gspca_resume
+  gspca_suspend
   guid_gen
   guid_null
   handle_bad_irq
@@ -1476,7 +1498,10 @@
   hid_open_report
   hid_parse_report
   __hid_register_driver
+  hid_register_report
   hid_report_raw_event
+  __hid_report_raw_event
+  hid_set_field
   hid_unregister_driver
   housekeeping_cpumask
   hrtimer_active
@@ -1626,10 +1651,12 @@
   inode_set_bytes
   inode_set_ctime_current
   inode_set_flags
+  inode_to_bdi
   input_alloc_absinfo
   input_allocate_device
   input_close_device
   input_device_enabled
+  input_enable_softrepeat
   input_event
   input_ff_create_memless
   input_free_device
@@ -1766,10 +1793,11 @@
   kernel_accept
   kernel_bind
   kernel_connect
+  kernel_getpeername
   kernel_kobj
   kernel_listen
-  kernel_neon_begin
-  kernel_neon_end
+  __kernel_neon_begin
+  __kernel_neon_end
   kernel_param_lock
   kernel_param_unlock
   kernel_recvmsg
@@ -1912,6 +1940,11 @@
   load_nls_default
   __local_bh_enable_ip
   lockref_get
+  lock_rename_child
+  locks_alloc_lock
+  locks_delete_block
+  locks_free_lock
+  locks_init_lock
   locks_lock_inode_wait
   lock_sock_nested
   lock_two_nondirectories
@@ -1924,6 +1957,7 @@
   look_up_OID
   lookup_one
   lookup_one_len
+  lookup_one_qstr_excl
   lookup_positive_unlocked
   lookup_user_key
   LZ4_compress_fast
@@ -1945,6 +1979,7 @@
   match_strdup
   match_string
   match_token
+  match_wildcard
   mbox_chan_received_data
   mbox_client_txdone
   mbox_controller_register
@@ -2618,6 +2653,7 @@
   platform_irq_count
   __platform_register_drivers
   platform_unregister_drivers
+  play_idle_precise
   pm_generic_freeze
   pm_generic_poweroff
   pm_generic_restore
@@ -2652,6 +2688,7 @@
   pm_suspend_target_state
   pm_system_wakeup
   pm_wakeup_dev_event
+  posix_acl_alloc
   posix_acl_chmod
   posix_acl_create
   posix_clock_register
@@ -2709,6 +2746,7 @@
   put_disk
   put_fs_context
   put_iova_domain
+  putname
   __put_net
   put_pid
   __put_task_struct
@@ -3084,11 +3122,13 @@
   set_direct_map_invalid_noflush
   set_disk_ro
   set_freezable
+  set_groups
   set_memory_encrypted
   set_nlink
   set_normalized_timespec64
   set_page_dirty
   __SetPageMovable
+  set_posix_acl
   setup_udp_tunnel_sock
   set_user_nice
   sg_alloc_table
@@ -3129,9 +3169,22 @@
   simple_strtol
   simple_strtoul
   simple_strtoull
+  simple_util_be_hw_params_fixup
+  simple_util_canonicalize_cpu
+  simple_util_canonicalize_platform
+  simple_util_clean_reference
   simple_util_dai_init
   simple_util_hw_params
+  simple_util_init_priv
+  simple_util_is_convert_required
+  simple_util_parse_card_name
+  simple_util_parse_clk
+  simple_util_parse_convert
+  simple_util_parse_daifmt
+  simple_util_parse_routing
+  simple_util_parse_widgets
   simple_util_remove
+  simple_util_set_dailink_name
   simple_util_shutdown
   simple_util_startup
   simple_write_to_buffer
@@ -3222,6 +3275,7 @@
   sk_stop_timer
   sk_stream_error
   sk_stream_wait_memory
+  smp_call_function_many
   smp_call_function_single
   smp_call_function_single_async
   snd_card_disconnect
@@ -3417,6 +3471,8 @@
   sock_release
   sock_rfree
   sock_sendmsg
+  sock_set_reuseaddr
+  sock_set_sndtimeo
   sock_setsockopt
   __sock_tx_timestamp
   sock_unregister
@@ -3885,6 +3941,7 @@
   usb_ep_set_maxpacket_limit
   usb_ep_type_string
   usb_find_common_endpoints
+  usb_find_common_endpoints_reverse
   usb_find_interface
   usb_free_all_descriptors
   usb_free_coherent
@@ -3967,12 +4024,15 @@
   usb_show_dynids
   usb_speed_string
   usb_stor_access_xfer_buf
+  usb_stor_Bulk_reset
   usb_stor_bulk_srb
   usb_stor_bulk_transfer_buf
   usb_stor_bulk_transfer_sg
+  usb_stor_Bulk_transport
   usb_stor_CB_reset
   usb_stor_CB_transport
   usb_stor_clear_halt
+  usb_stor_control_msg
   usb_stor_ctrl_transfer
   usb_stor_disconnect
   usb_store_new_id
@@ -3993,6 +4053,7 @@
   usb_unlink_urb
   usb_unpoison_urb
   usb_unregister_notify
+  usb_wait_anchor_empty_timeout
   __usecs_to_jiffies
   user_describe
   user_destroy
@@ -4001,8 +4062,12 @@
   usleep_range_state
   utf16s_to_utf8s
   utf32_to_utf8
+  utf8_casefold
+  utf8_load
   utf8s_to_utf16s
+  utf8_strncasecmp
   utf8_to_utf32
+  utf8_unload
   uuid_gen
   uuid_null
   uuid_parse
@@ -4023,6 +4088,7 @@
   v4l2_ctrl_new_std_menu
   __v4l2_ctrl_s_ctrl
   v4l2_ctrl_subscribe_event
+  v4l2_device_disconnect
   v4l2_device_put
   v4l2_device_register
   __v4l2_device_register_subdev
@@ -4092,9 +4158,11 @@
   vfs_link
   vfs_listxattr
   vfs_llseek
+  vfs_lock_file
   vfs_mkdir
   vfs_parse_fs_string
   vfs_path_lookup
+  vfs_path_parent_lookup
   vfs_remove_acl
   vfs_removexattr
   vfs_rename

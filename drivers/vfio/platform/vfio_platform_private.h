@@ -10,6 +10,7 @@
 #include <linux/types.h>
 #include <linux/interrupt.h>
 #include <linux/vfio.h>
+#include <linux/vfio_platform.h>
 
 #define VFIO_PLATFORM_OFFSET_SHIFT   40
 #define VFIO_PLATFORM_OFFSET_MASK (((u64)(1) << VFIO_PLATFORM_OFFSET_SHIFT) - 1)
@@ -65,18 +66,9 @@ struct vfio_platform_device {
 	struct resource*
 		(*get_resource)(struct vfio_platform_device *vdev, int i);
 	int	(*get_irq)(struct vfio_platform_device *vdev, int i);
-	int	(*of_reset)(struct vfio_platform_device *vdev);
+	vfio_platform_reset_fn_t	of_reset;
 
 	bool				reset_required;
-};
-
-typedef int (*vfio_platform_reset_fn_t)(struct vfio_platform_device *vdev);
-
-struct vfio_platform_reset_node {
-	struct list_head link;
-	char *compat;
-	struct module *owner;
-	vfio_platform_reset_fn_t of_reset;
 };
 
 int vfio_platform_init_common(struct vfio_platform_device *vdev);
@@ -103,30 +95,5 @@ void vfio_platform_irq_cleanup(struct vfio_platform_device *vdev);
 int vfio_platform_set_irqs_ioctl(struct vfio_platform_device *vdev,
 				 uint32_t flags, unsigned index,
 				 unsigned start, unsigned count, void *data);
-
-void __vfio_platform_register_reset(struct vfio_platform_reset_node *n);
-void vfio_platform_unregister_reset(const char *compat,
-				    vfio_platform_reset_fn_t fn);
-#define vfio_platform_register_reset(__compat, __reset)		\
-static struct vfio_platform_reset_node __reset ## _node = {	\
-	.owner = THIS_MODULE,					\
-	.compat = __compat,					\
-	.of_reset = __reset,					\
-};								\
-__vfio_platform_register_reset(&__reset ## _node)
-
-#define module_vfio_reset_handler(compat, reset)		\
-MODULE_ALIAS("vfio-reset:" compat);				\
-static int __init reset ## _module_init(void)			\
-{								\
-	vfio_platform_register_reset(compat, reset);		\
-	return 0;						\
-};								\
-static void __exit reset ## _module_exit(void)			\
-{								\
-	vfio_platform_unregister_reset(compat, reset);		\
-};								\
-module_init(reset ## _module_init);				\
-module_exit(reset ## _module_exit)
 
 #endif /* VFIO_PLATFORM_PRIVATE_H */

@@ -12,3 +12,4 @@
 #include <uapi/linux/mdio.h>
 #include <uapi/linux/mii.h>
 #include <uapi/linux/ethtool.h>
+#include <uapi/linux/wrapfd.h>

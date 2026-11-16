@@ -727,7 +727,7 @@ static int tcf_ife_decode(struct sk_buff *skb, const struct tc_action *a,
 
 	tlv_data = ife_decode(skb, &metalen);
 	if (unlikely(!tlv_data)) {
-		qstats_drop_inc(this_cpu_ptr(ife->common.cpu_qstats));
+		qstats_cpu_drop_inc(ife->common.cpu_qstats);
 		return TC_ACT_SHOT;
 	}
 
@@ -740,7 +740,7 @@ static int tcf_ife_decode(struct sk_buff *skb, const struct tc_action *a,
 		curr_data = ife_tlv_meta_decode(tlv_data, ifehdr_end, &mtype,
 						&dlen, NULL);
 		if (!curr_data) {
-			qstats_drop_inc(this_cpu_ptr(ife->common.cpu_qstats));
+			qstats_cpu_drop_inc(ife->common.cpu_qstats);
 			return TC_ACT_SHOT;
 		}
 
@@ -755,7 +755,7 @@ static int tcf_ife_decode(struct sk_buff *skb, const struct tc_action *a,
 	}
 
 	if (WARN_ON(tlv_data != ifehdr_end)) {
-		qstats_drop_inc(this_cpu_ptr(ife->common.cpu_qstats));
+		qstats_cpu_drop_inc(ife->common.cpu_qstats);
 		return TC_ACT_SHOT;
 	}
 
@@ -821,7 +821,7 @@ static int tcf_ife_encode(struct sk_buff *skb, const struct tc_action *a,
 	 * so lets be conservative.. */
 	if ((action == TC_ACT_SHOT) || exceed_mtu) {
 drop:
-		qstats_drop_inc(this_cpu_ptr(ife->common.cpu_qstats));
+		qstats_cpu_drop_inc(ife->common.cpu_qstats);
 		return TC_ACT_SHOT;
 	}
 
@@ -878,6 +878,28 @@ TC_INDIRECT_SCOPE int tcf_ife_act(struct sk_buff *skb,
 	return tcf_ife_decode(skb, a, res);
 }
 
+static size_t tcf_ife_get_fill_size(const struct tc_action *act)
+{
+	struct tcf_ife_info *ife = to_ife(act);
+	const struct tcf_ife_params *p;
+	struct tcf_meta_info *e;
+	size_t size = nla_total_size(sizeof(struct tc_ife)) /* TCA_IFE_PARMS */
+		+ nla_total_size(ETH_ALEN) /* TCA_IFE_DMAC */
+		+ nla_total_size(ETH_ALEN) /* TCA_IFE_SMAC */
+		+ nla_total_size(2) /* TCA_IFE_TYPE */
+		+ nla_total_size(0); /* TCA_IFE_METALST */
+
+	rcu_read_lock();
+	p = rcu_dereference(ife->params);
+	if (p) {
+		list_for_each_entry_rcu(e, &p->metalist, metalist)
+			size += nla_total_size(sizeof(u32));
+	}
+	rcu_read_unlock();
+
+	return size;
+}
+
 static struct tc_action_ops act_ife_ops = {
 	.kind = "ife",
 	.id = TCA_ID_IFE,
@@ -886,6 +908,7 @@ static struct tc_action_ops act_ife_ops = {
 	.dump = tcf_ife_dump,
 	.cleanup = tcf_ife_cleanup,
 	.init = tcf_ife_init,
+	.get_fill_size = tcf_ife_get_fill_size,
 	.size =	sizeof(struct tcf_ife_info),
 };
 MODULE_ALIAS_NET_ACT("ife");

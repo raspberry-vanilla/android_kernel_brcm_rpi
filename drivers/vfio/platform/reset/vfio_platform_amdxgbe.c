@@ -13,8 +13,9 @@
 #include <linux/io.h>
 #include <uapi/linux/mdio.h>
 #include <linux/delay.h>
-
-#include "../vfio_platform_private.h"
+#include <linux/device.h>
+#include <linux/err.h>
+#include <linux/vfio_platform.h>
 
 #define DMA_MR			0x3000
 #define MAC_VR			0x0110
@@ -45,66 +46,58 @@ static void xmdio_write(void __iomem *ioaddr, unsigned int mmd,
 	iowrite32(value, ioaddr + ((mmd_address & 0xff) << 2));
 }
 
-static int vfio_platform_amdxgbe_reset(struct vfio_platform_device *vdev)
+static int vfio_platform_amdxgbe_reset(struct device *dev)
 {
-	struct vfio_platform_region *xgmac_regs = &vdev->regions[0];
-	struct vfio_platform_region *xpcs_regs = &vdev->regions[1];
+	void __iomem *xgmac_ioaddr, *xpcs_ioaddr;
 	u32 dma_mr_value, pcs_value, value;
 	unsigned int count;
 
-	if (!xgmac_regs->ioaddr) {
-		xgmac_regs->ioaddr =
-			ioremap(xgmac_regs->addr, xgmac_regs->size);
-		if (!xgmac_regs->ioaddr)
-			return -ENOMEM;
-	}
-	if (!xpcs_regs->ioaddr) {
-		xpcs_regs->ioaddr =
-			ioremap(xpcs_regs->addr, xpcs_regs->size);
-		if (!xpcs_regs->ioaddr)
-			return -ENOMEM;
-	}
+	xgmac_ioaddr = vfio_platform_region_ioaddr(dev, 0, NULL);
+	if (IS_ERR(xgmac_ioaddr))
+		return PTR_ERR(xgmac_ioaddr);
+
+	xpcs_ioaddr = vfio_platform_region_ioaddr(dev, 1, NULL);
+	if (IS_ERR(xpcs_ioaddr))
+		return PTR_ERR(xpcs_ioaddr);
 
 	/* reset the PHY through MDIO*/
-	pcs_value = xmdio_read(xpcs_regs->ioaddr, MDIO_MMD_PCS, MDIO_CTRL1);
+	pcs_value = xmdio_read(xpcs_ioaddr, MDIO_MMD_PCS, MDIO_CTRL1);
 	pcs_value |= MDIO_CTRL1_RESET;
-	xmdio_write(xpcs_regs->ioaddr, MDIO_MMD_PCS, MDIO_CTRL1, pcs_value);
+	xmdio_write(xpcs_ioaddr, MDIO_MMD_PCS, MDIO_CTRL1, pcs_value);
 
 	count = 50;
 	do {
 		msleep(20);
-		pcs_value = xmdio_read(xpcs_regs->ioaddr, MDIO_MMD_PCS,
-					MDIO_CTRL1);
+		pcs_value = xmdio_read(xpcs_ioaddr, MDIO_MMD_PCS, MDIO_CTRL1);
 	} while ((pcs_value & MDIO_CTRL1_RESET) && --count);
 
 	if (pcs_value & MDIO_CTRL1_RESET)
-		dev_warn(vdev->device, "%s: XGBE PHY reset timeout\n",
-			 __func__);
+		dev_warn(dev, "%s: XGBE PHY reset timeout\n", __func__);
 
 	/* disable auto-negotiation */
-	value = xmdio_read(xpcs_regs->ioaddr, MDIO_MMD_AN, MDIO_CTRL1);
+	value = xmdio_read(xpcs_ioaddr, MDIO_MMD_AN, MDIO_CTRL1);
 	value &= ~MDIO_AN_CTRL1_ENABLE;
-	xmdio_write(xpcs_regs->ioaddr, MDIO_MMD_AN, MDIO_CTRL1, value);
+	xmdio_write(xpcs_ioaddr, MDIO_MMD_AN, MDIO_CTRL1, value);
 
 	/* disable AN IRQ */
-	xmdio_write(xpcs_regs->ioaddr, MDIO_MMD_AN, MDIO_AN_INTMASK, 0);
+	xmdio_write(xpcs_ioaddr, MDIO_MMD_AN, MDIO_AN_INTMASK, 0);
 
 	/* clear AN IRQ */
-	xmdio_write(xpcs_regs->ioaddr, MDIO_MMD_AN, MDIO_AN_INT, 0);
+	xmdio_write(xpcs_ioaddr, MDIO_MMD_AN, MDIO_AN_INT, 0);
 
 	/* MAC software reset */
-	dma_mr_value = ioread32(xgmac_regs->ioaddr + DMA_MR);
+	dma_mr_value = ioread32(xgmac_ioaddr + DMA_MR);
 	dma_mr_value |= 0x1;
-	iowrite32(dma_mr_value, xgmac_regs->ioaddr + DMA_MR);
+	iowrite32(dma_mr_value, xgmac_ioaddr + DMA_MR);
 
 	usleep_range(10, 15);
 
 	count = 2000;
-	while (--count && (ioread32(xgmac_regs->ioaddr + DMA_MR) & 1))
+	while (--count && (ioread32(xgmac_ioaddr + DMA_MR) & 1))
 		usleep_range(500, 600);
 
 	if (!count)
-		dev_warn(vdev->device, "%s: MAC SW reset failed\n", __func__);
+		dev_warn(dev, "%s: MAC SW reset failed\n", __func__);
 
 	return 0;
 }

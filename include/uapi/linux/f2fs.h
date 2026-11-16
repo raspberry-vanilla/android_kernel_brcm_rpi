@@ -104,4 +104,28 @@ struct f2fs_comp_option {
 	__u8 log_cluster_size;
 };
 
+/*
+ * Android-only ioctls. Numbers start at 0x80 so they do not collide with
+ * upstream F2FS ioctls, which are allocated sequentially from 1.
+ */
+#define F2FS_IOC_LOAD_DMABUF		_IOW(F2FS_IOCTL_MAGIC, 0x80,	\
+						struct f2fs_load_dmabuf)
+
+/*
+ * for F2FS_IOC_LOAD_DMABUF: direct read of a file range into a dma_buf, which
+ * the kernel must be able to vmap. The range must be inside the file and the
+ * dma_buf. Any offsets and len work, and holes read as zeroes, but only block
+ * aligned data is written by the storage DMA alone; the CPU copies or moves
+ * the rest. Returns 0 on success.
+ */
+struct f2fs_load_dmabuf {
+	__s32 dmabuf_fd;	/* dma_buf to load into */
+	__u32 flags;		/* must be 0 */
+	__u64 file_offset;	/* start offset in the file */
+	__u64 dmabuf_offset;	/* start offset in the dma_buf */
+	__u64 len;		/* length in bytes */
+	__u32 depth;		/* max chunk reads in flight, 0 for default */
+	__u32 reserved;		/* must be 0 */
+};
+
 #endif /* _UAPI_LINUX_F2FS_H */

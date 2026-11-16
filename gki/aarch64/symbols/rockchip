@@ -678,8 +678,8 @@
   jiffies_to_msecs
   kasan_flag_enabled
   kasprintf
-  kernel_neon_begin
-  kernel_neon_end
+  __kernel_neon_begin
+  __kernel_neon_end
   __kfifo_alloc
   __kfifo_free
   __kfifo_in

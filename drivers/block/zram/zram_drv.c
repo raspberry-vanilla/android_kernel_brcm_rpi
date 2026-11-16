@@ -465,6 +465,7 @@ struct zram_wb_req {
 
 struct zram_prefetch_ctl {
 	atomic_t num_inflight;
+	atomic64_t processed_bytes;
 	wait_queue_head_t done_wait;
 };
 
@@ -1173,7 +1174,8 @@ static void zram_deferred_prefetch(struct work_struct *w)
 	struct zram *zram = req->zram;
 	u32 index = req->index;
 
-	zram_populate_table(zram, page, index);
+	if (zram_populate_table(zram, page, index) == 0)
+		atomic64_add(PAGE_SIZE, &req->pf_ctl->processed_bytes);
 
 	__free_page(page);
 	bio_put(req->bio);
@@ -1238,7 +1240,8 @@ static int zram_prefetch_from_bdev(struct zram *zram, struct page *page,
 	return 0;
 }
 
-int zram_prefetch_slots(struct zram *zram, struct zram_pp_ctl *ctl)
+int zram_prefetch_slots(struct zram *zram, struct zram_pp_ctl *ctl,
+			u64 *read_bytes)
 {
 	struct zram_pp_slot *pps;
 	struct zram_prefetch_ctl pf_ctl;
@@ -1248,6 +1251,7 @@ int zram_prefetch_slots(struct zram *zram, struct zram_pp_ctl *ctl)
 	struct page *page = NULL;
 
 	atomic_set(&pf_ctl.num_inflight, 0);
+	atomic64_set(&pf_ctl.processed_bytes, 0);
 	init_waitqueue_head(&pf_ctl.done_wait);
 
 	while ((pps = select_pp_slot(ctl))) {
@@ -1290,6 +1294,7 @@ unlock_next:
 		__free_page(page);
 
 	wait_event(pf_ctl.done_wait, atomic_read(&pf_ctl.num_inflight) == 0);
+	*read_bytes = atomic64_read(&pf_ctl.processed_bytes);
 	return ret;
 }
 
@@ -1545,8 +1550,8 @@ static ssize_t writeback_store(struct device *dev,
 			       const char *buf, size_t len)
 {
 	struct zram *zram = dev_to_zram(dev);
-	u64 nr_pages = zram->disksize >> PAGE_SHIFT;
-	unsigned long lo = 0, hi = nr_pages;
+	u64 nr_pages;
+	unsigned long lo = 0, hi;
 	struct zram_pp_ctl *pp_ctl = NULL;
 	struct zram_wb_ctl *wb_ctl = NULL;
 	char *args, *param, *val;
@@ -1558,6 +1563,9 @@ static ssize_t writeback_store(struct device *dev,
 		up_read(&zram->init_lock);
 		return -EINVAL;
 	}
+
+	nr_pages = zram->disksize >> PAGE_SHIFT;
+	hi = nr_pages;
 
 	/* Do not permit concurrent post-processing actions. */
 	if (atomic_xchg(&zram->pp_in_progress, 1)) {
@@ -1872,7 +1880,7 @@ static ssize_t read_block_state(struct file *file, char __user *buf,
 	char *kbuf;
 	ssize_t index, written = 0;
 	struct zram *zram = file->private_data;
-	unsigned long nr_pages = zram->disksize >> PAGE_SHIFT;
+	unsigned long nr_pages;
 	struct timespec64 ts;
 
 	kbuf = kvmalloc(count, GFP_KERNEL);
@@ -1885,6 +1893,8 @@ static ssize_t read_block_state(struct file *file, char __user *buf,
 		kvfree(kbuf);
 		return -EINVAL;
 	}
+
+	nr_pages = zram->disksize >> PAGE_SHIFT;
 
 	for (index = *ppos; index < nr_pages; index++) {
 		int copied;
@@ -3257,11 +3267,12 @@ static void zram_destroy_comps(struct zram *zram)
 	}
 
 	zram_comp_params_reset(zram);
+	comp_algorithm_set(zram, ZRAM_PRIMARY_COMP, default_compressor);
 }
 
 static void zram_reset_device(struct zram *zram)
 {
-	down_write(&zram->init_lock);
+	guard(rwsem_write)(&zram->init_lock);
 
 	zram->limit_pages = 0;
 
@@ -3275,9 +3286,6 @@ static void zram_reset_device(struct zram *zram)
 	memset(&zram->stats, 0, sizeof(zram->stats));
 	atomic_set(&zram->pp_in_progress, 0);
 	reset_bdev(zram);
-
-	comp_algorithm_set(zram, ZRAM_PRIMARY_COMP, default_compressor);
-	up_write(&zram->init_lock);
 }
 
 static ssize_t disksize_store(struct device *dev,

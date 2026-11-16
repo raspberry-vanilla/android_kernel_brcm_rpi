@@ -803,19 +803,19 @@ read:
 static int hyp_trace_raw_open(struct inode *inode, struct file *file)
 {
 	int ret = hyp_trace_pipe_open(inode, file);
+	struct buffer_data_read_page *spare = NULL;
 	struct ht_iterator *iter;
 
 	if (ret)
 		return ret;
 
 	iter = file->private_data;
-	iter->spare = ring_buffer_alloc_read_page(iter->hyp_buffer->trace_buffer,
-						  iter->cpu);
-	if (IS_ERR(iter->spare)) {
-		ret = PTR_ERR(iter->spare);
-		iter->spare = NULL;
+	ret = ring_buffer_alloc_read_page(iter->hyp_buffer->trace_buffer,
+					  iter->cpu, &spare);
+	if (ret)
 		return ret;
-	}
+
+	iter->spare = spare;
 
 	return 0;
 }

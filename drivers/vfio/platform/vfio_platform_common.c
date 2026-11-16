@@ -28,6 +28,13 @@
 static LIST_HEAD(reset_list);
 static DEFINE_MUTEX(driver_lock);
 
+struct vfio_platform_reset_node {
+	struct list_head link;
+	const char *compat;
+	struct module *owner;
+	vfio_platform_reset_fn_t of_reset;
+};
+
 static vfio_platform_reset_fn_t vfio_platform_lookup_reset(const char *compat,
 					struct module **module)
 {
@@ -207,7 +214,7 @@ static int vfio_platform_call_reset(struct vfio_platform_device *vdev,
 		return vfio_platform_acpi_call_reset(vdev, extra_dbg);
 	} else if (vdev->of_reset) {
 		dev_info(vdev->device, "reset\n");
-		return vdev->of_reset(vdev);
+		return vdev->of_reset(vdev->device);
 	}
 
 	dev_warn(vdev->device, "no reset function found!\n");
@@ -720,11 +727,25 @@ void vfio_platform_release_common(struct vfio_platform_device *vdev)
 }
 EXPORT_SYMBOL_GPL(vfio_platform_release_common);
 
-void __vfio_platform_register_reset(struct vfio_platform_reset_node *node)
+int __vfio_platform_register_reset(const char *compat,
+				   vfio_platform_reset_fn_t fn,
+				   struct module *owner)
 {
+	struct vfio_platform_reset_node *node;
+
+	node = kzalloc(sizeof(*node), GFP_KERNEL);
+	if (!node)
+		return -ENOMEM;
+
+	node->compat = compat;
+	node->owner = owner;
+	node->of_reset = fn;
+
 	mutex_lock(&driver_lock);
 	list_add(&node->link, &reset_list);
 	mutex_unlock(&driver_lock);
+
+	return 0;
 }
 EXPORT_SYMBOL_GPL(__vfio_platform_register_reset);
 
@@ -737,14 +758,41 @@ void vfio_platform_unregister_reset(const char *compat,
 	list_for_each_entry_safe(iter, temp, &reset_list, link) {
 		if (!strcmp(iter->compat, compat) && (iter->of_reset == fn)) {
 			list_del(&iter->link);
+			kfree(iter);
 			break;
 		}
 	}
 
 	mutex_unlock(&driver_lock);
-
 }
 EXPORT_SYMBOL_GPL(vfio_platform_unregister_reset);
+
+void __iomem *vfio_platform_region_ioaddr(struct device *dev,
+					  unsigned int index,
+					  resource_size_t *size)
+{
+	struct vfio_platform_device *vdev = dev_get_drvdata(dev);
+	struct vfio_platform_region *reg;
+
+	if (!vdev || index >= vdev->num_regions)
+		return ERR_PTR(-EINVAL);
+
+	reg = &vdev->regions[index];
+	if (!(reg->type & VFIO_PLATFORM_REGION_TYPE_MMIO))
+		return ERR_PTR(-EINVAL);
+
+	if (!reg->ioaddr) {
+		reg->ioaddr = ioremap(reg->addr, reg->size);
+		if (!reg->ioaddr)
+			return ERR_PTR(-ENOMEM);
+	}
+
+	if (size)
+		*size = reg->size;
+
+	return reg->ioaddr;
+}
+EXPORT_SYMBOL_GPL(vfio_platform_region_ioaddr);
 
 MODULE_VERSION(DRIVER_VERSION);
 MODULE_LICENSE("GPL v2");

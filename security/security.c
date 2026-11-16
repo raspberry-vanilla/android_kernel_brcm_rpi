@@ -19,7 +19,7 @@
 #include <linux/kernel.h>
 #include <linux/kernel_read_file.h>
 #include <linux/lsm_hooks.h>
-#include <linux/fsnotify.h>
+#include <linux/fsnotify.h> /* ANDROID: keeps the KMI CRCs */
 #include <linux/mman.h>
 #include <linux/mount.h>
 #include <linux/personality.h>
@@ -3109,13 +3109,7 @@ int security_file_receive(struct file *file)
  */
 int security_file_open(struct file *file)
 {
-	int ret;
-
-	ret = call_int_hook(file_open, file);
-	if (ret)
-		return ret;
-
-	return fsnotify_open_perm(file);
+	return call_int_hook(file_open, file);
 }
 
 /**

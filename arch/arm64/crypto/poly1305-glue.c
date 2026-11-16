@@ -114,11 +114,13 @@ static int neon_poly1305_update(struct shash_desc *desc,
 	bool do_neon = crypto_simd_usable() && srclen > 128;
 	struct poly1305_desc_ctx *dctx = shash_desc_ctx(desc);
 
-	if (static_branch_likely(&have_neon) && do_neon)
+	if (static_branch_likely(&have_neon) && do_neon) {
 		kernel_neon_begin();
-	neon_poly1305_do_update(dctx, src, srclen, do_neon);
-	if (static_branch_likely(&have_neon) && do_neon)
+		neon_poly1305_do_update(dctx, src, srclen, true);
 		kernel_neon_end();
+	} else {
+		neon_poly1305_do_update(dctx, src, srclen, false);
+	}
 	return 0;
 }
 

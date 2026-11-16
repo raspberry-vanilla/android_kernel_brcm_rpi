@@ -1174,6 +1174,28 @@ unsafe impl<T, E> PinInit<T, E> for T {
     }
 }
 
+// SAFETY: when the `__init` function returns with
+// - `Ok(())`, `slot` was initialized and all pinned invariants of `T` are upheld.
+// - `Err(err)`, slot was not written to.
+unsafe impl<T, E> Init<T, E> for Result<T, E> {
+    unsafe fn __init(self, slot: *mut T) -> Result<(), E> {
+        // SAFETY: `slot` is valid for writes by the safety requirements of this function.
+        unsafe { slot.write(self?) };
+        Ok(())
+    }
+}
+
+// SAFETY: when the `__pinned_init` function returns with
+// - `Ok(())`, `slot` was initialized and all pinned invariants of `T` are upheld.
+// - `Err(err)`, slot was not written to.
+unsafe impl<T, E> PinInit<T, E> for Result<T, E> {
+    unsafe fn __pinned_init(self, slot: *mut T) -> Result<(), E> {
+        // SAFETY: `slot` is valid for writes by the safety requirements of this function.
+        unsafe { slot.write(self?) };
+        Ok(())
+    }
+}
+
 /// Smart pointer that can initialize memory in-place.
 pub trait InPlaceInit<T>: Sized {
     /// Pinned version of `Self`.

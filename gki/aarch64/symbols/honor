@@ -313,6 +313,8 @@
   __traceiter_android_vh_f2fs_printk
   __tracepoint_android_vh_f2fs_create
   __traceiter_android_vh_f2fs_create
+  __traceiter_android_vh_dd_dispatch_request_bypass
+  __tracepoint_android_vh_dd_dispatch_request_bypass
   wb_wakeup
   redirty_tail_locked
   bdi_list

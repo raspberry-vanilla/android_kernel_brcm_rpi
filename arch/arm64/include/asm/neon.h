@@ -13,7 +13,14 @@
 
 #define cpu_has_neon()		system_supports_fpsimd()
 
-void kernel_neon_begin(void);
-void kernel_neon_end(void);
+void __kernel_neon_begin(struct user_fpsimd_state *);
+void __kernel_neon_end(struct user_fpsimd_state *);
+
+#define kernel_neon_begin()  do {			\
+	struct user_fpsimd_state __uninitialized __st;	\
+	__kernel_neon_begin(&__st)
+
+#define kernel_neon_end()    \
+	__kernel_neon_end(&__st); } while (0)
 
 #endif /* ! __ASM_NEON_H */

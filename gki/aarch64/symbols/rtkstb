@@ -1895,3 +1895,19 @@
   regulator_list_voltage
   regulator_set_voltage
   v4l2_find_dv_timings_cea861_vic
+
+# required by rts54xx.ko
+  i2c_smbus_write_block_data
+  i2c_new_smbus_alert_device
+
+# required by typec_rtk_rtd_pd.ko
+  typec_cable_altmode_vdm
+  typec_cable_is_active
+  typec_cable_set_identity
+  typec_cable_set_svdm_version
+  typec_find_pwr_opmode
+  typec_get_cable_svdm_version
+  typec_get_fw_cap
+  typec_port_register_cable_ops
+  typec_port_set_usb_power_delivery
+  usb_power_delivery_register

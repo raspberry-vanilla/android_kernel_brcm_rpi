@@ -336,6 +336,17 @@ impl Task {
     pub fn set_user_nice(&self, nice: i32) {
         unsafe { bindings::set_user_nice(self.0.get(), nice as _) };
     }
+
+    /// Returns whether the task structure's mm field points to an mm struct.
+    #[inline]
+    pub fn has_mm(&self) -> bool {
+        // SAFETY: The caller holds a shared reference to the task struct, so this read is valid.
+        // This uses a volatile read because C code may be modifying this field in parallel using
+        // non-atomic unsynchronized writes. This corresponds to how the C macro READ_ONCE is
+        // implemented.
+        let mm = unsafe { core::ptr::addr_of!((*self.as_ptr()).mm).read_volatile() };
+        !mm.is_null()
+    }
 }
 
 impl CurrentTask {

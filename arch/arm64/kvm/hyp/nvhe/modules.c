@@ -12,6 +12,7 @@
 #include <nvhe/mem_protect.h>
 #include <nvhe/modules.h>
 #include <nvhe/mm.h>
+#include <nvhe/pkvm.h>
 #include <nvhe/serial.h>
 #include <nvhe/spinlock.h>
 #include <nvhe/trace.h>
@@ -143,6 +144,7 @@ enum mod_handler_type {
 	HOST_FAULT_HANDLER = 0,
 	HOST_SMC_HANDLER,
 	GUEST_SMC_HANDLER,
+	GUEST_ACCEPT_MODULE_OWNED_HANDLER,
 	NUM_MOD_HANDLER_TYPES,
 };
 
@@ -189,11 +191,18 @@ static int __register_host_smc_handler(bool (*cb)(struct user_pt_regs *))
 	return mod_handler_register(HOST_SMC_HANDLER, cb);
 }
 
-static int __register_guest_smc_handler(bool (*cb)(struct arm_smccc_1_2_regs *regs,
-						   struct arm_smccc_1_2_regs *res,
-						   pkvm_handle_t handle))
+static int __register_guest_smc_handler(enum pkvm_smc_handler_ret (*cb)(
+					struct arm_smccc_1_2_regs *regs,
+					struct arm_smccc_1_2_regs *res,
+					pkvm_handle_t handle))
 {
 	return mod_handler_register(GUEST_SMC_HANDLER, cb);
+}
+
+static int __register_guest_accept_module_owned_handler(int (*cb)(u64 phys, u64 ipa, u64 size,
+								  pkvm_handle_t handle))
+{
+	return mod_handler_register(GUEST_ACCEPT_MODULE_OWNED_HANDLER, cb);
 }
 
 bool module_handle_host_perm_fault(struct user_pt_regs *regs, u64 esr, u64 addr)
@@ -222,19 +231,23 @@ bool module_handle_host_smc(struct user_pt_regs *regs)
 	return false;
 }
 
-bool module_handle_guest_smc(struct arm_smccc_1_2_regs *regs, struct arm_smccc_1_2_regs *res,
-			     pkvm_handle_t handle)
+enum pkvm_smc_handler_ret
+module_handle_guest_smc(struct arm_smccc_1_2_regs *regs, struct arm_smccc_1_2_regs *res,
+			pkvm_handle_t handle)
 {
-	bool (*cb)(struct arm_smccc_1_2_regs *regs, struct arm_smccc_1_2_regs *res,
-		   pkvm_handle_t handle);
+	enum pkvm_smc_handler_ret (*cb)(struct arm_smccc_1_2_regs *regs,
+					struct arm_smccc_1_2_regs *res,
+					pkvm_handle_t handle);
+	enum pkvm_smc_handler_ret ret;
 	int i;
 
 	for_each_mod_handler(GUEST_SMC_HANDLER, cb, i) {
-		if (cb(regs, res, handle))
-			return true;
+		ret = cb(regs, res, handle);
+		if (ret != GUEST_SMC_NOT_HANDLED)
+			return ret;
 	}
 
-	return false;
+	return GUEST_SMC_NOT_HANDLED;
 }
 
 static const struct pkvm_module_trng_ops *module_guest_trng_ops;
@@ -288,6 +301,33 @@ int module_map_module_pages(u64 pfn, void *va, u64 nr_pages, enum kvm_pgtable_pr
 int module_unmap_module_pages(u64 pfn, void *va, u64 nr_pages)
 {
 	return __pkvm_unmap_module_pages(pfn, va, nr_pages);
+}
+
+int module_guest_accept_module_owned_share(u64 phys, u64 ipa, u64 size, struct pkvm_hyp_vm *vm)
+{
+	int (*cb)(u64 phys, u64 ipa, u64 size, pkvm_handle_t handle);
+	int i;
+
+	for_each_mod_handler(GUEST_ACCEPT_MODULE_OWNED_HANDLER, cb, i) {
+		if (!cb(phys, ipa, size, vm->kvm.arch.pkvm.handle))
+			return 0;
+	}
+
+	return -EPERM;
+}
+
+static int module_host_device_manage_context(u64 iommu_id, u32 endpoint_id,
+					     enum pkvm_device_context_op op)
+{
+	switch (op) {
+	case PKVM_DEVICE_CONTEXT_GET:
+		return pkvm_devices_get_context(iommu_id, endpoint_id, NULL);
+	case PKVM_DEVICE_CONTEXT_PUT:
+		pkvm_devices_put_context(iommu_id, endpoint_id);
+		return 0;
+	default:
+		return -EINVAL;
+	}
 }
 
 const struct pkvm_module_ops module_ops = {
@@ -359,6 +399,9 @@ const struct pkvm_module_ops module_ops = {
 	.device_register_power_lock = pkvm_device_register_power_lock,
 	.register_guest_trng_ops = __register_guest_trng_ops,
 	.request_hyp_alloc = kvm_iommu_request_hyp_alloc,
+	.guest_accept_module_prot_page = __pkvm_accept_module_prot_page,
+	.register_guest_accept_module_owned_handler = __register_guest_accept_module_owned_handler,
+	.host_device_manage_context = module_host_device_manage_context,
 };
 
 static void *pkvm_module_hyp_va(struct pkvm_el2_module *mod, void *kern_va)

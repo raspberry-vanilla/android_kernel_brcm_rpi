@@ -346,3 +346,18 @@ type 'struct fscrypt_master_key' changed
 type 'struct dw_pcie_rp' changed
   member 'union { bool keep_rp_msi_en:1; unsigned char __kabi_ignored1; }' was added
 
+type 'struct bindings::bindings_raw::task_dma_buf_info' changed
+  byte size changed from 0 to 48
+  member 'u8 _unused[0]' was removed
+  member 'usize rss' was added
+  member 'usize rss_hwm' was added
+  member 'struct bindings::bindings_raw::refcount_struct refcnt' was added
+  member 'struct bindings::bindings_raw::spinlock lock' was added
+  member 'struct bindings::bindings_raw::list_head dmabufs' was added
+  member 'u32 dmabuf_count' was added
+
+type 'struct pkvm_module_ops' changed
+  member 'u64 __kabi_reserved6' was removed
+  member 'union { int(* host_device_manage_context)(u64, u32, enum pkvm_device_context_op); struct { u64 __kabi_reserved6; }; union { }; }' was added
+
+

@@ -32,12 +32,15 @@ extern crate self as kernel;
 pub use ffi;
 
 pub mod alloc;
+pub mod anon_inodes;
 pub mod bitmap;
 #[cfg(CONFIG_BLOCK)]
 pub mod block;
 mod build_assert;
 pub mod cred;
 pub mod device;
+pub mod dma;
+pub mod dma_buf;
 pub mod error;
 #[cfg(CONFIG_RUST_FW_LOADER_ABSTRACTIONS)]
 pub mod firmware;
@@ -46,6 +49,7 @@ pub mod id_pool;
 #[doc(hidden)]
 pub mod impl_flags;
 pub mod init;
+pub mod interrupt;
 pub mod ioctl;
 pub mod jump_label;
 #[cfg(CONFIG_KUNIT)]
@@ -53,6 +57,7 @@ pub mod kunit;
 pub mod list;
 pub mod miscdevice;
 pub mod mm;
+pub mod module_param;
 #[cfg(CONFIG_NET)]
 pub mod net;
 pub mod page;

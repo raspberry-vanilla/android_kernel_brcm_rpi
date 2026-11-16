@@ -14,7 +14,6 @@
   alarm_cancel
   alarm_init
   alarm_start_relative
-  arch_touch_nmi_watchdog
   alarmtimer_get_rtcdev
   alarm_try_to_cancel
   alloc_chrdev_region
@@ -27,6 +26,7 @@
   __alloc_skb
   alloc_skb_with_frags
   alloc_workqueue
+  alloc_workqueue_attrs
   all_vm_events
   alt_cb_patch_nops
   amba_bustype
@@ -41,6 +41,7 @@
   __arch_copy_to_user
   arch_freq_scale
   arch_timer_read_counter
+  arch_touch_nmi_watchdog
   argv_free
   argv_split
   arm64_use_ng_mappings
@@ -437,6 +438,7 @@
   device_add
   device_add_disk
   device_add_groups
+  device_attach
   device_create
   device_create_file
   device_create_managed_software_node
@@ -465,6 +467,7 @@
   device_property_read_u32_array
   device_property_read_u8_array
   device_register
+  device_release_driver
   device_remove_file
   device_remove_file_self
   device_remove_groups
@@ -1062,6 +1065,7 @@
   drm_writeback_signal_completion
   drop_reasons_register_subsys
   drop_reasons_unregister_subsys
+  dummy_irq_chip
   dump_backtrace
   dump_page
   dump_stack
@@ -1307,6 +1311,7 @@
   i2c_smbus_read_byte_data
   i2c_smbus_write_byte_data
   i2c_smbus_xfer
+  __i2c_transfer
   i2c_transfer
   i2c_transfer_buffer_flags
   i2c_unregister_device
@@ -1491,6 +1496,7 @@
   irq_set_irqchip_state
   irq_set_irq_type
   irq_set_irq_wake
+  irq_set_parent
   irq_to_desc
   irq_work_queue
   irq_work_run
@@ -1506,8 +1512,8 @@
   kernel_cpustat
   kernel_getsockname
   kernel_kobj
-  kernel_neon_begin
-  kernel_neon_end
+  __kernel_neon_begin
+  __kernel_neon_end
   kernel_param_lock
   kernel_param_unlock
   kernel_recvmsg
@@ -2137,6 +2143,7 @@
   platform_driver_unregister
   platform_find_device_by_driver
   platform_get_irq
+  platform_get_irq_affinity
   platform_get_irq_byname
   platform_get_irq_byname_optional
   platform_get_irq_optional
@@ -2389,6 +2396,7 @@
   request_firmware_direct
   request_firmware_nowait
   __request_percpu_irq
+  __request_percpu_irq_NEW
   __request_region
   request_threaded_irq
   resched_curr
@@ -2647,7 +2655,9 @@
   snd_soc_set_runtime_hwparams
   snd_soc_unregister_card
   snd_soc_unregister_component
+  snd_usb_lock_shutdown
   snd_usb_register_platform_ops
+  snd_usb_unlock_shutdown
   snd_usb_unregister_platform_ops
   snprintf
   soc_device_register
@@ -2798,6 +2808,7 @@
   system_wq
   sys_tz
   task_active_pid_ns
+  task_is_blocked
   __tasklet_hi_schedule
   tasklet_init
   tasklet_kill
@@ -2861,6 +2872,7 @@
   trace_handle_return
   __traceiter_android_rvh_after_dequeue_task
   __traceiter_android_rvh_after_enqueue_task
+  __traceiter_android_rvh_alloc_workqueue
   __traceiter_android_rvh_attach_entity_load_avg
   __traceiter_android_rvh_blk_mq_has_request
   __traceiter_android_rvh_build_perf_domains
@@ -2935,12 +2947,14 @@
   __traceiter_android_vh_binder_restore_priority
   __traceiter_android_vh_binder_set_priority
   __traceiter_android_vh_binder_wait_for_work
+  __traceiter_android_vh_calc_alloc_flags
   __traceiter_android_vh_calculate_totalreserve_pages
   __traceiter_android_vh_check_new_page
   __traceiter_android_vh_chk_task
   __traceiter_android_vh_cpu_idle_enter
   __traceiter_android_vh_cpu_idle_exit
   __traceiter_android_vh_do_async_mmap_readahead
+  __traceiter_android_vh_do_send_sig_info
   __traceiter_android_vh_do_sync_mmap_readahead
   __traceiter_android_vh_dump_throttled_rt_tasks
   __traceiter_android_vh_dup_task_struct
@@ -2953,10 +2967,12 @@
   __traceiter_android_vh_filemap_get_folio
   __traceiter_android_vh_free_one_page_flag_check
   __traceiter_android_vh_free_pages_prepare_init
+  __traceiter_android_vh_free_task
   __traceiter_android_vh_ipi_stop
   __traceiter_android_vh_lock_task_fork
   __traceiter_android_vh_mm_compaction_begin
   __traceiter_android_vh_mm_compaction_end
+  __traceiter_android_vh_mm_customize_longterm_pinnable
   __traceiter_android_vh_mm_kcompactd_cpu_online
   __traceiter_android_vh_page_cache_ra_order_bypass
   __traceiter_android_vh_page_cache_readahead_start
@@ -3038,6 +3054,7 @@
   trace_output_call
   __tracepoint_android_rvh_after_dequeue_task
   __tracepoint_android_rvh_after_enqueue_task
+  __tracepoint_android_rvh_alloc_workqueue
   __tracepoint_android_rvh_attach_entity_load_avg
   __tracepoint_android_rvh_blk_mq_has_request
   __tracepoint_android_rvh_build_perf_domains
@@ -3112,12 +3129,14 @@
   __tracepoint_android_vh_binder_restore_priority
   __tracepoint_android_vh_binder_set_priority
   __tracepoint_android_vh_binder_wait_for_work
+  __tracepoint_android_vh_calc_alloc_flags
   __tracepoint_android_vh_calculate_totalreserve_pages
   __tracepoint_android_vh_check_new_page
   __tracepoint_android_vh_chk_task
   __tracepoint_android_vh_cpu_idle_enter
   __tracepoint_android_vh_cpu_idle_exit
   __tracepoint_android_vh_do_async_mmap_readahead
+  __tracepoint_android_vh_do_send_sig_info
   __tracepoint_android_vh_do_sync_mmap_readahead
   __tracepoint_android_vh_dump_throttled_rt_tasks
   __tracepoint_android_vh_dup_task_struct
@@ -3130,10 +3149,12 @@
   __tracepoint_android_vh_filemap_get_folio
   __tracepoint_android_vh_free_one_page_flag_check
   __tracepoint_android_vh_free_pages_prepare_init
+  __tracepoint_android_vh_free_task
   __tracepoint_android_vh_ipi_stop
   __tracepoint_android_vh_lock_task_fork
   __tracepoint_android_vh_mm_compaction_begin
   __tracepoint_android_vh_mm_compaction_end
+  __tracepoint_android_vh_mm_customize_longterm_pinnable
   __tracepoint_android_vh_mm_kcompactd_cpu_online
   __tracepoint_android_vh_page_cache_ra_order_bypass
   __tracepoint_android_vh_page_cache_readahead_start
@@ -3329,6 +3350,7 @@
   usb_copy_descriptors
   __usb_create_hcd
   usb_debug_root
+  usb_disable_autosuspend
   usb_disabled
   usb_enable_autosuspend
   usb_ep_alloc_request
@@ -3435,6 +3457,9 @@
   vcalloc_noprof
   vendor_data_pad
   verify_pkcs7_signature
+  vfio_platform_region_ioaddr
+  __vfio_platform_register_reset
+  vfio_platform_unregister_reset
   vfree
   video_devdata
   video_device_alloc

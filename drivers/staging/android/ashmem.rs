@@ -278,6 +278,8 @@ impl MiscDevice for AshmemMisc {
             bindings::ASHMEM_GET_PROT_MASK => me.get_prot_mask(),
             bindings::ASHMEM_GET_FILE_ID => me.get_file_id(UserSlice::new(arg, size).writer()),
             ASHMEM_PIN | ASHMEM_UNPIN | ASHMEM_GET_PIN_STATUS => {
+                // ASHMEM_GET_PIN_STATUS is _IO(), so _IOC_SIZE(cmd) is 0.
+                let size = core::mem::size_of::<bindings::ashmem_pin>();
                 me.pin_unpin(cmd, UserSlice::new(arg, size).reader())
             }
             bindings::ASHMEM_PURGE_ALL_CACHES => me.purge_all_caches(),

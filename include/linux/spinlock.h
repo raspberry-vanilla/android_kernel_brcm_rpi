@@ -57,6 +57,7 @@
 #include <linux/linkage.h>
 #include <linux/compiler.h>
 #include <linux/irqflags.h>
+#include <linux/interrupt_rc.h>
 #include <linux/thread_info.h>
 #include <linux/stringify.h>
 #include <linux/bottom_half.h>
@@ -453,6 +454,66 @@ static __always_inline int spin_is_contended(spinlock_t *lock)
 
 #else  /* !CONFIG_PREEMPT_RT */
 # include <linux/spinlock_rt.h>
+#endif /* CONFIG_PREEMPT_RT */
+
+/*
+ * spin_lock_irq_disable() and friends behave like spin_lock_irq(), except that
+ * the interrupt disabling is refcounted (see <linux/interrupt_rc.h>).
+ *
+ * Two differences from spin_lock_irq() follow from that:
+ *
+ *  - Nesting works: an inner critical section does not re-enable interrupts on
+ *    exit while an outer one is still held.
+ *  - If interrupts were already disabled on entry to the outermost section,
+ *    they stay disabled on exit, as with spin_lock_irqsave().
+ *
+ * Unlike spin_lock_irqsave() the saved state lives in per-CPU state rather
+ * than in a caller-provided variable, so sections need not be released in
+ * acquisition order. These exist for Rust's SpinLockIrq, whose guards are
+ * ordinary values and may be dropped in any order.
+ */
+#ifndef CONFIG_PREEMPT_RT
+static __always_inline void spin_lock_irq_disable(spinlock_t *lock)
+{
+	local_interrupt_disable();
+	spin_lock(lock);
+}
+
+static __always_inline void spin_unlock_irq_enable(spinlock_t *lock)
+{
+	spin_unlock(lock);
+	local_interrupt_enable();
+}
+
+static __always_inline int spin_trylock_irq_disable(spinlock_t *lock)
+{
+	local_interrupt_disable();
+
+	if (spin_trylock(lock))
+		return 1;
+
+	local_interrupt_enable();
+	return 0;
+}
+#else /* CONFIG_PREEMPT_RT */
+/*
+ * On PREEMPT_RT spinlock_t is a sleeping lock and spin_lock_irq() does not
+ * disable interrupts at all; mirror that behaviour here.
+ */
+static __always_inline void spin_lock_irq_disable(spinlock_t *lock)
+{
+	spin_lock(lock);
+}
+
+static __always_inline void spin_unlock_irq_enable(spinlock_t *lock)
+{
+	spin_unlock(lock);
+}
+
+static __always_inline int spin_trylock_irq_disable(spinlock_t *lock)
+{
+	return spin_trylock(lock);
+}
 #endif /* CONFIG_PREEMPT_RT */
 
 /*

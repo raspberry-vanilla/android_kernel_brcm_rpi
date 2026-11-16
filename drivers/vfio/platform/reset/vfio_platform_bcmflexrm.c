@@ -10,12 +10,12 @@
 
 #include <linux/delay.h>
 #include <linux/device.h>
+#include <linux/err.h>
 #include <linux/init.h>
 #include <linux/io.h>
 #include <linux/kernel.h>
 #include <linux/module.h>
-
-#include "../vfio_platform_private.h"
+#include <linux/vfio_platform.h>
 
 /* FlexRM configuration */
 #define RING_REGS_SIZE					0x10000
@@ -66,26 +66,23 @@ static int vfio_platform_bcmflexrm_shutdown(void __iomem *ring)
 	return 0;
 }
 
-static int vfio_platform_bcmflexrm_reset(struct vfio_platform_device *vdev)
+static int vfio_platform_bcmflexrm_reset(struct device *dev)
 {
-	void __iomem *ring;
+	void __iomem *ioaddr, *ring;
+	resource_size_t size;
 	int rc = 0, ret = 0, ring_num = 0;
-	struct vfio_platform_region *reg = &vdev->regions[0];
 
 	/* Map FlexRM ring registers if not mapped */
-	if (!reg->ioaddr) {
-		reg->ioaddr = ioremap(reg->addr, reg->size);
-		if (!reg->ioaddr)
-			return -ENOMEM;
-	}
+	ioaddr = vfio_platform_region_ioaddr(dev, 0, &size);
+	if (IS_ERR(ioaddr))
+		return PTR_ERR(ioaddr);
 
 	/* Discover and shutdown each FlexRM ring */
-	for (ring = reg->ioaddr;
-	     ring < (reg->ioaddr + reg->size); ring += RING_REGS_SIZE) {
+	for (ring = ioaddr; ring < (ioaddr + size); ring += RING_REGS_SIZE) {
 		if (readl_relaxed(ring + RING_VER) == RING_VER_MAGIC) {
 			rc = vfio_platform_bcmflexrm_shutdown(ring);
 			if (rc) {
-				dev_warn(vdev->device,
+				dev_warn(dev,
 					 "FlexRM ring%d shutdown error %d\n",
 					 ring_num, rc);
 				ret |= rc;

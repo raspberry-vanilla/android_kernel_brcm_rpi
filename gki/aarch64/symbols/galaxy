@@ -275,3 +275,4 @@
   blkcg_deactivate_policy
   netlink_ack
   wake_up_var
+  inet_proto_csum_replace_by_diff

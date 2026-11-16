@@ -31,6 +31,7 @@ load(
     "merge_kzip",
     "merged_kernel_uapi_headers",
     "modinfo_summary_report",
+    "multi_abi_update",
 )
 load(":abi.bzl", "cc_binary_with_abi")
 load(
@@ -413,6 +414,25 @@ common_kernel(
     module_implicit_outs = get_gki_modules_list("x86_64") + get_kunit_modules_list("x86_64"),
     system_dlkm_extra_archive_files = [":generate_gki_module_info_x86_64"],
     visibility = ["//visibility:public"],
+)
+
+# NOTE: While a 'genquery' target seems ideal for automating the 'targets' list
+#  below, it is not viable because genquery does not support wildcards (e.g., :all)
+#  in its scope[0].
+#
+# This means the list cannot be calculated dynamically. If you add a new
+#  abi_update target to this package, you must manually add it here.
+#
+# To check for missing targets, run:
+#  $ bazel query 'kind("^abi_update rule$", //common:all)'
+#
+# [0] https://bazel.build/reference/be/general#genquery.scope
+multi_abi_update(
+    name = "kernel_abis_update",
+    targets = [
+        ":kernel_aarch64_abi_update",
+        ":kernel_aarch64_microdroid_abi_update",
+    ],
 )
 
 alias(
@@ -2524,6 +2544,34 @@ cc_binary_with_abi(
 )
 
 cc_binary_with_abi(
+    name = "kselftest_fuse_bpf_test",
+    srcs = [
+        "include/uapi/linux/android_fuse.h",
+        "include/uapi/linux/bpf.h",
+        "include/uapi/linux/bpf_common.h",
+        "include/uapi/linux/fuse.h",
+        "tools/testing/selftests/filesystems/fuse/fuse_bpf_android_test.c",
+    ],
+    copts = _KSELFTEST_COPTS + [
+        "-I",
+        paths.join(
+            package_relative_label(":x").workspace_root,
+            package_relative_label(":x").package,
+            "include/uapi",
+        ),
+    ],
+    defines = ["__EXPORTED_HEADERS__"],
+    includes = [
+        "include/uapi",
+        "tools/testing/selftests",
+    ],
+    path_prefix = _KSELFTEST_DIR,
+    target_compatible_with = ["@platforms//os:android"],
+    visibility = ["//visibility:private"],
+    deps = [":kselftest_headers_lib"],
+)
+
+cc_binary_with_abi(
     name = "kselftest_breakpoints_breakpoint_test",
     srcs = select({
         "//build/kernel/kleaf/platforms/config_settings:android_x86_64": ["tools/testing/selftests/breakpoints/breakpoint_test.c"],
@@ -3507,6 +3555,7 @@ cc_binary_with_abi(
         "include/uapi/linux/wrapfd.h",
         "tools/include/linux/align.h",
         "tools/include/uapi/linux/const.h",
+        "tools/testing/selftests/drivers/wrapfd/load_gate.h",
         "tools/testing/selftests/drivers/wrapfd/wrapfd.c",
     ],
     copts = _KSELFTEST_COPTS,
@@ -3542,6 +3591,7 @@ pkg_filegroup(
         ":kselftest_breakpoints_breakpoint_test_x86_64",
         ":kselftest_capabilities_test_execve_x86_64",
         ":kselftest_capabilities_validate_cap_x86_64",
+        ":kselftest_fuse_bpf_test_x86_64",
         ":kselftest_futex_futex_requeue_pi_mismatched_ops_x86_64",
         ":kselftest_futex_futex_requeue_pi_signal_restart_x86_64",
         ":kselftest_futex_futex_requeue_pi_x86_64",
@@ -3613,6 +3663,7 @@ pkg_filegroup(
         ":kselftest_breakpoints_breakpoint_test_x86",
         ":kselftest_capabilities_test_execve_x86",
         ":kselftest_capabilities_validate_cap_x86",
+        ":kselftest_fuse_bpf_test_x86",
         ":kselftest_futex_futex_requeue_pi_mismatched_ops_x86",
         ":kselftest_futex_futex_requeue_pi_signal_restart_x86",
         ":kselftest_futex_futex_requeue_pi_x86",
@@ -3681,6 +3732,7 @@ pkg_filegroup(
         ":kselftest_binderfs_binderfs_test_arm",
         ":kselftest_capabilities_test_execve_arm",
         ":kselftest_capabilities_validate_cap_arm",
+        ":kselftest_fuse_bpf_test_arm",
         ":kselftest_futex_futex_requeue_arm",
         ":kselftest_futex_futex_requeue_pi_arm",
         ":kselftest_futex_futex_requeue_pi_mismatched_ops_arm",
@@ -3744,6 +3796,7 @@ pkg_filegroup(
         ":kselftest_breakpoints_breakpoint_test_arm64",
         ":kselftest_capabilities_test_execve_arm64",
         ":kselftest_capabilities_validate_cap_arm64",
+        ":kselftest_fuse_bpf_test_arm64",
         ":kselftest_futex_futex_requeue_arm64",
         ":kselftest_futex_futex_requeue_pi_arm64",
         ":kselftest_futex_futex_requeue_pi_mismatched_ops_arm64",

@@ -594,6 +594,7 @@
   kvmemdup
 
 # required by btusb.ko
+  baswap
   btbcm_set_bdaddr
   btbcm_setup_apple
   btbcm_setup_patchram
@@ -923,6 +924,8 @@
   bio_alloc_bioset
   bio_chain
   bio_clone_blkg_association
+  bio_endio
+  errno_to_blk_status
   fs_bio_set
   submit_bio
 
@@ -1131,6 +1134,8 @@
 
 # required by virtio-gpu.ko
   __devm_request_region
+  dma_buf_map_attachment
+  dma_buf_unmap_attachment
   dma_fence_match_context
   dma_fence_unwrap_first
   dma_fence_unwrap_next
@@ -1163,6 +1168,7 @@
   drm_dev_exit
   drm_dev_get
   drm_dev_unplug
+  drm_event_cancel_free
   drm_event_reserve_init
   drm_framebuffer_init
   drm_gem_dmabuf_mmap
@@ -1279,8 +1285,11 @@
   cpumask_next_wrap
   cpus_read_lock
   cpus_read_unlock
+  disable_work
+  disable_work_sync
   dql_completed
   dql_reset
+  enable_work
   eth_commit_mac_addr_change
   eth_prepare_mac_addr_change
   ethtool_sprintf
@@ -1356,6 +1365,7 @@
   xp_set_rxq_info
 
 # required by virtio_pmem.ko
+  drain_workqueue
   nvdimm_bus_register
   nvdimm_bus_unregister
   nvdimm_pmem_region_create
@@ -1519,3 +1529,9 @@
 # preserved by --additions-only
   down_write
   up_write
+
+# required by pkvm_iommu_temp.ko
+  __pkvm_load_el2_module
+  kvm_iommu_init_hyp
+  kvm_iommu_register_driver
+

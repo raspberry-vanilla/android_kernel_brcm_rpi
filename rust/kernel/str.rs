@@ -8,6 +8,8 @@ use core::ops::{self, Deref, DerefMut, Index};
 
 use crate::error::{code::*, Error};
 
+pub mod parse_int;
+
 /// Byte string without UTF-8 validity guarantee.
 #[repr(transparent)]
 pub struct BStr([u8]);
@@ -103,6 +105,18 @@ impl Deref for BStr {
     #[inline]
     fn deref(&self) -> &Self::Target {
         &self.0
+    }
+}
+
+impl AsRef<BStr> for [u8] {
+    fn as_ref(&self) -> &BStr {
+        BStr::from_bytes(self)
+    }
+}
+
+impl AsRef<BStr> for BStr {
+    fn as_ref(&self) -> &BStr {
+        self
     }
 }
 

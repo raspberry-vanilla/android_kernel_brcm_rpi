@@ -1,2 +1,3 @@
 fuse_test
+fuse_bpf_android_test
 *.raw

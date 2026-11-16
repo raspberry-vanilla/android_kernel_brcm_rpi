@@ -59,6 +59,9 @@
           "include-filter": "kselftest_capabilities_test_execve"
         },
         {
+          "include-filter": "kselftest_fuse_bpf_test"
+        },
+        {
           "include-filter": "kselftest_futex_requeue"
         },
         {

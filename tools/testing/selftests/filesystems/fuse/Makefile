@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-2.0
 CFLAGS += -D_FILE_OFFSET_BITS=64 -Wall -Werror -I../.. -I../../../../.. -I../../../../include
 LDLIBS := -lpthread -lelf
-TEST_GEN_PROGS := fuse_test fuse_daemon
+TEST_GEN_PROGS := fuse_test fuse_daemon fuse_bpf_android_test
 TEST_GEN_FILES := \
 	test_bpf.bpf \
 	fd_bpf.bpf \
@@ -20,7 +20,10 @@ include ../../lib.mk
 # Put after include ../../lib.mk since that changes $(TEST_GEN_PROGS)
 # Otherwise you get multiple targets, this becomes the default, and it's a mess
 EXTRA_SOURCES := bpf_loader.c
-$(TEST_GEN_PROGS) : $(EXTRA_SOURCES)
+$(filter-out $(OUTPUT)/fuse_bpf_android_test,$(TEST_GEN_PROGS)) : $(EXTRA_SOURCES)
+
+$(OUTPUT)/fuse_bpf_android_test: CFLAGS += -I$(top_srcdir)/include/uapi
+$(OUTPUT)/fuse_bpf_android_test: LDLIBS := -lpthread
 
 $(OUTPUT)/%.ir: %.c
 	clang $(BPF_FLAGS) -c $< -o $@
