@@ -983,6 +983,14 @@ static const struct panel_init_cmd ws_panel_10_1_b_init[] = {
 	{},
 };
 
+static const struct panel_init_cmd ws_panel_10_1_e_4lane_init[] = {
+	_INIT_DCS_CMD(0x11),
+	_INIT_DELAY_CMD(120),
+	_INIT_DCS_CMD(0x29),
+	_INIT_DELAY_CMD(50),
+	{},
+};
+
 static const struct panel_init_cmd ws_panel_8_8_a_init[] = {
 	_INIT_DCS_CMD(0x11),
 	_INIT_DELAY_CMD(120),
@@ -1393,6 +1401,73 @@ static const struct panel_init_cmd ws_panel_7_c_init[] = {
 	{},
 };
 
+static const struct panel_init_cmd ws_panel_6_25_a_init[] = {
+	_INIT_DCS_CMD(0x60, 0x71, 0x23, 0xa2),
+	_INIT_DCS_CMD(0x60, 0x71, 0x23, 0xa3),
+	_INIT_DCS_CMD(0x60, 0x71, 0x23, 0xa4),
+	_INIT_DCS_CMD(0xB0, 0x22, 0x61, 0x11, 0x6B, 0x25, 0x39, 0x39),
+	_INIT_DCS_CMD(0xB7, 0x00, 0x00, 0x64, 0x64),
+	_INIT_DCS_CMD(0xBF, 0x95, 0x95),
+	_INIT_DCS_CMD(0xA4, 0x31),
+	_INIT_DCS_CMD(0xC8, 0x00, 0x00, 0x10, 0x1F, 0x3A, 0x00, 0x66, 0x03,
+		      0xA8, 0x04, 0x11, 0x02, 0x06, 0x73, 0x01, 0x21, 0xC1,
+		      0x02, 0x01, 0x02, 0x22, 0x3E, 0x00, 0x84, 0x09, 0x32,
+		      0xE9, 0x0B, 0x3B, 0x0D, 0xF3, 0x7E, 0x0D, 0xB2, 0xE6,
+		      0x03, 0xFC),
+	_INIT_DCS_CMD(0xC9, 0x00, 0x00, 0x10, 0x1F, 0x3A, 0x00, 0x66, 0x03,
+		      0xA8, 0x04, 0x11, 0x02, 0x06, 0x73, 0x01, 0x21, 0xC1,
+		      0x02, 0x01, 0x02, 0x22, 0x3E, 0x00, 0x84, 0x09, 0x32,
+		      0xE9, 0x0B, 0x3B, 0x0D, 0xF3, 0x7E, 0x0D, 0xB2, 0xE6,
+		      0x03, 0xFC),
+	_INIT_DCS_CMD(0xD7, 0x10, 0x12, 0x49, 0x3B, 0x0C, 0x0C),
+	_INIT_DCS_CMD(0x90, 0x71, 0x23, 0x5A, 0x20, 0x24, 0x09, 0x09),
+	_INIT_DCS_CMD(0xA3, 0x80, 0x01, 0x88, 0x30, 0x05, 0x00, 0x00, 0x00,
+		      0x00, 0x00, 0x46, 0x00, 0x00, 0x1E, 0x5C, 0x1E, 0x80,
+		      0x00, 0x4F, 0x05, 0x00, 0x00, 0x00, 0x00, 0x00, 0x46,
+		      0x00, 0x00, 0x1E, 0x5C, 0x1E, 0x80, 0x00, 0x6F, 0x58,
+		      0x00, 0x00, 0x00, 0xFF),
+	_INIT_DCS_CMD(0xA6, 0x50, 0x00, 0x24, 0x55, 0x3A, 0x00, 0x00, 0x01,
+		      0x54, 0x54, 0x91, 0xFF, 0x00, 0x24, 0x55, 0x3B, 0x00,
+		      0x00, 0x00, 0x54, 0x54, 0x91, 0xFF, 0x00, 0x24, 0x11,
+		      0x00, 0x00, 0x00, 0x00, 0x54, 0x54, 0x91, 0xFF, 0x00,
+		      0xAC, 0x11, 0x00, 0x00, 0x00, 0x00, 0x54, 0x54, 0xFF,
+		      0xFF, 0x00, 0x08, 0x80, 0x08, 0x80, 0x06, 0x00, 0x00,
+		      0x00, 0x00),
+	_INIT_DCS_CMD(0xA7, 0x1D, 0x1D, 0x80, 0x64, 0x40, 0x07, 0x16, 0x41,
+		      0x02, 0x48, 0x07, 0x54, 0x54, 0x91, 0xFF, 0x08, 0x80,
+		      0x64, 0x40, 0x25, 0x34, 0x43, 0x04, 0x06, 0x05, 0x54,
+		      0x54, 0x91, 0xFF, 0x08, 0x80, 0x64, 0x40, 0x00, 0x00,
+		      0x40, 0x00, 0x00, 0x00, 0x54, 0x54, 0x91, 0xFF, 0x08,
+		      0x80, 0x64, 0x40, 0x00, 0x00, 0x00, 0x00, 0x20, 0x00,
+		      0x54, 0x54, 0x84, 0xFF, 0x08, 0x80, 0x44),
+	_INIT_DCS_CMD(0xAC, 0x1C, 0x02, 0x09, 0x0B, 0x12, 0x10, 0x18, 0x19,
+		      0x1C, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+		      0x00, 0x00, 0x00, 0x00, 0x00, 0x1C, 0x00, 0x08, 0x0A,
+		      0x13, 0x11, 0x18, 0x19, 0x1C, 0x03, 0x00, 0x00, 0x00,
+		      0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00),
+	_INIT_DCS_CMD(0xAD, 0xF0, 0x00, 0x46, 0x00, 0x05, 0x50, 0x50, 0xFF,
+		      0xFF, 0xF0, 0x40, 0x06, 0x01, 0x07, 0x42, 0x42, 0xFF,
+		      0xFF, 0x01, 0x00, 0x00, 0xFF, 0xFF, 0xFF, 0xFF),
+	_INIT_DCS_CMD(0xAE, 0xFF, 0x03, 0x00, 0xFF, 0x03, 0x00, 0x01),
+	_INIT_DCS_CMD(0xB2, 0x15, 0x19, 0x05, 0x23, 0x49, 0xAF, 0x03, 0x2E,
+		      0x5C, 0xD2, 0xFF, 0x10, 0x20, 0xFD, 0x20, 0xC0, 0x00),
+	_INIT_DCS_CMD(0xE8, 0x20, 0x6F, 0x04, 0x7C, 0x7C, 0x3E, 0x04, 0xDC,
+		      0xDC, 0x3E, 0x06, 0xFA, 0x26, 0x3E),
+	_INIT_DCS_CMD(0x75, 0x03, 0x04),
+	_INIT_DCS_CMD(0xE7, 0x3B, 0x00, 0x00, 0x7C, 0xA1, 0x8C, 0x20, 0x1A,
+		      0xF0, 0xB1, 0x50, 0x00, 0x50, 0xB1, 0x50, 0xB1, 0x50,
+		      0xD8, 0x00, 0x55, 0x00, 0xB1, 0x00, 0x45, 0xC9, 0x6A,
+		      0xFF, 0x5A, 0xD8, 0x18, 0x88, 0x15, 0xB1, 0x01, 0x01,
+		      0x77),
+	_INIT_DCS_CMD(0xEA, 0x13, 0x00, 0x04, 0x00, 0x00, 0x00, 0x00, 0x2C),
+	_INIT_DCS_CMD(0x60, 0x71, 0x23, 0x00),
+	_INIT_DCS_CMD(0x11),
+	_INIT_DELAY_CMD(120),
+	_INIT_DCS_CMD(0x29),
+	_INIT_DELAY_CMD(50),
+	{},
+};
+
 static const struct panel_init_cmd ws_panel_5_5_a_init[] = {
 	_INIT_DCS_CMD(0xB9, 0xFF, 0x83, 0x94),
 	_INIT_DCS_CMD(0xBA, 0x61, 0x03, 0x68, 0x6B, 0xB2, 0xC0),
@@ -1487,6 +1562,14 @@ static const struct panel_init_cmd ws_panel_5_a_init[] = {
 		      0x00, 0x00, 0xC0, 0x18),
 	_INIT_DCS_CMD(0x29),
 	_INIT_DELAY_CMD(80),
+	{},
+};
+
+static const struct panel_init_cmd ws_panel_5_b_init[] = {
+	_INIT_DCS_CMD(0x11),
+	_INIT_DELAY_CMD(120),
+	_INIT_DCS_CMD(0x29),
+	_INIT_DELAY_CMD(30),
 	{},
 };
 
@@ -1907,11 +1990,11 @@ static const struct drm_display_mode ws_panel_12_3_a_4lane_mode = {
 };
 
 static const struct drm_display_mode ws_panel_10_1_a_mode = {
-	.clock = 70000,
+	.clock = 71000,
 	.hdisplay = 800,
 	.hsync_start = 800 + 40,
-	.hsync_end = 800 + 40 + 20,
-	.htotal = 800 + 40 + 20 + 20,
+	.hsync_end = 800 + 40 + 30,
+	.htotal = 800 + 40 + 30 + 20,
 	.vdisplay = 1280,
 	.vsync_start = 1280 + 20,
 	.vsync_end = 1280 + 20 + 20,
@@ -1946,6 +2029,20 @@ static const struct drm_display_mode ws_panel_10_1_b_mode = {
 	.vtotal = 1280 + 26 + 12 + 4,
 	.width_mm = 125,
 	.height_mm = 222,
+};
+
+static const struct drm_display_mode ws_panel_10_1_e_4lane_mode = {
+	.clock = 155000,
+	.hdisplay = 1200,
+	.hsync_start = 1200 + 28,
+	.hsync_end = 1200 + 28 + 10,
+	.htotal = 1200 + 28 + 10 + 30,
+	.vdisplay = 1920,
+	.vsync_start = 1920 + 80,
+	.vsync_end = 1920 + 80 + 4,
+	.vtotal = 1920 + 80 + 4 + 28,
+	.width_mm = 135,
+	.height_mm = 216,
 };
 
 static const struct drm_display_mode ws_panel_9_b_4lane_mode = {
@@ -1991,11 +2088,11 @@ static const struct drm_display_mode ws_panel_8_8_a_mode = {
 };
 
 static const struct drm_display_mode ws_panel_8_a_mode = {
-	.clock = 70000,
+	.clock = 71000,
 	.hdisplay = 800,
 	.hsync_start = 800 + 40,
-	.hsync_end = 800 + 40 + 20,
-	.htotal = 800 + 40 + 20 + 20,
+	.hsync_end = 800 + 40 + 30,
+	.htotal = 800 + 40 + 30 + 20,
 	.vdisplay = 1280,
 	.vsync_start = 1280 + 30,
 	.vsync_end = 1280 + 30 + 12,
@@ -2032,6 +2129,20 @@ static const struct drm_display_mode ws_panel_7_c_mode = {
 	.height_mm = 85,
 };
 
+static const struct drm_display_mode ws_panel_6_25_a_mode = {
+	.clock = 83000,
+	.hdisplay = 720,
+	.hsync_start = 720 + 20,
+	.hsync_end = 720 + 20 + 20,
+	.htotal = 720 + 20 + 20 + 20,
+	.vdisplay = 1560,
+	.vsync_start = 1560 + 200,
+	.vsync_end = 1560 + 200 + 8,
+	.vtotal = 1560 + 200 + 8 + 10,
+	.width_mm = 62,
+	.height_mm = 110,
+};
+
 static const struct drm_display_mode ws_panel_5_5_a_mode = {
 	.clock = 65000,
 	.hdisplay = 720,
@@ -2050,12 +2161,26 @@ static const struct drm_display_mode ws_panel_5_a_mode = {
 	.clock = 70000,
 	.hdisplay = 720,
 	.hsync_start = 720 + 40,
-	.hsync_end = 720 + 40 + 20,
-	.htotal = 720 + 40 + 20 + 20,
+	.hsync_end = 720 + 40 + 30,
+	.htotal = 720 + 40 + 30 + 20,
 	.vdisplay = 1280,
 	.vsync_start = 1280 + 30,
 	.vsync_end = 1280 + 30 + 10,
 	.vtotal = 1280 + 30 + 10 + 4,
+	.width_mm = 62,
+	.height_mm = 110,
+};
+
+static const struct drm_display_mode ws_panel_5_b_mode = {
+	.clock = 70000,
+	.hdisplay = 720,
+	.hsync_start = 720 + 80,
+	.hsync_end = 720 + 80 + 10,
+	.htotal = 720 + 80 + 10 + 30,
+	.vdisplay = 1280,
+	.vsync_start = 1280 + 6,
+	.vsync_end = 1280 + 6 + 6,
+	.vtotal = 1280 + 6 + 6 + 12,
 	.width_mm = 62,
 	.height_mm = 110,
 };
@@ -2305,6 +2430,15 @@ static const struct ws_panel_desc ws_panel_10_1_inch_b_desc = {
 	.format = MIPI_DSI_FMT_RGB888,
 };
 
+static const struct ws_panel_desc ws_panel_10_1_inch_e_4lane_desc = {
+	.init = ws_panel_10_1_e_4lane_init,
+	.mode = &ws_panel_10_1_e_4lane_mode,
+	.mode_flags = MIPI_DSI_MODE_VIDEO_HSE | MIPI_DSI_MODE_VIDEO |
+		      MIPI_DSI_MODE_LPM | MIPI_DSI_CLOCK_NON_CONTINUOUS,
+	.lanes = 4,
+	.format = MIPI_DSI_FMT_RGB888,
+};
+
 static const struct ws_panel_desc ws_panel_9_inch_b_4lane_desc = {
 	.init = ws_panel_10_1_b_4lane_init,
 	.mode = &ws_panel_9_b_4lane_mode,
@@ -2368,6 +2502,15 @@ static const struct ws_panel_desc ws_panel_7_inch_c_desc = {
 	.format = MIPI_DSI_FMT_RGB888,
 };
 
+static const struct ws_panel_desc ws_panel_6_25_inch_a_desc = {
+	.init = ws_panel_6_25_a_init,
+	.mode = &ws_panel_6_25_a_mode,
+	.mode_flags = MIPI_DSI_MODE_VIDEO_HSE | MIPI_DSI_MODE_VIDEO |
+		      MIPI_DSI_MODE_LPM | MIPI_DSI_CLOCK_NON_CONTINUOUS,
+	.lanes = 2,
+	.format = MIPI_DSI_FMT_RGB888,
+};
+
 static const struct ws_panel_desc ws_panel_5_5_inch_a_desc = {
 	.init = ws_panel_5_5_a_init,
 	.mode = &ws_panel_5_5_a_mode,
@@ -2380,6 +2523,15 @@ static const struct ws_panel_desc ws_panel_5_5_inch_a_desc = {
 static const struct ws_panel_desc ws_panel_5_inch_a_desc = {
 	.init = ws_panel_5_a_init,
 	.mode = &ws_panel_5_a_mode,
+	.mode_flags = MIPI_DSI_MODE_VIDEO_HSE | MIPI_DSI_MODE_VIDEO |
+		      MIPI_DSI_MODE_LPM | MIPI_DSI_CLOCK_NON_CONTINUOUS,
+	.lanes = 2,
+	.format = MIPI_DSI_FMT_RGB888,
+};
+
+static const struct ws_panel_desc ws_panel_5_inch_b_desc = {
+	.init = ws_panel_5_b_init,
+	.mode = &ws_panel_5_b_mode,
 	.mode_flags = MIPI_DSI_MODE_VIDEO_HSE | MIPI_DSI_MODE_VIDEO |
 		      MIPI_DSI_MODE_LPM | MIPI_DSI_CLOCK_NON_CONTINUOUS,
 	.lanes = 2,
@@ -2423,17 +2575,19 @@ static const struct ws_panel_desc ws_panel_3_4_inch_c_desc = {
 };
 
 static const struct of_device_id ws_panel_of_match[] = {
-	{ .compatible = "waveshare,12.3-dsi-touch-a,4lane",
+	{ .compatible = "waveshare,12.3-dsi-touch-a-4lane",
 	  &ws_panel_12_3_inch_a_4lane_desc },
 	{ .compatible = "waveshare,10.1-dsi-touch-a-4lane",
 	  &ws_panel_10_1_inch_a_4lane_desc },
 	{ .compatible = "waveshare,10.1-dsi-touch-a",
 	  &ws_panel_10_1_inch_a_desc },
-	{ .compatible = "waveshare,10.1-dsi-touch-b,4lane",
+	{ .compatible = "waveshare,10.1-dsi-touch-b-4lane",
 	  &ws_panel_10_1_inch_b_4lane_desc },
 	{ .compatible = "waveshare,10.1-dsi-touch-b",
 	  &ws_panel_10_1_inch_b_desc },
-	{ .compatible = "waveshare,9.0-dsi-touch-b,4lane",
+	{ .compatible = "waveshare,10.1-dsi-touch-e-4lane",
+	  &ws_panel_10_1_inch_e_4lane_desc },
+	{ .compatible = "waveshare,9.0-dsi-touch-b-4lane",
 	  &ws_panel_9_inch_b_4lane_desc },
 	{ .compatible = "waveshare,9.0-dsi-touch-b", &ws_panel_9_inch_b_desc },
 	{ .compatible = "waveshare,8.8-dsi-touch-a",
@@ -2444,9 +2598,14 @@ static const struct of_device_id ws_panel_of_match[] = {
 	{ .compatible = "waveshare,7.0-dsi-touch-a", &ws_panel_7_inch_a_desc },
 	{ .compatible = "waveshare,7.0-dsi-touch-b", &ws_panel_7_inch_a_desc },
 	{ .compatible = "waveshare,7.0-dsi-touch-c", &ws_panel_7_inch_c_desc },
+	{ .compatible = "waveshare,6.25-dsi-touch-a",
+	  &ws_panel_6_25_inch_a_desc },
 	{ .compatible = "waveshare,5.5-dsi-touch-a",
 	  &ws_panel_5_5_inch_a_desc },
 	{ .compatible = "waveshare,5.0-dsi-touch-a", &ws_panel_5_inch_a_desc },
+	{ .compatible = "waveshare,5.0-dsi-touch-a-v2",
+	  &ws_panel_5_inch_b_desc },
+	{ .compatible = "waveshare,5.0-dsi-touch-b", &ws_panel_5_inch_b_desc },
 	{ .compatible = "waveshare,4.3-dsi-touch-a", &ws_panel_4_3_inch_a_desc },
 	{ .compatible = "waveshare,4.0-dsi-touch-a", &ws_panel_4_inch_a_desc },
 	{ .compatible = "waveshare,4.0-dsi-touch-c", &ws_panel_4_inch_c_desc },

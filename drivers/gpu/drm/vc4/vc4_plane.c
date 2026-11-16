@@ -688,36 +688,18 @@ static void vc4_write_tpz(struct vc4_plane_state *vc4_state, u32 src, u32 dst)
 #define PHASE_BITS 6
 
 static void vc4_write_ppf(struct vc4_plane_state *vc4_state, u32 src, u32 dst,
-			  u32 xy, int channel, int chroma_offset,
-			  bool no_interpolate)
+			  u32 xy, int channel, unsigned int subsample,
+			  int chroma_offset, bool no_interpolate)
 {
 	struct vc4_dev *vc4 = to_vc4_dev(vc4_state->base.plane->dev);
+	unsigned int sub_shift = subsample == 2 ? 1 : 0;
 	u32 scale = src / dst;
 	s32 offset, offset2;
 	s32 phase;
 
 	WARN_ON_ONCE(vc4->gen > VC4_GEN_6_D);
 
-	/*
-	 * Start the phase at 1/2 pixel from the 1st pixel at src_x.
-	 * 1/4 pixel for YUV, plus the offset for chroma siting.
-	 */
-	if (channel) {
-		/*
-		 * The phase is relative to scale_src->x, so shift it for
-		 * display list's x value
-		 */
-		offset = (xy & 0x1ffff) >> (16 - PHASE_BITS) >> 1;
-		offset -= chroma_offset >> (17 - PHASE_BITS);
-		offset += -(1 << PHASE_BITS >> 2);
-	} else {
-		/*
-		 * The phase is relative to scale_src->x, so shift it for
-		 * display list's x value
-		 */
-		offset = (xy & 0xffff) >> (16 - PHASE_BITS);
-		offset += -(1 << PHASE_BITS >> 1);
-
+	if (!channel) {
 		/*
 		 * This is a kludge to make sure the scaling factors are
 		 * consistent with YUV's luma scaling. We lose 1-bit precision
@@ -725,6 +707,25 @@ static void vc4_write_ppf(struct vc4_plane_state *vc4_state, u32 src, u32 dst,
 		 */
 		scale &= ~1;
 	}
+
+	/*
+	 * Start the phase at 1/2 pixel from the 1st pixel at src_x, less the
+	 * chroma siting offset. The phase is relative to scale_src->x, so
+	 * shift it for the display list's x value. Everything is computed in
+	 * luma pixels and then converted to this channel's pixels, so that a
+	 * subsampled chroma channel lands on the same position as the luma.
+	 */
+	offset = (xy & ((0x10000 << sub_shift) - 1)) >> (16 - PHASE_BITS);
+	offset -= chroma_offset >> (16 - PHASE_BITS);
+	offset -= 1 << PHASE_BITS >> 1;
+	offset >>= sub_shift;
+
+	/*
+	 * Output pixel r samples the source at (r + 1/2) * scale - 1/2, so the
+	 * phase the first output pixel starts at needs half a destination
+	 * pixel's worth of source added to it.
+	 */
+	offset += (s32)(scale >> (17 - PHASE_BITS));
 
 	/*
 	 * There may be a also small error introduced by precision of scale.
@@ -930,7 +931,13 @@ static void vc4_write_scaling_parameters(struct drm_plane_state *state,
 {
 	struct vc4_dev *vc4 = to_vc4_dev(state->plane->dev);
 	struct vc4_plane_state *vc4_state = to_vc4_plane_state(state);
+	const struct drm_format_info *info = state->fb->format;
 	bool no_interpolate = state->scaling_filter == DRM_SCALING_FILTER_NEAREST_NEIGHBOR;
+	unsigned int hsub = channel ? info->hsub : 1;
+	unsigned int vsub = channel ? info->vsub : 1;
+	/* Chroma siting only has any meaning on a subsampled axis */
+	int siting_h = hsub > 1 ? state->chroma_siting_h : 0;
+	int siting_v = vsub > 1 ? state->chroma_siting_v : 0;
 
 	if (vc4_state->is_yuv444_unity)
 		no_interpolate = 1;
@@ -941,16 +948,14 @@ static void vc4_write_scaling_parameters(struct drm_plane_state *state,
 	if (vc4_state->x_scaling[channel] == VC4_SCALING_PPF) {
 		vc4_write_ppf(vc4_state, vc4_state->src_w[channel],
 			      vc4_state->crtc_w, vc4_state->src_x, channel,
-			      state->chroma_siting_h,
-			      no_interpolate);
+			      hsub, siting_h, no_interpolate);
 	}
 
 	/* Ch0 V-PPF Words 0-1: Scaling Parameters, Context */
 	if (vc4_state->y_scaling[channel] == VC4_SCALING_PPF) {
 		vc4_write_ppf(vc4_state, vc4_state->src_h[channel],
 			      vc4_state->crtc_h, vc4_state->src_y, channel,
-			      state->chroma_siting_v,
-			      no_interpolate);
+			      vsub, siting_v, no_interpolate);
 		vc4_dlist_write(vc4_state, 0xc0c0c0c0);
 	}
 
@@ -1328,7 +1333,8 @@ static u32 vc4_hvs5_get_alpha_blend_mode(struct drm_plane_state *state)
 		}
 	case VC4_GEN_6_D:
 		/* 2712-D configures fixed alpha mode in CTL0 */
-		return state->pixel_blend_mode == DRM_MODE_BLEND_PREMULTI ?
+		return state->fb->format->has_alpha &&
+		       state->pixel_blend_mode == DRM_MODE_BLEND_PREMULTI ?
 			SCALER5_CTL2_ALPHA_PREMULT : 0;
 	}
 }
@@ -2178,7 +2184,8 @@ static int vc6_plane_mode_set(struct drm_plane *plane,
 	 * In any case we use the alpha property value as the fixed alpha.
 	 */
 	mix_plane_alpha = state->alpha != DRM_BLEND_ALPHA_OPAQUE &&
-			  fb->format->has_alpha;
+			  fb->format->has_alpha &&
+			  state->pixel_blend_mode != DRM_MODE_BLEND_PIXEL_NONE;
 
 	/* Control Word 0: Scaling Configuration & Element Validity*/
 	vc4_dlist_write(vc4_state,
@@ -2838,7 +2845,8 @@ struct drm_plane *vc4_plane_init(struct drm_device *dev,
 						 BIT(DRM_SCALING_FILTER_DEFAULT) |
 						 BIT(DRM_SCALING_FILTER_NEAREST_NEIGHBOR));
 
-	drm_plane_create_chroma_siting_properties(plane, 0, 0);
+	/* MPEG-2 / H.264 / HEVC 4:2:0 siting: H cosited, V interstitial */
+	drm_plane_create_chroma_siting_properties(plane, 0, 0x8000);
 
 	if (type == DRM_PLANE_TYPE_PRIMARY)
 		drm_plane_create_zpos_immutable_property(plane, 0);

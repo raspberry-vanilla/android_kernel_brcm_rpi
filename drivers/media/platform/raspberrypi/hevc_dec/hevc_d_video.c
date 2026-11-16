@@ -29,9 +29,9 @@ static inline struct hevc_d_ctx *hevc_d_file2ctx(struct file *file)
 size_t hevc_d_round_up_size(const size_t x)
 {
 	/* Admit no size < 256 */
-	const unsigned int n = x < 256 ? 8 : ilog2(x);
+	const unsigned int n = x < 256 ? 7 : ilog2(x) - 1;
 
-	return x >= (3 << n) ? 4 << n : (3 << n);
+	return x >= ((size_t)3 << n) ? (size_t)4 << n : ((size_t)3 << n);
 }
 
 static u32 bit_buf_size(unsigned int w, unsigned int h, unsigned int bits_minus8)
@@ -83,6 +83,11 @@ void hevc_d_prepare_src_format(struct v4l2_pix_format_mplane *pix_fmt)
 	/* Zero bytes per line for encoded source. */
 	pix_fmt->plane_fmt[0].bytesperline = 0;
 	pix_fmt->plane_fmt[0].sizeimage = sizeimage;
+
+	/* Zero all unused planes */
+	memset(pix_fmt->plane_fmt + pix_fmt->num_planes, 0,
+	       (ARRAY_SIZE(pix_fmt->plane_fmt) - pix_fmt->num_planes) *
+		sizeof(*pix_fmt->plane_fmt));
 }
 
 /* Take any pix_format and make it valid */
@@ -171,6 +176,11 @@ static void hevc_d_prepare_dst_format(struct v4l2_pix_format_mplane *pix_fmt)
 		pix_fmt->num_planes = 1;
 		break;
 	}
+
+	/* Zero all unused planes */
+	memset(pix_fmt->plane_fmt + pix_fmt->num_planes, 0,
+	       (ARRAY_SIZE(pix_fmt->plane_fmt) - pix_fmt->num_planes) *
+		sizeof(*pix_fmt->plane_fmt));
 }
 
 static int hevc_d_querycap(struct file *file, void *priv,
@@ -180,6 +190,26 @@ static int hevc_d_querycap(struct file *file, void *priv,
 	strscpy(cap->card, HEVC_D_NAME, sizeof(cap->card));
 	snprintf(cap->bus_info, sizeof(cap->bus_info),
 		 "platform:%s", HEVC_D_NAME);
+
+	return 0;
+}
+
+static int hevc_d_enum_framesizes(struct file *file, void *priv,
+				  struct v4l2_frmsizeenum *fsize)
+{
+	if (fsize->index != 0)
+		return -EINVAL;
+
+	if (fsize->pixel_format != V4L2_PIX_FMT_HEVC_SLICE)
+		return -EINVAL;
+
+	fsize->type = V4L2_FRMSIZE_TYPE_STEPWISE;
+	fsize->stepwise.min_width = HEVC_D_MIN_WIDTH;
+	fsize->stepwise.max_width = HEVC_D_MAX_WIDTH;
+	fsize->stepwise.step_width = 4;
+	fsize->stepwise.min_height = HEVC_D_MIN_HEIGHT;
+	fsize->stepwise.max_height = HEVC_D_MAX_HEIGHT;
+	fsize->stepwise.step_height = 4;
 
 	return 0;
 }
@@ -199,61 +229,8 @@ static int hevc_d_enum_fmt_vid_out(struct file *file, void *priv,
 	return -EINVAL;
 }
 
-static int hevc_d_hevc_validate_sps(const struct v4l2_ctrl_hevc_sps * const sps)
-{
-	const unsigned int ctb_log2_size_y =
-			sps->log2_min_luma_coding_block_size_minus3 + 3 +
-			sps->log2_diff_max_min_luma_coding_block_size;
-	const unsigned int min_tb_log2_size_y =
-			sps->log2_min_luma_transform_block_size_minus2 + 2;
-	const unsigned int max_tb_log2_size_y = min_tb_log2_size_y +
-			sps->log2_diff_max_min_luma_transform_block_size;
-
-	/* Local limitations */
-	if (sps->pic_width_in_luma_samples < 32 ||
-	    sps->pic_width_in_luma_samples > 4096)
-		return 0;
-	if (sps->pic_height_in_luma_samples < 32 ||
-	    sps->pic_height_in_luma_samples > 4096)
-		return 0;
-	if (!(sps->bit_depth_luma_minus8 == 0 ||
-	      sps->bit_depth_luma_minus8 == 2))
-		return 0;
-	if (sps->bit_depth_luma_minus8 != sps->bit_depth_chroma_minus8)
-		return 0;
-	if (sps->chroma_format_idc != 1)
-		return 0;
-
-	/*  Limits from H.265 7.4.3.2.1 */
-	if (sps->log2_max_pic_order_cnt_lsb_minus4 > 12)
-		return 0;
-	if (sps->sps_max_dec_pic_buffering_minus1 > 15)
-		return 0;
-	if (sps->sps_max_num_reorder_pics >
-				sps->sps_max_dec_pic_buffering_minus1)
-		return 0;
-	if (ctb_log2_size_y > 6)
-		return 0;
-	if (max_tb_log2_size_y > 5)
-		return 0;
-	if (max_tb_log2_size_y > ctb_log2_size_y)
-		return 0;
-	if (sps->max_transform_hierarchy_depth_inter >
-				(ctb_log2_size_y - min_tb_log2_size_y))
-		return 0;
-	if (sps->max_transform_hierarchy_depth_intra >
-				(ctb_log2_size_y - min_tb_log2_size_y))
-		return 0;
-	/* Check pcm stuff */
-	if (sps->num_short_term_ref_pic_sets > 64)
-		return 0;
-	if (sps->num_long_term_ref_pics_sps > 32)
-		return 0;
-	return 1;
-}
-
 static u32 pixelformat_from_sps(const struct v4l2_ctrl_hevc_sps * const sps,
-				const int index)
+				const unsigned int index)
 {
 	static const u32 all_formats[] = {
 		V4L2_PIX_FMT_NV12MT_COL128,
@@ -263,7 +240,7 @@ static u32 pixelformat_from_sps(const struct v4l2_ctrl_hevc_sps * const sps,
 	};
 	u32 pf = 0;
 
-	if (!is_sps_set(sps) || !hevc_d_hevc_validate_sps(sps)) {
+	if (!is_sps_set(sps)) {
 		/* Treat this as an error? For now return both */
 
 		if (index < ARRAY_SIZE(all_formats))
@@ -315,7 +292,7 @@ hevc_d_hevc_default_dst_fmt(struct hevc_d_ctx * const ctx)
 }
 
 static u32 hevc_d_hevc_get_dst_pixelformat(struct hevc_d_ctx * const ctx,
-					   const int index)
+					   const unsigned int index)
 {
 	const struct v4l2_ctrl_hevc_sps * const sps =
 		hevc_d_find_control_data(ctx, V4L2_CID_STATELESS_HEVC_SPS);
@@ -339,11 +316,15 @@ static int hevc_d_enum_fmt_vid_cap(struct file *file, void *priv,
 
 /*
  * get dst format - sets it to default if otherwise unset
- * returns a pointer to the struct as a convienience
+ * default is not updated whilst CAPTURE buffers exist as they were sized
+ * from it
+ * returns a pointer to the struct as a convenience
  */
 static struct v4l2_pix_format_mplane *get_dst_fmt(struct hevc_d_ctx *const ctx)
 {
-	if (!ctx->dst_fmt_set)
+	struct vb2_queue *vq = v4l2_m2m_get_dst_vq(ctx->fh.m2m_ctx);
+
+	if (!ctx->dst_fmt_set && !vb2_is_busy(vq))
 		ctx->dst_fmt = hevc_d_hevc_default_dst_fmt(ctx);
 	return &ctx->dst_fmt;
 }
@@ -373,7 +354,7 @@ static int hevc_d_try_fmt_vid_cap(struct file *file, void *priv,
 	const struct v4l2_ctrl_hevc_sps * const sps =
 		hevc_d_find_control_data(ctx, V4L2_CID_STATELESS_HEVC_SPS);
 	u32 pixelformat;
-	int i;
+	unsigned int i;
 
 	for (i = 0; (pixelformat = pixelformat_from_sps(sps, i)) != 0; i++) {
 		if (f->fmt.pix_mp.pixelformat == pixelformat)
@@ -428,7 +409,7 @@ static int hevc_d_s_fmt_vid_out(struct file *file, void *priv,
 	int ret;
 
 	vq = v4l2_m2m_get_vq(ctx->fh.m2m_ctx, f->type);
-	if (vb2_is_busy(vq))
+	if (vb2_is_streaming(vq))
 		return -EBUSY;
 
 	ret = hevc_d_try_fmt_vid_out(file, priv, f);
@@ -436,7 +417,6 @@ static int hevc_d_s_fmt_vid_out(struct file *file, void *priv,
 		return ret;
 
 	ctx->src_fmt = f->fmt.pix_mp;
-	ctx->dst_fmt_set = 0;  /* Setting src invalidates dst */
 
 	/* Propagate colorspace information to capture. */
 	copy_color(&ctx->dst_fmt, &f->fmt.pix_mp);
@@ -445,6 +425,7 @@ static int hevc_d_s_fmt_vid_out(struct file *file, void *priv,
 
 const struct v4l2_ioctl_ops hevc_d_ioctl_ops = {
 	.vidioc_querycap		= hevc_d_querycap,
+	.vidioc_enum_framesizes		= hevc_d_enum_framesizes,
 
 	.vidioc_enum_fmt_vid_cap	= hevc_d_enum_fmt_vid_cap,
 	.vidioc_g_fmt_vid_cap_mplane	= hevc_d_g_fmt_vid_cap,
@@ -462,6 +443,7 @@ const struct v4l2_ioctl_ops hevc_d_ioctl_ops = {
 	.vidioc_dqbuf			= v4l2_m2m_ioctl_dqbuf,
 	.vidioc_prepare_buf		= v4l2_m2m_ioctl_prepare_buf,
 	.vidioc_create_bufs		= v4l2_m2m_ioctl_create_bufs,
+	.vidioc_remove_bufs		= v4l2_m2m_ioctl_remove_bufs,
 	.vidioc_expbuf			= v4l2_m2m_ioctl_expbuf,
 
 	.vidioc_streamon		= v4l2_m2m_ioctl_streamon,
@@ -556,19 +538,19 @@ static int hevc_d_start_streaming(struct vb2_queue *vq, unsigned int count)
 	v4l2_m2m_update_start_streaming_state(ctx->fh.m2m_ctx, vq);
 
 	if (V4L2_TYPE_IS_OUTPUT(vq->type)) {
-		ret = hevc_d_hw_start_clock(dev);
+		ret = hevc_d_hw_pm_get(dev);
 		if (ret)
 			goto fail_cleanup;
 
 		ret = hevc_d_h265_start(ctx);
 		if (ret)
-			goto fail_stop_clock;
+			goto fail_pm_put;
 	}
 
 	return 0;
 
-fail_stop_clock:
-	hevc_d_hw_stop_clock(dev);
+fail_pm_put:
+	hevc_d_hw_pm_put(dev);
 fail_cleanup:
 	v4l2_err(&dev->v4l2_dev, "%s: qtype=%d: FAIL\n", __func__, vq->type);
 	hevc_d_queue_cleanup(vq, VB2_BUF_STATE_QUEUED);
@@ -582,7 +564,7 @@ static void hevc_d_stop_streaming(struct vb2_queue *vq)
 
 	if (V4L2_TYPE_IS_OUTPUT(vq->type)) {
 		hevc_d_h265_stop(ctx);
-		hevc_d_hw_stop_clock(dev);
+		hevc_d_hw_pm_put(dev);
 	}
 
 	hevc_d_queue_cleanup(vq, VB2_BUF_STATE_ERROR);

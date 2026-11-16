@@ -67,6 +67,8 @@ dtbo-$(CONFIG_ARCH_BCM2835) += \
 	draws-pi5.dtbo \
 	dwc-otg-deprecated.dtbo \
 	dwc2.dtbo \
+	ed-backlight-pwm.dtbo \
+	ed-backlight-pwm-pi5.dtbo \
 	ed-ipc.dtbo \
 	edt-ft5406.dtbo \
 	enc28j60.dtbo \
@@ -77,9 +79,12 @@ dtbo-$(CONFIG_ARCH_BCM2835) += \
 	fe-pi-audio.dtbo \
 	fsm-demo.dtbo \
 	gc9a01.dtbo \
+	geekworm-x120x.dtbo \
 	ghost-amp.dtbo \
 	goodix.dtbo \
 	googlevoicehat-soundcard.dtbo \
+	gpclk.dtbo \
+	gpclk-pi5.dtbo \
 	gpio-charger.dtbo \
 	gpio-fan.dtbo \
 	gpio-hog.dtbo \
@@ -157,6 +162,7 @@ dtbo-$(CONFIG_ARCH_BCM2835) += \
 	imx500.dtbo \
 	imx500-pi5.dtbo \
 	imx519.dtbo \
+	imx662.dtbo \
 	imx708.dtbo \
 	interludeaudio-analog.dtbo \
 	interludeaudio-digital.dtbo \
@@ -240,6 +246,7 @@ dtbo-$(CONFIG_ARCH_BCM2835) += \
 	proto-codec.dtbo \
 	pwm.dtbo \
 	pwm-2chan.dtbo \
+	pwm-fan.dtbo \
 	pwm-gpio.dtbo \
 	pwm-gpio-fan.dtbo \
 	pwm-ir-tx.dtbo \
@@ -268,6 +275,7 @@ dtbo-$(CONFIG_ARCH_BCM2835) += \
 	rpi-sense-v2.dtbo \
 	rpi-tv.dtbo \
 	rra-digidac1-wm8741-audio.dtbo \
+	rt5616.dtbo \
 	sainsmart18.dtbo \
 	sc16is750-i2c.dtbo \
 	sc16is752-i2c.dtbo \
@@ -283,6 +291,7 @@ dtbo-$(CONFIG_ARCH_BCM2835) += \
 	smi.dtbo \
 	smi-dev.dtbo \
 	smi-nand.dtbo \
+	spdif-gpio21.dtbo \
 	spi-gpio35-39.dtbo \
 	spi-gpio40-45.dtbo \
 	spi-rtc.dtbo \
@@ -315,6 +324,7 @@ dtbo-$(CONFIG_ARCH_BCM2835) += \
 	ssd1327-spi.dtbo \
 	ssd1331-spi.dtbo \
 	ssd1351-spi.dtbo \
+	starvis2.dtbo \
 	sunfounder-pipower3.dtbo \
 	sunfounder-pironman5.dtbo \
 	superaudioboard.dtbo \

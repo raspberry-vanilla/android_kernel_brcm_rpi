@@ -63,8 +63,27 @@
 		bcm2712;
 	};
 
+	ed-backlight-pwm {
+		bcm2711;
+		bcm2712 = "ed-backlight-pwm-pi5";
+	};
+
+	ed-backlight-pwm-pi5 {
+		bcm2712;
+	};
+
 	dwc-otg {
 		renamed = "dwc-otg-deprecated";
+	};
+
+	gpclk {
+		bcm2835;
+		bcm2711;
+		bcm2712 = "gpclk-pi5";
+	};
+
+	gpclk-pi5 {
+		bcm2712;
 	};
 
 	hifiberry-adc8x {

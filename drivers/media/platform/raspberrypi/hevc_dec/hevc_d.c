@@ -13,6 +13,7 @@
 
 #include <linux/dma-mapping.h>
 #include <linux/platform_device.h>
+#include <linux/pm_runtime.h>
 #include <linux/module.h>
 
 #include <media/v4l2-device.h>
@@ -46,12 +47,13 @@ static const struct v4l2_ctrl_config hevc_d_ctrls[] = {
 		.id	= V4L2_CID_STATELESS_HEVC_PPS,
 		.ops	= &hevc_d_hevc_pps_ctrl_ops,
 	}, {
-		.id = V4L2_CID_STATELESS_HEVC_SCALING_MATRIX,
+		.id	= V4L2_CID_STATELESS_HEVC_SCALING_MATRIX,
 	}, {
 		.id	= V4L2_CID_STATELESS_HEVC_DECODE_PARAMS,
 	}, {
 		.name	= "Slice param array",
 		.id	= V4L2_CID_STATELESS_HEVC_SLICE_PARAMS,
+		.ops	= &hevc_d_hevc_slice_params_ctrl_ops,
 		.type	= V4L2_CTRL_TYPE_HEVC_SLICE_PARAMS,
 		.flags	= V4L2_CTRL_FLAG_DYNAMIC_ARRAY,
 		.dims	= { 600 },
@@ -65,7 +67,17 @@ static const struct v4l2_ctrl_config hevc_d_ctrls[] = {
 		.min	= V4L2_STATELESS_HEVC_START_CODE_NONE,
 		.max	= V4L2_STATELESS_HEVC_START_CODE_ANNEX_B,
 		.def	= V4L2_STATELESS_HEVC_START_CODE_NONE,
-	},
+	}, {
+		.id	= V4L2_CID_MPEG_VIDEO_HEVC_PROFILE,
+		.min	= V4L2_MPEG_VIDEO_HEVC_PROFILE_MAIN,
+		.max	= V4L2_MPEG_VIDEO_HEVC_PROFILE_MAIN_10,
+		.def	= V4L2_MPEG_VIDEO_HEVC_PROFILE_MAIN,
+	}, {
+		.id	= V4L2_CID_MPEG_VIDEO_HEVC_LEVEL,
+		.min	= V4L2_MPEG_VIDEO_HEVC_LEVEL_1,
+		.max	= V4L2_MPEG_VIDEO_HEVC_LEVEL_5_1,
+		.def	= V4L2_MPEG_VIDEO_HEVC_LEVEL_4_1,
+	}
 };
 
 void *hevc_d_find_control_data(struct hevc_d_ctx *ctx, u32 id)
@@ -78,7 +90,6 @@ void *hevc_d_find_control_data(struct hevc_d_ctx *ctx, u32 id)
 static int hevc_d_init_ctrls(struct hevc_d_dev *dev, struct hevc_d_ctx *ctx)
 {
 	struct v4l2_ctrl_handler *hdl = &ctx->hdl;
-	struct v4l2_ctrl *ctrl;
 	unsigned int i;
 
 	v4l2_ctrl_handler_init(hdl, ARRAY_SIZE(hevc_d_ctrls));
@@ -89,7 +100,7 @@ static int hevc_d_init_ctrls(struct hevc_d_dev *dev, struct hevc_d_ctx *ctx)
 	}
 
 	for (i = 0; i < ARRAY_SIZE(hevc_d_ctrls); i++) {
-		ctrl = v4l2_ctrl_new_custom(hdl, &hevc_d_ctrls[i], ctx);
+		v4l2_ctrl_new_custom(hdl, &hevc_d_ctrls[i], ctx);
 		if (hdl->error) {
 			v4l2_err(&dev->v4l2_dev,
 				 "Failed to create new custom control id=%#x\n",
@@ -154,16 +165,13 @@ static int hevc_d_release(struct file *file)
 	struct hevc_d_ctx *ctx = container_of(file->private_data,
 					      struct hevc_d_ctx, fh);
 
-	v4l2_fh_del(&ctx->fh, file);
-
-	v4l2_ctrl_handler_free(&ctx->hdl);
-
 	v4l2_m2m_ctx_release(ctx->fh.m2m_ctx);
-
+	v4l2_fh_del(&ctx->fh, file);
 	v4l2_fh_exit(&ctx->fh);
+	v4l2_ctrl_handler_free(&ctx->hdl);
 	mutex_destroy(&ctx->ctx_mutex);
-
 	kfree(ctx);
+
 	return 0;
 }
 
@@ -214,6 +222,7 @@ static int hevc_d_probe(struct platform_device *pdev)
 	dev->vfd = hevc_d_video_device;
 	dev->dev = &pdev->dev;
 	dev->pdev = pdev;
+	platform_set_drvdata(pdev, dev);
 
 	ret = hevc_d_hw_probe(dev);
 	if (ret) {
@@ -221,13 +230,13 @@ static int hevc_d_probe(struct platform_device *pdev)
 		return ret;
 	}
 
-	mutex_init(&dev->dev_mutex);
-
 	ret = v4l2_device_register(&pdev->dev, &dev->v4l2_dev);
 	if (ret) {
 		dev_err_probe(&pdev->dev, ret, "Failed to register V4L2 device\n");
-		return ret;
+		goto err_hw;
 	}
+
+	mutex_init(&dev->dev_mutex);
 
 	vfd = &dev->vfd;
 	vfd->lock = &dev->dev_mutex;
@@ -284,8 +293,6 @@ static int hevc_d_probe(struct platform_device *pdev)
 		goto err_m2m_mc;
 	}
 
-	platform_set_drvdata(pdev, dev);
-
 	return 0;
 
 err_m2m_mc:
@@ -293,9 +300,13 @@ err_m2m_mc:
 err_video:
 	video_unregister_device(&dev->vfd);
 err_m2m:
+	media_device_cleanup(&dev->mdev);
 	v4l2_m2m_release(dev->m2m_dev);
 err_v4l2:
+	mutex_destroy(&dev->dev_mutex);
 	v4l2_device_unregister(&dev->v4l2_dev);
+err_hw:
+	hevc_d_hw_remove(dev);
 
 	return ret;
 }
@@ -310,10 +321,64 @@ static void hevc_d_remove(struct platform_device *pdev)
 
 	v4l2_m2m_release(dev->m2m_dev);
 	video_unregister_device(&dev->vfd);
+	mutex_destroy(&dev->dev_mutex);
 	v4l2_device_unregister(&dev->v4l2_dev);
 
 	hevc_d_hw_remove(dev);
 }
+
+static int hevc_d_runtime_suspend(struct device *d)
+{
+	struct hevc_d_dev *dev = dev_get_drvdata(d);
+
+	hevc_d_hw_power_off(dev);
+	return 0;
+}
+
+static int hevc_d_runtime_resume(struct device *d)
+{
+	struct hevc_d_dev *dev = dev_get_drvdata(d);
+
+	return hevc_d_hw_power_on(dev);
+}
+
+static int hevc_d_suspend(struct device *d)
+{
+	struct hevc_d_dev *dev = dev_get_drvdata(d);
+	int ret;
+
+	/* Stop new jobs being started */
+	v4l2_m2m_suspend(dev->m2m_dev);
+	/*
+	 * v4l2_m2m_suspend only waits for the current job to finish but we
+	 * finish jobs before the h/w is done with them so also wait for any
+	 * phase 1 / phase 2 work still in flight
+	 */
+	hevc_d_h265_sync(dev);
+
+	ret = pm_runtime_force_suspend(d);
+	if (ret)
+		v4l2_m2m_resume(dev->m2m_dev);
+	return ret;
+}
+
+static int hevc_d_resume(struct device *d)
+{
+	struct hevc_d_dev *dev = dev_get_drvdata(d);
+	int ret;
+
+	ret = pm_runtime_force_resume(d);
+	if (ret)
+		return ret;
+
+	v4l2_m2m_resume(dev->m2m_dev);
+	return 0;
+}
+
+static const struct dev_pm_ops hevc_d_pm_ops = {
+	SYSTEM_SLEEP_PM_OPS(hevc_d_suspend, hevc_d_resume)
+	RUNTIME_PM_OPS(hevc_d_runtime_suspend, hevc_d_runtime_resume, NULL)
+};
 
 static const struct of_device_id hevc_d_dt_match[] = {
 	{ .compatible = "brcm,bcm2711-hevc-dec", },
@@ -328,6 +393,7 @@ static struct platform_driver hevc_d_driver = {
 	.driver		= {
 		.name = HEVC_D_NAME,
 		.of_match_table	= hevc_d_dt_match,
+		.pm = pm_ptr(&hevc_d_pm_ops),
 	},
 };
 module_platform_driver(hevc_d_driver);

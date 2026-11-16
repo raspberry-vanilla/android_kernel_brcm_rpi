@@ -183,6 +183,49 @@ struct rp1_pio_sm_config_xfer32_args {
 	uint32_t buf_count;
 };
 
+#define RP1_PIO_SM_CONFIG_XFER_FL_DMA_PREFER_HEAVY 0
+#define RP1_PIO_SM_CONFIG_XFER_FL_DMA_PREFER_LIGHT 1
+#define RP1_PIO_SM_CONFIG_XFER_FL_DMA_FORCE_HEAVY  2
+#define RP1_PIO_SM_CONFIG_XFER_FL_DMA_FORCE_LIGHT  3
+
+/*
+ * How to use cyclic DMA: buf_size is the size of one period and buf_count is
+ * the number of periods. Each PIO_IOC_SM_XFER_DATA* call transfers at most one
+ * period and blocks until that period is available; a zero-byte transfer is
+ * rejected with -EINVAL.
+ *
+ * Input accepts any buf_count of two or more. Output requires at least three
+ * periods.
+ *
+ * The minimum value for buf_size is RP1_PIO_CYCLIC_MIN_BUF_SIZE. This ensures
+ * that the size of each period is more than the PIO FIFO size plus DMA burst
+ * plus margin.
+ *
+ * A read returns -EOVERFLOW if the DMA wrapped onto the period that was about
+ * to be read. No data is returned in that case. Detection is best effort, but
+ * the stream resynchronises to the oldest still-valid period so that subsequent
+ * reads succeed again without needing to be reconfigured.
+ *
+ * For output a write returns -EPIPE if the DMA caught up and resent stale data.
+ * Detection is best effort, but the stream resynchronises to the first available
+ * period that has not yet been transmitted so that subsequent writes succeed
+ * again without needing to be reconfigured. A failed user copy does not
+ * advance the writer or start DMA. A write shorter than a period zeroes the
+ * remainder of that period.
+ *
+ * All buffers must be filled before the output DMA will start.
+ */
+#define RP1_PIO_SM_CONFIG_XFER_FL_DMA_CYCLE (1 << 2)
+#define RP1_PIO_CYCLIC_MIN_BUF_SIZE 128
+
+struct rp1_pio_sm_config_xfer_v2_args {
+	uint16_t sm;
+	uint16_t dir;
+	uint32_t flags;
+	uint32_t buf_size;
+	uint32_t buf_count;
+};
+
 struct rp1_pio_sm_xfer_data_args {
 	uint16_t sm;
 	uint16_t dir;
@@ -242,6 +285,7 @@ struct rp1_pio_interrupt_clear_args {
 #define PIO_IOC_SM_XFER_DATA _IOW(PIO_IOC_MAGIC, 1, struct rp1_pio_sm_xfer_data_args)
 #define PIO_IOC_SM_XFER_DATA32 _IOW(PIO_IOC_MAGIC, 2, struct rp1_pio_sm_xfer_data32_args)
 #define PIO_IOC_SM_CONFIG_XFER32 _IOW(PIO_IOC_MAGIC, 3, struct rp1_pio_sm_config_xfer32_args)
+#define PIO_IOC_SM_CONFIG_XFER_V2 _IOW(PIO_IOC_MAGIC, 4, struct rp1_pio_sm_config_xfer_v2_args)
 
 #define PIO_IOC_READ_HW _IOW(PIO_IOC_MAGIC, 8, struct rp1_access_hw_args)
 #define PIO_IOC_WRITE_HW _IOW(PIO_IOC_MAGIC, 9, struct rp1_access_hw_args)

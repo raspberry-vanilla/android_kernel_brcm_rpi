@@ -432,6 +432,12 @@ enum rtw89_mac_c2h_mcc_func {
 	NUM_OF_RTW89_MAC_C2H_FUNC_MCC,
 };
 
+enum rtw89_mac_c2h_misc_func {
+	RTW89_MAC_C2H_FUNC_TX_REPORT = 1,
+
+	NUM_OF_RTW89_MAC_C2H_FUNC_MISC,
+};
+
 enum rtw89_mac_c2h_mlo_func {
 	RTW89_MAC_C2H_FUNC_MLO_GET_TBL			= 0x0,
 	RTW89_MAC_C2H_FUNC_MLO_EMLSR_TRANS_DONE		= 0x1,
@@ -470,6 +476,7 @@ enum rtw89_mac_c2h_class {
 	RTW89_MAC_C2H_CLASS_WOW = 0x3,
 	RTW89_MAC_C2H_CLASS_MCC = 0x4,
 	RTW89_MAC_C2H_CLASS_FWDBG = 0x5,
+	RTW89_MAC_C2H_CLASS_MISC = 0x9,
 	RTW89_MAC_C2H_CLASS_MLO = 0xc,
 	RTW89_MAC_C2H_CLASS_MRC = 0xe,
 	RTW89_MAC_C2H_CLASS_AP = 0x18,
@@ -915,6 +922,7 @@ struct rtw89_mac_size_set {
 	const struct rtw89_hfc_prec_cfg hfc_prec_cfg_c0;
 	const struct rtw89_hfc_prec_cfg hfc_prec_cfg_c2;
 	const struct rtw89_dle_size wde_size0;
+	const struct rtw89_dle_size wde_size1;
 	const struct rtw89_dle_size wde_size0_v1;
 	const struct rtw89_dle_size wde_size4;
 	const struct rtw89_dle_size wde_size4_v1;
@@ -926,6 +934,7 @@ struct rtw89_mac_size_set {
 	const struct rtw89_dle_size wde_size23;
 	const struct rtw89_dle_size wde_size25;
 	const struct rtw89_dle_size ple_size0;
+	const struct rtw89_dle_size ple_size1;
 	const struct rtw89_dle_size ple_size0_v1;
 	const struct rtw89_dle_size ple_size3_v1;
 	const struct rtw89_dle_size ple_size4;
@@ -937,6 +946,7 @@ struct rtw89_mac_size_set {
 	const struct rtw89_dle_size ple_size32;
 	const struct rtw89_dle_size ple_size33;
 	const struct rtw89_wde_quota wde_qt0;
+	const struct rtw89_wde_quota wde_qt1;
 	const struct rtw89_wde_quota wde_qt0_v1;
 	const struct rtw89_wde_quota wde_qt4;
 	const struct rtw89_wde_quota wde_qt6;
@@ -952,6 +962,8 @@ struct rtw89_mac_size_set {
 	const struct rtw89_ple_quota ple_qt9;
 	const struct rtw89_ple_quota ple_qt13;
 	const struct rtw89_ple_quota ple_qt18;
+	const struct rtw89_ple_quota ple_qt25;
+	const struct rtw89_ple_quota ple_qt26;
 	const struct rtw89_ple_quota ple_qt44;
 	const struct rtw89_ple_quota ple_qt45;
 	const struct rtw89_ple_quota ple_qt46;
@@ -1607,5 +1619,93 @@ int rtw89_mac_scan_offload(struct rtw89_dev *rtwdev,
 	}
 
 	return ret;
+}
+
+static inline
+void rtw89_tx_rpt_init(struct rtw89_dev *rtwdev,
+		       struct rtw89_core_tx_request *tx_req)
+{
+	struct rtw89_tx_rpt *tx_rpt = &rtwdev->tx_rpt;
+
+	if (!rtwdev->hci.tx_rpt_enabled)
+		return;
+
+	tx_req->desc_info.report = true;
+	/* firmware maintains a 4-bit sequence number */
+	tx_req->desc_info.sn = atomic_inc_return(&tx_rpt->sn) &
+			       RTW89_MAX_TX_RPTS_MASK;
+	tx_req->desc_info.tx_cnt_lmt_en = true;
+	tx_req->desc_info.tx_cnt_lmt = 8;
+}
+
+static inline
+bool rtw89_is_tx_rpt_skb(struct rtw89_dev *rtwdev, struct sk_buff *skb)
+{
+	struct rtw89_tx_skb_data *skb_data = RTW89_TX_SKB_CB(skb);
+	struct ieee80211_tx_info *info = IEEE80211_SKB_CB(skb);
+
+	return rtw89_core_is_tx_wait(rtwdev, skb_data) ||
+	       (info->flags & IEEE80211_TX_CTL_REQ_TX_STATUS);
+}
+
+static inline
+void rtw89_tx_rpt_tx_status(struct rtw89_dev *rtwdev, struct sk_buff *skb,
+			    u8 tx_status)
+{
+	struct rtw89_tx_skb_data *skb_data = RTW89_TX_SKB_CB(skb);
+	struct ieee80211_tx_info *info;
+
+	if (rtw89_core_tx_wait_complete(rtwdev, skb_data, tx_status))
+		return;
+
+	info = IEEE80211_SKB_CB(skb);
+	ieee80211_tx_info_clear_status(info);
+
+	if (tx_status == RTW89_TX_DONE)
+		info->flags |= IEEE80211_TX_STAT_ACK;
+	else
+		info->flags &= ~IEEE80211_TX_STAT_ACK;
+
+	ieee80211_tx_status_irqsafe(rtwdev->hw, skb);
+}
+
+static inline
+void rtw89_tx_rpt_skb_add(struct rtw89_dev *rtwdev, struct sk_buff *skb)
+{
+	struct rtw89_tx_rpt *tx_rpt = &rtwdev->tx_rpt;
+	struct rtw89_tx_skb_data *skb_data;
+	u8 idx;
+
+	skb_data = RTW89_TX_SKB_CB(skb);
+	idx = skb_data->tx_rpt_sn;
+
+	scoped_guard(spinlock_irqsave, &tx_rpt->skb_lock) {
+		/* if skb having the similar seq number is still in the queue,
+		 * this means the queue is overflowed - it isn't normal and
+		 * should indicate firmware doesn't provide TX reports in time;
+		 * report the old skb as dropped, we can't do much more here
+		 */
+		if (tx_rpt->skbs[idx])
+			rtw89_tx_rpt_tx_status(rtwdev, tx_rpt->skbs[idx],
+					       RTW89_TX_MACID_DROP);
+		tx_rpt->skbs[idx] = skb;
+	}
+}
+
+static inline
+void rtw89_tx_rpt_skbs_purge(struct rtw89_dev *rtwdev)
+{
+	struct rtw89_tx_rpt *tx_rpt = &rtwdev->tx_rpt;
+	struct sk_buff *skbs[RTW89_MAX_TX_RPTS];
+
+	scoped_guard(spinlock_irqsave, &tx_rpt->skb_lock) {
+		memcpy(skbs, tx_rpt->skbs, sizeof(tx_rpt->skbs));
+		memset(tx_rpt->skbs, 0, sizeof(tx_rpt->skbs));
+	}
+
+	for (int i = 0; i < ARRAY_SIZE(skbs); i++)
+		if (skbs[i])
+			rtw89_tx_rpt_tx_status(rtwdev, skbs[i],
+					       RTW89_TX_MACID_DROP);
 }
 #endif

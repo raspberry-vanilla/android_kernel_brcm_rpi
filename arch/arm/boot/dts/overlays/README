@@ -1278,6 +1278,20 @@ Params: dr_mode                 Dual role mode: "host", "peripheral" or "otg"
                                 mode
 
 
+Name:   ed-backlight-pwm
+Info:   Configures the EDATEC PWM backlight for CM4 based boards
+        (BCM2711). Creates a pwm-backlight device with a 16-step gamma
+        brightness table and an optional pca9535 GPIO expander at 0x20
+        for the backlight enable signal.
+Load:   dtoverlay=ed-backlight-pwm,<param>=<val>
+Params: sg215                   Invert the brightness curve for 21.5"
+                                SG215 panels
+
+
+Name:   ed-backlight-pwm-pi5
+Info:   See ed-backlight-pwm (this is the CM5 version)
+
+
 Name:   ed-ipc
 Info:   Configures the EDATEC IPC/EXP series hardware peripherals.
         This overlay provides support for PCA9535 GPIO expanders on
@@ -1547,6 +1561,15 @@ Params: speed                   Display SPI bus speed
         debug                   Debug output level {0-7}
 
 
+Name:   geekworm-x120x
+Info:   Geekworm X120x UPS boards for the Raspberry Pi 5, such as the X1202
+        and X1206. Adds the MAX17040-compatible fuel gauge at I2C address
+        0x36 and a gpio-charger for the GPIO that reports input power, and
+        links the two so the battery can report whether it is charging.
+Load:   dtoverlay=geekworm-x120x,<param>=<val>
+Params: gpio                    GPIO that reports input power (default 6)
+
+
 Name:   ghost-amp
 Info:   An overlay for the Ghost amplifier.
 Load:   dtoverlay=ghost-amp,<param>=<val>
@@ -1568,6 +1591,73 @@ Name:   googlevoicehat-soundcard
 Info:   Configures the Google voiceHAT soundcard
 Load:   dtoverlay=googlevoicehat-soundcard
 Params: <None>
+
+
+Name:   gpclk
+Info:   Configure a general purpose clock (GPCLK0, GPCLK1 or GPCLK2) output
+        on a GPIO pin, and set its rate. The clock is held open by a
+        clk-hog device (see drivers/clk/clk-hog.c, CONFIG_CLK_HOG), so it
+        stays enabled for as long as the overlay is loaded, with no other
+        consumer required.
+        Legal pin,function combinations, and the override that selects
+        each one directly:
+          GPCLK0: 4,4(Alt0)/gpclk0_4   20,2(Alt5)/gpclk0_20
+                  32,4(Alt0)/gpclk0_32 34,4(Alt0)/gpclk0_34
+          GPCLK1: 5,4(Alt0)/gpclk1_5   21,2(Alt5)/gpclk1_21
+                  42,4(Alt0)/gpclk1_42 44,4(Alt0)/gpclk1_44
+          GPCLK2: 6,4(Alt0)/gpclk2_6   43,4(Alt0)/gpclk2_43
+        N.B.: Check the chosen pin and clock aren't already used by the
+        firmware, other overlays, or onboard hardware.
+Load:   dtoverlay=gpclk,<param>=<val>
+Params: freq                    Output frequency in Hz (default 500000)
+        gpclk0_4                Output GPCLK0 on GPIO4 (Alt0) - the default
+        gpclk0_20               Output GPCLK0 on GPIO20 (Alt5)
+        gpclk0_32               Output GPCLK0 on GPIO32 (Alt0)
+        gpclk0_34               Output GPCLK0 on GPIO34 (Alt0)
+        gpclk1_5                Output GPCLK1 on GPIO5 (Alt0)
+        gpclk1_21               Output GPCLK1 on GPIO21 (Alt5)
+        gpclk1_42               Output GPCLK1 on GPIO42 (Alt0)
+        gpclk1_44               Output GPCLK1 on GPIO44 (Alt0)
+        gpclk2_6                Output GPCLK2 on GPIO6 (Alt0)
+        gpclk2_43               Output GPCLK2 on GPIO43 (Alt0)
+
+
+Name:   gpclk-pi5
+Info:   Configure an RP1 general purpose clock (GPCLK0-GPCLK5) output on a
+        GPIO pin, and set its rate. This is the Pi 5 counterpart of gpclk,
+        selected automatically when gpclk is requested on a Pi 5. As with
+        gpclk, the clock is held open by a clk-hog device (see
+        drivers/clk/clk-hog.c, CONFIG_CLK_HOG), so it stays enabled for as
+        long as the overlay is loaded, with no other consumer required.
+        Legal pin,clock combinations, and the override that selects each
+        one directly:
+          GPCLK0: gpio4/gpclk0_4    gpio20/gpclk0_20
+          GPCLK1: gpio5/gpclk1_5    gpio18/gpclk1_18   gpio21/gpclk1_21
+          GPCLK2: gpio6/gpclk2_6
+          GPCLK3: gpio32/gpclk3_32  gpio34/gpclk3_34   gpio46/gpclk3_46
+          GPCLK4: gpio33/gpclk4_33  gpio43/gpclk4_43
+          GPCLK5: gpio42/gpclk5_42  gpio44/gpclk5_44   gpio47/gpclk5_47
+        GPCLK0-GPCLK2 on pins 4/20, 5/21 and 6 are the combinations in
+        common with gpclk (see above); the rest (GPCLK1 on pin 18, and
+        GPCLK3-GPCLK5) only exist on RP1, so aren't offered by gpclk.
+        N.B.: Check the chosen pin and clock aren't already used by the
+        firmware, other overlays, or onboard hardware.
+Load:   dtoverlay=gpclk-pi5,<param>=<val>
+Params: freq                    Output frequency in Hz (default 500000)
+        gpclk0_4                Output GPCLK0 on GPIO4 - the default
+        gpclk0_20               Output GPCLK0 on GPIO20
+        gpclk1_5                Output GPCLK1 on GPIO5
+        gpclk1_18               Output GPCLK1 on GPIO18
+        gpclk1_21               Output GPCLK1 on GPIO21
+        gpclk2_6                Output GPCLK2 on GPIO6
+        gpclk3_32               Output GPCLK3 on GPIO32
+        gpclk3_34               Output GPCLK3 on GPIO34
+        gpclk3_46               Output GPCLK3 on GPIO46
+        gpclk4_33               Output GPCLK4 on GPIO33
+        gpclk4_43               Output GPCLK4 on GPIO43
+        gpclk5_42               Output GPCLK5 on GPIO42
+        gpclk5_44               Output GPCLK5 on GPIO44
+        gpclk5_47               Output GPCLK5 on GPIO47
 
 
 Name:   gpio-charger
@@ -2411,6 +2501,10 @@ Params: abx80x                  Select one of the ABx80x family:
                                 and Vdd < Vddsw and Vbackup > Vddsw)
                                 (RV3028, RV3032)
 
+        quartz-load-femtofarads
+                                Quartz load capacitance in femtofarads,
+                                7000 or 12500 (PCF85063, PCF85063A)
+
 
 Name:   i2c-rtc-gpio
 Info:   Adds support for a number of I2C Real Time Clock devices
@@ -2492,6 +2586,10 @@ Params: abx80x                  Select one of the ABx80x family:
                                 "Level Switching" (if Vdd < Vbackup
                                 and Vdd < Vddsw and Vbackup > Vddsw)
                                 (RV3028, RV3032)
+
+        quartz-load-femtofarads
+                                Quartz load capacitance in femtofarads,
+                                7000 or 12500 (PCF85063, PCF85063A)
 
         i2c_gpio_sda            GPIO used for I2C data (default "23")
 
@@ -3200,6 +3298,39 @@ Params: rotation                Mounting rotation of the camera sensor (0 or
                                 but vcm=off will disable.
 
 
+Name:   imx662
+Info:   Sony imx662 camera module.
+        Uses Unicam 1, which is the standard camera connector on most Pi
+        variants.
+Load:   dtoverlay=imx662,<param>
+Params: 4lane                   Enable 4 CSI2 data lanes (default is for 2 lane
+                                operation), which requires a Pi5 or CM.
+        clock-frequency         Sets the clock frequency to match that used on
+                                the board.
+                                Valid values are 24, 27, 37.125, 72, or
+                                74.25MHz.
+                                The default is 24MHz.
+        link-frequency          Confgures the link frequency to be used. Note
+                                that the permitted values vary based on
+                                clock-frequency and number of lanes.
+                                The default is 445.5MHz for 891Mbit/s.
+        all-link-frequencies    Define all permitted link frequencies to allow
+                                for user selection of the preferred rate.
+                                Does NOT include 1188Mbit/s as that is not
+                                reliable.
+        orientation             Sensor orientation (0 = front, 1 = rear,
+                                2 = external, default external)
+        rotation                Mounting rotation of the camera sensor (0 or
+                                180, default 0)
+        media-controller        Configure use of Media Controller API for
+                                configuring the sensor (default on)
+        cam0                    Adopt the default configuration for CAM0 on a
+                                Compute Module (CSI0, i2c_vc, and cam0_reg).
+        vcm                     Enable ad5398 VCM associated with the sensor.
+        compatible              Allows overriding of the compatible if automatic
+                                detection at probe is undesirable.
+
+
 Name:   imx708
 Info:   Sony IMX708 camera module.
         Uses Unicam 1, which is the standard camera connector on most Pi
@@ -3492,8 +3623,8 @@ Params: s08-spi<n>-<m>-present  4-bit integer, bitmap indicating MCP23S08
 
 
 Name:   mcp2515
-Info:   Configures the MCP2515 CAN controller on spi0/1/2/3/5
-        For devices on spi1, spi2, spi3 or spi5, the interfaces should be
+Info:   Configures the MCP2515 CAN controller on spi0/1/2/3/5/6
+        For devices on spi1, spi2, spi3, spi5 or spi6, the interfaces should be
         enabled with one of the spi<n>-1/2/3cs overlays.
 Load:   dtoverlay=mcp2515,<param>=<val>
 Params: spi<n>-<m>              Configure device at spi<n>, cs<m>
@@ -4358,6 +4489,39 @@ Params: pin                     Output pin (default 18) - see table
         clock                   PWM clock frequency (informational)
 
 
+Name:   pwm-fan
+Info:   Configure a PWM GPIO pin to control a cooling fan.
+Load:   dtoverlay=pwm-fan,<param>=<val>
+Params: fan_gpio_12             Use GPIO12 (PWM0) to control the fan.
+        fan_gpio_18             Use GPIO18 (PWM0) to control the fan (default).
+        fan_gpio_13             Use GPIO13 (PWM1) to control the fan.
+        fan_gpio_19             Use GPIO19 (PWM1) to control the fan.
+        fan_temp0               Temperature threshold (in millicelsius) for
+                                1st cooling level (default 50000).
+        fan_temp0_hyst          Temperature hysteresis (in millicelsius) for
+                                1st cooling level (default 5000).
+        fan_temp0_speed         Fan PWM setting for 1st cooling level (0-255,
+                                default 75).
+        fan_temp1               Temperature threshold (in millicelsius) for
+                                2nd cooling level (default 60000).
+        fan_temp1_hyst          Temperature hysteresis (in millicelsius) for
+                                2nd cooling level (default 5000).
+        fan_temp1_speed         Fan PWM setting for 2nd cooling level (0-255,
+                                default 125).
+        fan_temp2               Temperature threshold (in millicelsius) for
+                                3rd cooling level (default 67500).
+        fan_temp2_hyst          Temperature hysteresis (in millicelsius) for
+                                3rd cooling level (default 5000).
+        fan_temp2_speed         Fan PWM setting for 3rd cooling level (0-255,
+                                default 175).
+        fan_temp3               Temperature threshold (in millicelsius) for
+                                4th cooling level (default 75000).
+        fan_temp3_hyst          Temperature hysteresis (in millicelsius) for
+                                4th cooling level (default 5000).
+        fan_temp3_speed         Fan PWM setting for 4th cooling level (0-255,
+                                default 250).
+
+
 Name:   pwm-gpio
 Info:   Configures the software PWM GPIO driver
 Load:   dtoverlay=pwm-gpio,<param>=<val>
@@ -4741,6 +4905,14 @@ Load:   dtoverlay=rra-digidac1-wm8741-audio
 Params: <None>
 
 
+Name:   rt5616
+Info:   Overlay for the Realtek RT5616 I2S audio codec (HAT with the RT5616
+        codec on I2C1 at 0x1b, MCLK 12.288 MHz, I2S connected to the I2S
+        consumer controller on GPIO 18-21).
+Load:   dtoverlay=rt5616,<param>=<val>
+Params: alsaname                Changes the card name in ALSA
+
+
 Name:   sainsmart18
 Info:   Overlay for the SPI-connected Sainsmart 1.8" display (based on the
         ST7735R chip).
@@ -4832,6 +5004,10 @@ Params: overclock_50            Clock (in MHz) to use when the MMC framework
                                 for use with a secondary SD card slot on
                                 custom carrier boards (e.g. CM4 baseboard).
                                 Applies ALT0 function and appropriate pulls.
+
+        preserve_mmc            Don't disable the other MMC interfaces
+                                (mmc/mmcnr). Useful on Compute Module
+                                when using gpios_22_27 with WiFi.
 
 
 Name:   sdio
@@ -4939,6 +5115,18 @@ Params: <None>
 Name:   smi-nand
 Info:   Enables access to NAND flash via the SMI interface
 Load:   dtoverlay=smi-nand
+Params: <None>
+
+
+Name:   spdif-gpio21
+Info:   Sound card that drives an S/PDIF transmitter (TOSLINK module or coaxial
+        driver) directly from GPIO21 (PCM_DOUT, 40-pin header pin 40), without
+        a transceiver chip. The I2S block is the bit and frame clock producer
+        and sends 2 x 32-bit slots per frame; userspace has to supply the
+        biphase-mark coded S/PDIF line signal as S32_LE at twice the audio
+        sample rate (e.g. through an ALSA plugin) - plain PCM does not produce
+        audio. Only GPIO21 is claimed, GPIOs 18-20 stay free.
+Load:   dtoverlay=spdif-gpio21
 Params: <None>
 
 
@@ -5352,6 +5540,39 @@ Params: speed                   SPI bus speed (default 4500000)
         debug                   Debug output level (0-7; default 0)
         dc_pin                  GPIO pin for D/C (default 24)
         reset_pin               GPIO pin for RESET (default 25)
+
+
+Name:   starvis2
+Info:   Sony Starvis2 camera module.
+        Uses Unicam 1, which is the standard camera connector on most Pi
+        variants.
+Load:   dtoverlay=starvis2,<param>
+Params: 4lane                   Enable 4 CSI2 data lanes (default is for 2 lane
+                                operation), which requires a Pi5 or CM.
+        clock-frequency         Sets the clock frequency to match that used on
+                                the board.
+                                Valid values are 24, 27, 37.125, 72, or
+                                74.25MHz.
+                                The default is 24MHz.
+        link-frequency          Confgures the link frequency to be used. Note
+                                that the permitted values vary based on
+                                clock-frequency and number of lanes.
+                                The default is 445.5MHz for 891Mbit/s.
+        all-link-frequencies    Define all permitted link frequencies to allow
+                                for user selection of the preferred rate.
+                                Does NOT include 1188Mbit/s as that is not
+                                reliable.
+        orientation             Sensor orientation (0 = front, 1 = rear,
+                                2 = external, default external)
+        rotation                Mounting rotation of the camera sensor (0 or
+                                180, default 0)
+        media-controller        Configure use of Media Controller API for
+                                configuring the sensor (default on)
+        cam0                    Adopt the default configuration for CAM0 on a
+                                Compute Module (CSI0, i2c_vc, and cam0_reg).
+        vcm                     Enable ad5398 VCM associated with the sensor.
+        compatible              Allows overriding of the compatible if automatic
+                                detection at probe is undesirable.
 
 
 Name:   sunfounder-pipower3
@@ -6072,6 +6293,8 @@ Params: 2_8_inch                2.8" 480x640
         11_9_inch               11.9" 320x1480
         13_3_inch_4lane         13.3" 1920x1080 4lane
         13_3_inch_2lane         13.3" 1920x1080 2lane
+        10_1_inchE_4lane        10.1" E 1920x1200 60fps 4lane
+        10_1_inchE_2lane        10.1" E 1920x1200 30fps 2lane
         i2c1                    Use i2c-1 with jumper wires from GPIOs 2&3
         disable_touch           Disable the touch controller
         rotation                Set the panel orientation property
@@ -6093,7 +6316,10 @@ Params: 3_4_inch_c              3.4" 800x800 2lane
         4_0_inch_c              4.0" 720x720 2lane
         4_3_inch_a              4.3" 480x800 2lane
         5_0_inch_a              5.0" 720x1280 2lane
+        5_0_inch_a_v2           5.0" A V2 720x1280 2lane
+        5_0_inch_b              5.0" B 720x1280 2lane
         5_5_inch_a              5.5" 720x1280 2lane
+        6_25_inch_a             6.25" 720x1560 2lane
         7_0_inch_a              7.0" A 720x1280 2lane
         7_0_inch_b              7.0" B 720x1280 2lane
         7_0_inch_c              7.0" C 1024x600 2lane
@@ -6106,6 +6332,7 @@ Params: 3_4_inch_c              3.4" 800x800 2lane
         10_1_inch_a_4lane       10.1" 800x1280 4lane
         10_1_inch_b             10.1" 720x1280 2lane
         10_1_inch_b_4lane       10.1" 720x1280 4lane
+        10_1_inch_e_4lane       10.1" 1200x1920 4lane
         12_3_inch_a_4lane       12.3" 720x1920 4lane
         disable_touch           Disable the touch controller
         invx                    Touchscreen inverted x axis
@@ -6379,6 +6606,13 @@ Info:   Overlay for the Waveshare wm8960 soundcard
 Load:   dtoverlay=wm8960-soundcard,<param>=<val>
 Params: alsaname                Changes the card name in ALSA
         compatible              Changes the codec compatibility
+        mclk                    Sets the MCLK clock frequency in Hz (default
+                                12.288 MHz for the standard Waveshare HAT,
+                                24 MHz when the media parameter is used)
+        media                   Uses the media board configuration: 24 MHz
+                                MCLK, enables headphone jack detection
+                                (wlf,hp-cfg) and an on-board microphone /
+                                dual speaker sound card
 
 
 Name:   ws2812-pio

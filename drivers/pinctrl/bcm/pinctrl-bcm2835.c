@@ -485,7 +485,7 @@ static void bcm2835_gpio_irq_handler(struct irq_desc *desc)
 		bcm2835_gpio_irq_handle_bank(pc, 1, 0x00003fff);
 		break;
 	case 2: /* IRQ2 covers GPIOs 46-57 */
-		bcm2835_gpio_irq_handle_bank(pc, 1, 0x003fc000);
+		bcm2835_gpio_irq_handle_bank(pc, 1, 0x03ffc000);
 		break;
 	}
 
@@ -724,6 +724,23 @@ static int bcm2835_gpio_irq_set_wake(struct irq_data *data, unsigned int on)
 	return ret;
 }
 
+static int bcm2835_gpio_irq_reqres(struct irq_data *d)
+{
+	struct gpio_chip *gc = irq_data_get_irq_chip_data(d);
+	int ret;
+
+	ret = gpiochip_irq_reqres(d);
+	if (!ret)
+		ret = bcm2835_gpio_direction_input(gc, d->hwirq);
+
+	return ret;
+}
+
+static void bcm2835_gpio_irq_relres(struct irq_data *d)
+{
+	return gpiochip_irq_relres(d);
+}
+
 static const struct irq_chip bcm2835_gpio_irq_chip = {
 	.name = MODULE_NAME,
 	.irq_set_type = bcm2835_gpio_irq_set_type,
@@ -731,6 +748,8 @@ static const struct irq_chip bcm2835_gpio_irq_chip = {
 	.irq_mask = bcm2835_gpio_irq_mask,
 	.irq_unmask = bcm2835_gpio_irq_unmask,
 	.irq_set_wake = bcm2835_gpio_irq_set_wake,
+	.irq_request_resources = bcm2835_gpio_irq_reqres,
+	.irq_release_resources = bcm2835_gpio_irq_relres,
 	.flags = (IRQCHIP_MASK_ON_SUSPEND | IRQCHIP_IMMUTABLE),
 	GPIOCHIP_IRQ_RESOURCE_HELPERS,
 };
@@ -1015,6 +1034,13 @@ static int bcm2835_pmx_gpio_set_direction(struct pinctrl_dev *pctldev,
 	return 0;
 }
 
+static bool bcm2835_pmx_function_is_gpio(struct pinctrl_dev *pctldev,
+					 unsigned int selector)
+{
+	return selector == BCM2835_FSEL_GPIO_IN ||
+	       selector == BCM2835_FSEL_GPIO_OUT;
+}
+
 static const struct pinmux_ops bcm2835_pmx_ops = {
 	.free = bcm2835_pmx_free,
 	.get_functions_count = bcm2835_pmx_get_functions_count,
@@ -1023,6 +1049,8 @@ static const struct pinmux_ops bcm2835_pmx_ops = {
 	.set_mux = bcm2835_pmx_set,
 	.gpio_disable_free = bcm2835_pmx_gpio_disable_free,
 	.gpio_set_direction = bcm2835_pmx_gpio_set_direction,
+	.function_is_gpio = bcm2835_pmx_function_is_gpio,
+	.strict = true,
 };
 
 static int bcm2835_pinconf_get(struct pinctrl_dev *pctldev,

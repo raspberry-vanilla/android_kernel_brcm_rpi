@@ -1296,8 +1296,6 @@ struct macb_queue {
 	struct macb_tx_skb	*tx_skb;
 	dma_addr_t		tx_ring_dma;
 	struct work_struct	tx_error_task;
-	bool			txubr_pending;
-	bool			tx_pending;
 	struct napi_struct	napi_tx;
 
 	dma_addr_t		rx_ring_dma;
@@ -1373,6 +1371,7 @@ struct macb {
 
 	struct gpio_desc	*phy_reset_gpio;
 	int			phy_reset_ms;
+	int			phy_reset_post_ms;
 
 	/* AT91RM9200 transmit queue (1 on wire + 1 queued) */
 	struct macb_tx_skb	rm9200_txq[2];
