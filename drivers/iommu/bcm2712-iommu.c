@@ -234,8 +234,7 @@ static int bcm2712_iommu_init(struct bcm2712_iommu *mmu)
 	return 0;
 }
 
-static int bcm2712_iommu_attach_dev(struct iommu_domain *domain, struct device *dev,
-				    struct iommu_domain *old)
+static int bcm2712_iommu_attach_dev(struct iommu_domain *domain, struct device *dev)
 {
 	struct bcm2712_iommu *mmu = dev ? dev_iommu_priv_get(dev) : 0;
 	struct bcm2712_iommu_domain *mydomain =
