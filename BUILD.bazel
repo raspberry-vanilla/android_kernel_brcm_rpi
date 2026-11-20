@@ -1785,6 +1785,12 @@ _RPI_OVERLAY_OUTS = [
 
 _RPI_MODULE_OUTS = [
     # keep sorted
+    "drivers/bluetooth/btqca.ko",
+    "drivers/char/broadcom/bcm2835_smi_dev.ko",
+    "drivers/bluetooth/hci_uart.ko",
+    "drivers/bluetooth/btbcm.ko",
+    "drivers/power/sequencing/pwrseq-core.ko",
+    "drivers/misc/bcm2835_smi.ko",
 ]
 
 kernel_build(
@@ -1845,7 +1851,7 @@ kernel_build(
     ],
     arch = "arm64",
     build_config = "build.config.rpi",
-    defconfig = "arch/arm64/configs/android_rpi4_defconfig",
+    defconfig = "arch/arm64/configs/gki_defconfig",
     make_goals = [
         "Image",
         "modules",
@@ -1853,6 +1859,7 @@ kernel_build(
     ],
     makefile = ":Makefile",
     module_outs = get_gki_modules_list("arm64") + get_kunit_modules_list("arm64") + _RPI_MODULE_OUTS,
+    pre_defconfig_fragments = ["arch/arm64/configs/bcm2711_gki.fragment"],
     strip_modules = True,
 )
 
